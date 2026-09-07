@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, type ReactNode } from "react";
 import { cn } from "@/lib/cn";
 import { SelectField } from "@/components/SelectField";
 import { PAYCREST_SENDER_FEE_RATE } from "@/lib/offramp/fee";
@@ -104,6 +104,11 @@ export function FormCard({
       : (code || "NGN").toUpperCase();
 
   const [amount, setAmount] = useState("");
+  // Which unit `amount` is currently denominated in. Switching modes clears
+  // `amount` (and the quote) rather than trying to convert the existing
+  // value — the conversion depends on a live rate, and showing a converted
+  // guess before that resolves risks the user reading a stale number.
+  const [amountMode, setAmountMode] = useState<"usdc" | "ngn">("usdc");
   const [accountNumber, setAccountNumber] = useState("");
   const [bank, setBank] = useState("");
   const [accountName, setAccountName] = useState("");
@@ -121,6 +126,17 @@ export function FormCard({
   );
   const [isLoadingFees, setIsLoadingFees] = useState(false);
 
+  // The USDC amount that will actually get burned, regardless of which unit
+  // the user typed the amount in. In USDC mode this is just `amount`; in NGN
+  // mode it's whatever the quote computed as the source amount for the
+  // requested net payout (quote.sourceAmount) — never the raw NGN figure.
+  // Everything that needs a real USDC number (the bridge-fee preview, the
+  // 0.7 floor check, and — critically — what's actually submitted to
+  // onInitiateOfframp) must read this, not `amount`, or NGN mode would try
+  // to burn e.g. "5000" USDC for a ₦5000 request.
+  const effectiveUsdcAmount =
+    amountMode === "ngn" ? (quote?.sourceAmount ?? "") : amount;
+
   // Reset form fields when resetKey changes (after successful transaction)
   useEffect(() => {
     if (resetKey === 0) return; // skip initial mount
@@ -132,14 +148,16 @@ export function FormCard({
   }, [resetKey]);
 
   // Fetch gas fee options — the fee is a rate of the burn amount, so refetch
-  // (debounced, same pattern as the quote fetch below) whenever amount changes.
+  // (debounced, same pattern as the quote fetch below) whenever the *USDC*
+  // amount changes. In NGN mode that's effectiveUsdcAmount, which only
+  // becomes known once the quote resolves — not the raw NGN input.
   useEffect(() => {
     const fetchGasFees = async () => {
       setIsLoadingFees(true);
       try {
         const query =
-          amount && parseFloat(amount) > 0
-            ? `?amount=${encodeURIComponent(amount)}`
+          effectiveUsdcAmount && parseFloat(effectiveUsdcAmount) > 0
+            ? `?amount=${encodeURIComponent(effectiveUsdcAmount)}`
             : "";
         const res = await fetch(`/api/offramp/bridge/gas-fee-options${query}`);
         if (res.ok) {
@@ -153,7 +171,7 @@ export function FormCard({
     };
     const debounce = setTimeout(fetchGasFees, 500);
     return () => clearTimeout(debounce);
-  }, [amount]);
+  }, [effectiveUsdcAmount]);
 
   // Fetch supported currencies on mount
   useEffect(() => {
@@ -248,10 +266,16 @@ export function FormCard({
     verifyAccount();
   }, [accountNumber, bank]);
 
-  // Get quote when amount, currency, or fee method changes
+  // Get quote when amount, currency, mode, or fee method changes. The 0.7
+  // floor only means something in USDC terms — in NGN mode any positive
+  // amount is worth quoting, and the server rejects a derived USDC amount
+  // that's too small on its own (see /api/offramp/quote).
   useEffect(() => {
     const getQuote = async () => {
-      if (amount && parseFloat(amount) >= 0.7) {
+      const parsedAmount = parseFloat(amount);
+      const meetsFloor =
+        amountMode === "usdc" ? parsedAmount >= 0.7 : parsedAmount > 0;
+      if (amount && meetsFloor) {
         setIsLoadingQuote(true);
         try {
           const response = await fetch("/api/offramp/quote", {
@@ -262,6 +286,7 @@ export function FormCard({
               token: "USDC",
               currency,
               network: "base",
+              amountType: amountMode === "ngn" ? "fiat" : "crypto",
             }),
           });
           if (!response.ok) {
@@ -297,7 +322,7 @@ export function FormCard({
 
     const debounce = setTimeout(getQuote, 500);
     return () => clearTimeout(debounce);
-  }, [amount, currency]);
+  }, [amount, currency, amountMode]);
 
   useEffect(() => {
     onPricingUpdate?.({
@@ -316,12 +341,18 @@ export function FormCard({
     return "CONNECT WALLET";
   };
 
+  const handleAmountModeToggle = () => {
+    setAmountMode((prev) => (prev === "usdc" ? "ngn" : "usdc"));
+    setAmount("");
+    setQuote(null);
+  };
+
   const canInitiateOfframp =
     isConnected &&
     !isConnecting &&
     !isExecutingOfframp &&
     !!quote &&
-    Number.parseFloat(amount) >= 0.7 &&
+    Number.parseFloat(effectiveUsdcAmount) >= 0.7 &&
     accountNumber.length === 10 &&
     !!bank &&
     !!accountName;
@@ -335,7 +366,7 @@ export function FormCard({
     if (!canInitiateOfframp || !quote || !onInitiateOfframp) return;
 
     await onInitiateOfframp({
-      amount,
+      amount: effectiveUsdcAmount,
       rate: quote.rate,
       token: "USDC",
       beneficiary: {
@@ -369,19 +400,32 @@ export function FormCard({
 
       <div className="flex flex-col gap-[0.6rem]">
         <InputField
-          label="AMOUNT IN USDC"
+          label={amountMode === "ngn" ? `AMOUNT IN ${currency}` : "AMOUNT IN USDC"}
           value={amount}
           onChange={setAmount}
           type="number"
-          min={0.7}
-          step="0.000001"
+          min={amountMode === "ngn" ? undefined : 0.7}
+          step={amountMode === "ngn" ? "0.01" : "0.000001"}
           placeholder="0.00"
+          labelAction={
+            <button
+              type="button"
+              onClick={handleAmountModeToggle}
+              className="text-[0.65rem] uppercase tracking-[0.06em] text-[var(--accent)] hover:brightness-110"
+            >
+              Switch to {amountMode === "ngn" ? "USDC" : currency} →
+            </button>
+          }
           suffix={
             isLoadingQuote
               ? "..."
               : quote
-                ? `≈ ${getCurrencyPrefix(quote.currency)} ${quote.destinationAmount}`
-                : "Min 0.7 USDC"
+                ? amountMode === "ngn"
+                  ? `≈ ${quote.sourceAmount} USDC`
+                  : `≈ ${getCurrencyPrefix(quote.currency)} ${quote.destinationAmount}`
+                : amountMode === "ngn"
+                  ? undefined
+                  : "Min 0.7 USDC"
           }
         />
         {/* Bridge fee — CCTP charges one real fee, deducted from the amount */}
@@ -393,12 +437,13 @@ export function FormCard({
             <p className="m-0 text-[0.8rem] text-[var(--muted)]">Loading...</p>
           ) : (
             gasFeeOptions &&
-            parseFloat(amount) > 0 && (
+            parseFloat(effectiveUsdcAmount) > 0 && (
               <p className="m-0 text-[0.8rem] text-[var(--muted)]">
                 {parseFloat(gasFeeOptions.fee.float).toFixed(4)} USDC — ~
                 {Math.max(
                   0,
-                  parseFloat(amount) - parseFloat(gasFeeOptions.fee.float),
+                  parseFloat(effectiveUsdcAmount) -
+                    parseFloat(gasFeeOptions.fee.float),
                 ).toFixed(4)}{" "}
                 USDC bridged
               </p>
@@ -460,7 +505,8 @@ export function FormCard({
                 Bridged: ~
                 {Math.max(
                   0,
-                  parseFloat(amount) - parseFloat(gasFeeOptions.fee.float),
+                  parseFloat(effectiveUsdcAmount) -
+                    parseFloat(gasFeeOptions.fee.float),
                 ).toFixed(4)}{" "}
                 USDC → Base
               </div>
@@ -504,6 +550,8 @@ interface InputFieldProps {
   readonly maxLength?: number;
   readonly min?: number;
   readonly step?: string;
+  /** Optional control rendered inline with the label — e.g. a unit switcher. */
+  readonly labelAction?: ReactNode;
 }
 
 function InputField({
@@ -517,12 +565,16 @@ function InputField({
   maxLength,
   min,
   step,
+  labelAction,
 }: Readonly<InputFieldProps>) {
   return (
     <div className="flex flex-col gap-[0.4rem]">
-      <label className="text-[0.69rem] tracking-[0.08em] text-[var(--muted)]">
-        {label}
-      </label>
+      <div className="flex items-center justify-between">
+        <label className="text-[0.69rem] tracking-[0.08em] text-[var(--muted)]">
+          {label}
+        </label>
+        {labelAction}
+      </div>
       <div className="flex h-[46px] items-center justify-between gap-3 border border-[var(--line)] px-[0.8rem]">
         <input
           type={type}

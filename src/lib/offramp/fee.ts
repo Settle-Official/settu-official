@@ -25,3 +25,17 @@ export const PAYCREST_SENDER_FEE_RATE = 0.003; // 0.3%
 export function applyPaycrestSenderFee(grossFiat: number): number {
   return grossFiat * (1 - PAYCREST_SENDER_FEE_RATE);
 }
+
+/**
+ * Inverts applyPaycrestSenderFee: given the fiat amount the recipient should
+ * actually receive (net), returns the gross fiat amount that produces it —
+ * i.e. solves `netFiat = grossFiat * (1 - RATE)` for grossFiat. Division, not
+ * `netFiat * (1 + RATE)` — those aren't the same thing, and only the division
+ * form nets to exactly `netFiat` after applyPaycrestSenderFee is applied to
+ * it. Used for "I want the recipient to receive exactly X" flows (the
+ * offramp amount-in-fiat mode), the mirror image of the normal "I'm sending
+ * X crypto, what does the recipient get" direction.
+ */
+export function invertPaycrestSenderFee(netFiat: number): number {
+  return netFiat / (1 - PAYCREST_SENDER_FEE_RATE);
+}
