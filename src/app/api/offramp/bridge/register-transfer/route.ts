@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createCctpTransfer } from "@/lib/cctp/cctp-store";
+import { createCctpTransfer, getCctpTransfer } from "@/lib/cctp/cctp-store";
 import { recordLedgerEntry } from "@/lib/ledger/funds-ledger";
 import { CCTP_DOMAIN } from "@/lib/cctp/constants";
 
@@ -13,6 +13,20 @@ export async function POST(request: NextRequest) {
         { error: "burnTxHash, mintRecipient, and amount are required" },
         { status: 400 },
       );
+    }
+
+    // Idempotent: the client now retries this call (a real burn getting
+    // orphaned here — burned on Stellar with no record, never mintable
+    // automatically — is exactly the failure mode that stranded a real
+    // user's funds), so a repeat call for a burn already registered must be
+    // a safe no-op rather than re-running createCctpTransfer (which does an
+    // unconditional overwrite and would reset an already-advancing record
+    // back to "burned"/attempts:0) or recordLedgerEntry (which always
+    // allocates a fresh id — a second call would double the permanent audit
+    // entry for one real burn).
+    const existing = await getCctpTransfer(burnTxHash);
+    if (existing) {
+      return NextResponse.json({ transferId: existing.id });
     }
 
     // The burn tx hash is already unique per transfer, and the client already

@@ -95,6 +95,7 @@ export async function POST(request: NextRequest) {
         payoutValue,
         reference: reference || undefined,
         network,
+        receiveAddress: (order as any)?.receiveAddress || undefined,
       }).catch(() => {});
     }
 

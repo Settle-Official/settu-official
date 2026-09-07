@@ -27,6 +27,14 @@ export interface OrderMeta {
   payoutValue: number; // fiat value the recipient receives
   reference?: string;
   network?: string;
+  /**
+   * Paycrest's per-order deposit address — the CCTP burn's mintRecipient.
+   * Stashed so a stuck/expired order can be diagnosed straight from our own
+   * store instead of re-fetching it from Paycrest's API, and so a burn found
+   * on-chain with no matching CctpTransferRecord can be matched back to an
+   * order by address.
+   */
+  receiveAddress?: string;
   createdAt: number;
 }
 

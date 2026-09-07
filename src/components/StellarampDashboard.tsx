@@ -147,6 +147,69 @@ async function submitAndConfirmSoroban(signedXdr: string): Promise<string> {
   );
 }
 
+/**
+ * Register a confirmed CCTP burn so the backend can attest+mint it — the
+ * only link between "burn succeeded on Stellar" and "USDC actually reaches
+ * Paycrest's receive address". A burn with no successful registration is
+ * cryptographically stuck: Circle will attest it, but nothing ever submits
+ * the mint, and the mint recipient is fixed at burn time — it can't be
+ * redirected or re-burned onto a fresh order. This happened for real: a
+ * single unretried fetch(...).catch(()=>{}) here silently ate a transient
+ * failure and orphaned a user's 9 USDC, burned but never minted, discovered
+ * only when Paycrest's order expired unpaid.
+ *
+ * Retries a few times (the server route is idempotent — see
+ * register-transfer/route.ts — so a retry after an ambiguous failure, e.g.
+ * the first attempt actually succeeded but the response never arrived,
+ * can't corrupt an already-advancing transfer). If every attempt still
+ * fails, falls back to navigator.sendBeacon, which the browser can deliver
+ * even as the page is unloading (a closed/backgrounded tab is a real way
+ * for the plain retries above to never get a chance to run at all).
+ *
+ * Never throws — this must not block the rest of the offramp flow (the SSE
+ * stream open + status polling that follow), same as the fire-and-forget
+ * intent of the code this replaces.
+ */
+async function registerBridgeTransfer(payload: {
+  burnTxHash: string;
+  mintRecipient: string;
+  amount: string;
+  paycrestOrderId: string;
+}): Promise<void> {
+  const attempts = 3;
+  const delaysMs = [1000, 3000];
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const res = await fetch("/api/offramp/bridge/register-transfer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) return;
+    } catch {
+      // network error — fall through to retry/backoff below
+    }
+    if (i < delaysMs.length) {
+      await new Promise((resolve) => setTimeout(resolve, delaysMs[i]));
+    }
+  }
+  // Every plain attempt failed. Last resort: sendBeacon survives page
+  // unload/backgrounding better than fetch, though it's fire-and-forget
+  // with no way to confirm delivery.
+  try {
+    navigator.sendBeacon?.(
+      "/api/offramp/bridge/register-transfer",
+      new Blob([JSON.stringify(payload)], { type: "application/json" }),
+    );
+  } catch {
+    // Nothing more we can do client-side. There is currently no server-side
+    // backstop that independently detects an unregistered burn (that would
+    // mean scanning Stellar for deposit_for_burn events against every open
+    // order's known receive address, e.g. via OrderMeta.receiveAddress) — a
+    // real gap this doesn't close, just makes much less likely to matter.
+  }
+}
+
 export function StellarampDashboard() {
   const {
     wallet,
@@ -619,19 +682,22 @@ export function StellarampDashboard() {
 
       // 5) Register the transfer (creates the CctpTransferRecord + ledger
       // entry) and open the SSE stream so attest-to-mint is driven forward
-      // while this tab is open. Fire-and-forget from the UI's perspective —
-      // Paycrest's payout webhook remains the real completion signal below;
-      // this is only for our own operational tracking.
-      await fetch("/api/offramp/bridge/register-transfer", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          burnTxHash: stellarTxHash,
-          mintRecipient: settlementAddress,
-          amount: tradeData.amount,
-          paycrestOrderId: payoutOrderId,
-        }),
-      }).catch(() => {});
+      // while this tab is open. This is NOT mere operational bookkeeping —
+      // it's the only thing that will ever get this burn minted to
+      // Paycrest's receive address at all, since the mint recipient was
+      // fixed at burn time and can't be redirected or re-burned onto a new
+      // order. Paycrest's payout webhook can only fire once that mint has
+      // actually landed there, so a failed registration here doesn't just
+      // lose tracking — it strands the burn permanently. registerBridgeTransfer
+      // retries and falls back to sendBeacon accordingly; still awaited
+      // (not truly fire-and-forget) so the UI doesn't move on before at
+      // least the first attempt has had a chance to land.
+      await registerBridgeTransfer({
+        burnTxHash: stellarTxHash,
+        mintRecipient: settlementAddress,
+        amount: tradeData.amount,
+        paycrestOrderId: payoutOrderId,
+      });
       new EventSource(`/api/offramp/bridge/stream/${stellarTxHash}`);
 
       // Update transaction with tx hash
