@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { PaycrestAdapter } from "@/lib/offramp/adapters/paycrest-adapter";
 import { setOrderMeta } from "@/lib/offramp/order-meta-store";
 import { alertOfframpEvent } from "@/lib/notify/telegram";
+import { applyPaycrestSenderFee } from "@/lib/offramp/fee";
 
 export async function POST(request: NextRequest) {
   try {
@@ -80,7 +81,12 @@ export async function POST(request: NextRequest) {
     const order = await paycrest.createOrder(normalizedPayload as any);
 
     const orderId: string | undefined = (order as any)?.id;
-    const payoutValue = Number((amount * rate).toFixed(2));
+    // `amount` here is the gross USDC we're sending — Paycrest deducts its
+    // own sender fee (dashboard-configured) from that automatically before
+    // converting to fiat, so this has to apply the same deduction or the
+    // Telegram alert this feeds shows a different number than what actually
+    // gets paid out (exactly the mismatch this fix was written to close).
+    const payoutValue = Number(applyPaycrestSenderFee(amount * rate).toFixed(2));
 
     // Persist metadata (bank details, rate, payout value) so webhook alerts —
     // whose payload lacks these — can be enriched later. Best-effort.
