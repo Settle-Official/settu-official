@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { PaycrestAdapter } from "@/lib/offramp/adapters/paycrest-adapter";
 import { setOrderMeta } from "@/lib/offramp/order-meta-store";
 import { alertOfframpEvent } from "@/lib/notify/telegram";
+import { selectTopProviders } from "@/lib/offramp/provider-routing";
+
+// How far the live book rate may fall below the rate the client was quoted
+// before we refuse to place the order. The quote's own 5-minute validUntil is
+// never enforced, so without this a stale quote can silently reprice the user.
+const RATE_DRIFT_TOLERANCE = 0.005;
 
 export async function POST(request: NextRequest) {
   try {
@@ -61,26 +67,73 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const normalizedPayload = {
-      amount,
-      token,
-      rate,
-      network,
-      recipient: {
-        ...recipient,
-        ...(providerId ? { providerId } : {}),
-      },
-      reference: reference || undefined,
-      returnAddress,
-    };
-
-    
     const paycrest = new PaycrestAdapter(apiKey);
 
-    const order = await paycrest.createOrder(normalizedPayload as any);
+    // Select the provider queue here rather than trusting the client: the quote
+    // prices the bridge-quote's receiveAmount, while this route is handed an
+    // amount derived from a *second* bridge quote. Tier bands are exact, so a
+    // drifted amount can qualify for a different band than the quote saw.
+    let providerIds: string[] = providerId ? [providerId] : [];
+    let rateSource: "book" | "client" = "client";
+    let finalRate = rate;
+
+    if (!providerId) {
+      try {
+        const book = await paycrest.getMarketBook({
+          side: "sell",
+          fiat: recipient.currency,
+          token,
+          network,
+        });
+        const selection = selectTopProviders(book, {
+          amount,
+          side: "sell",
+          fiat: recipient.currency,
+          token,
+          network,
+        });
+
+        if (selection.providerIds.length > 0) {
+          // Never silently pay the user less than they were quoted. Drift beyond
+          // the tolerance means the book moved under a stale quote — surface it
+          // so the client can re-quote instead of repricing behind their back.
+          if (selection.rate < rate * (1 - RATE_DRIFT_TOLERANCE)) {
+            return NextResponse.json(
+              {
+                code: "RATE_MOVED",
+                error: "Rate moved since the quote was issued",
+                message:
+                  "The best available rate has dropped since you were quoted. Please refresh and try again.",
+                details: { quotedRate: rate, availableRate: selection.rate },
+              },
+              { status: 409 },
+            );
+          }
+
+          providerIds = selection.providerIds;
+          rateSource = "book";
+          finalRate = selection.rate;
+        }
+      } catch {
+        // Markets unavailable — fall through with no providerIds, which is
+        // exactly today's behaviour: Paycrest picks the provider itself.
+      }
+    }
+
+    const order = await paycrest.createOfframpOrderV2({
+      amount,
+      token,
+      network,
+      rate: finalRate,
+      currency: recipient.currency,
+      recipient,
+      refundAddress: returnAddress,
+      reference: reference || undefined,
+      ...(providerIds.length ? { providerIds } : {}),
+    });
 
     const orderId: string | undefined = (order as any)?.id;
-    const payoutValue = Number((amount * rate).toFixed(2));
+    const payoutValue = Number((amount * finalRate).toFixed(2));
 
     // Persist metadata (bank details, rate, payout value) so webhook alerts —
     // whose payload lacks these — can be enriched later. Best-effort.
@@ -91,11 +144,13 @@ export async function POST(request: NextRequest) {
         accountName: recipient.accountName,
         currency: recipient.currency,
         amountUsdc: amount,
-        rate,
+        rate: finalRate,
         payoutValue,
         reference: reference || undefined,
         network,
         receiveAddress: (order as any)?.receiveAddress || undefined,
+        providerIds,
+        rateSource,
       }).catch(() => {});
     }
 
@@ -108,12 +163,12 @@ export async function POST(request: NextRequest) {
       bank: recipient.institution,
       currency: recipient.currency,
       amountUsdc: amount,
-      rate,
+      rate: finalRate,
       payoutValue,
       reference: reference || undefined,
     });
 
-    return NextResponse.json({ data: order });
+    return NextResponse.json({ data: order, providerIds, rateSource });
   } catch (error: any) {
     const statusCode =
       typeof error?.status === "number" && error.status >= 400

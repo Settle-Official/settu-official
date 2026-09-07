@@ -24,8 +24,10 @@ export async function GET(
       throw new Error("PAYCREST_API_KEY not configured");
     }
 
+    // Orders are created on v2, which is not guaranteed to be readable through
+    // the v1 endpoint. This is the polling backstop behind the SSE stream.
     const paycrest = new PaycrestAdapter(apiKey);
-    const status = await paycrest.getOrderStatus(orderId);
+    const status = await paycrest.getOrderStatusV2(orderId);
 
     return NextResponse.json({ data: status, source: "api" });
   } catch (error: any) {

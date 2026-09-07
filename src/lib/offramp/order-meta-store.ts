@@ -35,6 +35,14 @@ export interface OrderMeta {
    * order by address.
    */
   receiveAddress?: string;
+  /**
+   * The provider queue this order was routed to, best-rate first, and where the
+   * rate came from. Kept for support triage: a settlement that went wrong is
+   * much easier to chase when you know which providers were in play and whether
+   * the rate was book-derived or taken from the client's quote.
+   */
+  providerIds?: string[];
+  rateSource?: "book" | "client";
   createdAt: number;
 }
 
