@@ -8,6 +8,7 @@ import {
   validateToken,
   validateCurrency,
 } from "@/lib/offramp/utils/validation";
+import { selectTopProviders } from "@/lib/offramp/provider-routing";
 
 function intToFloat(amountInt: bigint, decimals: number): string {
   const divisor = BigInt(10) ** BigInt(decimals);
@@ -66,15 +67,52 @@ export async function POST(request: NextRequest) {
     }
     const receiveAmount = amountAfterBridge.toFixed(6); // Base USDC, 6 decimals
 
-    // Paycrest: convert post-bridge USDC amount to fiat rate/output
-    const rate = await paycrest.getRate(token, receiveAmount, currency, {
-      network: network || "base",
-      providerId: provider_id,
-    });
+    // Paycrest: convert post-bridge USDC amount to fiat rate/output.
+    //
+    // Price off the market book so the quoted rate belongs to a provider we would
+    // actually route to, and surface the queue we would use. The order route
+    // re-derives both against the real order amount — these are informational.
+    const resolvedNetwork = (network || "base").toLowerCase();
+    let rate: number | undefined;
+    let rateSource: "book" | "rates" = "book";
+    let providerIds: string[] = [];
 
-    // Platform fee: 0.5%
+    try {
+      const book = await paycrest.getMarketBook({
+        side: "sell",
+        fiat: currency,
+        token,
+        network: resolvedNetwork,
+      });
+      const selection = selectTopProviders(book, {
+        amount: Number.parseFloat(receiveAmount),
+        side: "sell",
+        fiat: currency,
+        token,
+        network: resolvedNetwork,
+      });
+      if (selection.providerIds.length > 0) {
+        rate = selection.rate;
+        providerIds = selection.providerIds;
+      }
+    } catch {
+      // Markets is a public, rate-limited endpoint — an outage there must never
+      // break quoting. Fall through to /v1/rates below.
+    }
+
+    if (rate === undefined) {
+      rateSource = "rates";
+      rate = await paycrest.getRate(token, receiveAmount, currency, {
+        network: resolvedNetwork,
+        providerId: provider_id,
+      });
+    }
+
+    // Platform fee: 0.3%. Paycrest deducts this on their side (it is configured
+    // on the account), so this only mirrors the deduction in what we show the
+    // user — the order payload deliberately carries no senderFee.
     const grossFiat = amountAfterBridge * rate;
-    const platformFeeRate = 0.005;
+    const platformFeeRate = 0.003;
     const netFiat = grossFiat * (1 - platformFeeRate);
 
     const sourceAmount = amount;
@@ -97,6 +135,8 @@ export async function POST(request: NextRequest) {
       payoutFee,
       amountAfterBridge: receiveAmount,
       rate,
+      rateSource,
+      providerIds,
       estimatedTime,
       validUntil: new Date(Date.now() + 5 * 60 * 1000),
     });

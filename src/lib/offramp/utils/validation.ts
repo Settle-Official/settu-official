@@ -30,9 +30,14 @@ export function sanitizeInput(input: string): string {
   return input.trim().replace(/[^\w\s.-]/g, "");
 }
 
+// Fiat corridors we route offramps into. Each must be a currency Paycrest
+// publishes a market book for.
+export const SUPPORTED_CURRENCIES = ["NGN", "KES"] as const;
+
 export function validateCurrency(currency: string): boolean {
-  // For now, we only support NGN
-  return currency === "NGN";
+  return (SUPPORTED_CURRENCIES as readonly string[]).includes(
+    String(currency ?? "").toUpperCase(),
+  );
 }
 
 export function validateToken(token: string): boolean {
