@@ -6,6 +6,9 @@ import type {
   PayoutOrderResponse,
   PayoutStatus,
   CreateOnrampOrderParams,
+  CreateOfframpOrderV2Params,
+  MarketOffer,
+  MarketSide,
   OnrampOrderResponse,
 } from "../types";
 
@@ -13,6 +16,12 @@ const PAYCREST_API_BASE = "https://api.paycrest.io/v1";
 // Onramp requires v2 (v1 is offramp-only). Kept separate so the working v1
 // offramp path is untouched.
 const PAYCREST_API_V2_BASE = "https://api.paycrest.io/v2";
+
+// The markets endpoint is per-IP rate limited and cached ~10s upstream, while the
+// quote route fires on a 500ms debounce. This collapses a typing burst into one
+// call; it is per-instance on Vercel and is not meant to be a real cache.
+const MARKET_BOOK_TTL_MS = 5_000;
+const marketBookCache = new Map<string, { at: number; book: MarketOffer[] }>();
 
 class PaycrestHttpError extends Error {
   status: number;
@@ -151,6 +160,96 @@ export class PaycrestAdapter implements PayoutProviderAdapter {
     }
 
     return parsedRate;
+  }
+
+  /**
+   * Fetch the market book for one corridor (Paycrest v2, public endpoint).
+   *
+   * Returns the raw `book` rows — ranking lives in provider-routing.ts. An
+   * unparseable payload yields an empty book rather than throwing, so callers
+   * can fall back to /v1/rates.
+   */
+  async getMarketBook(params: {
+    side: MarketSide;
+    fiat: string;
+    token: string;
+    network: string;
+  }): Promise<MarketOffer[]> {
+    const side = params.side.toLowerCase();
+    const fiat = params.fiat.toUpperCase();
+    const token = params.token.toUpperCase();
+    const network = params.network.toLowerCase();
+
+    const cacheKey = `${side}|${fiat}|${token}|${network}`;
+    const cached = marketBookCache.get(cacheKey);
+    if (cached && Date.now() - cached.at < MARKET_BOOK_TTL_MS) {
+      return cached.book;
+    }
+
+    const query = new URLSearchParams({ side, fiat, token, network });
+
+    // The shared fetch() already unwrapped the envelope, so this is `data`.
+    const result = await this.fetch<{ book?: MarketOffer[] }>(
+      `/markets?${query.toString()}`,
+      {},
+      PAYCREST_API_V2_BASE,
+    );
+    const book = Array.isArray(result?.book) ? result.book : [];
+
+    marketBookCache.set(cacheKey, { at: Date.now(), book });
+    return book;
+  }
+
+  /**
+   * Create an offramp order on v2, optionally pinned to an ordered queue of
+   * providers. v1 has no `providerIds`, which is the reason this exists.
+   *
+   * Note the response is normalized back to the flat v1 shape: v2 nests the
+   * settlement address under `providerAccount`, and callers use it as the CCTP
+   * mint recipient.
+   */
+  async createOfframpOrderV2(
+    params: CreateOfframpOrderV2Params,
+  ): Promise<PayoutOrderResponse> {
+    const providerIds = params.providerIds?.filter(Boolean) ?? [];
+
+    const body = {
+      amount: String(params.amount),
+      rate: String(params.rate),
+      ...(params.reference ? { reference: params.reference } : {}),
+      source: {
+        type: "crypto" as const,
+        currency: params.token.toUpperCase(),
+        network: params.network.toLowerCase(),
+        refundAddress: params.refundAddress,
+      },
+      destination: {
+        type: "fiat" as const,
+        currency: params.currency.toUpperCase(),
+        ...(providerIds.length ? { providerIds } : {}),
+        recipient: {
+          institution: params.recipient.institution,
+          accountIdentifier: params.recipient.accountIdentifier,
+          accountName: params.recipient.accountName,
+          memo: params.recipient.memo || "Settu offramp",
+          ...(params.recipient.metadata &&
+          Object.keys(params.recipient.metadata).length
+            ? { metadata: params.recipient.metadata }
+            : {}),
+        },
+      },
+    };
+
+    const raw = await this.fetch<
+      PayoutOrderResponse & {
+        providerAccount?: { receiveAddress?: string };
+      }
+    >("/sender/orders", { method: "POST", body: JSON.stringify(body) }, PAYCREST_API_V2_BASE);
+
+    return {
+      ...raw,
+      receiveAddress: raw?.providerAccount?.receiveAddress ?? raw?.receiveAddress,
+    } as PayoutOrderResponse;
   }
 
   async createOrder(request: PayoutOrderRequest): Promise<PayoutOrderResponse> {
