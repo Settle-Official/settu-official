@@ -3,6 +3,7 @@ import { PaycrestAdapter } from "@/lib/offramp/adapters/paycrest-adapter";
 import { getBurnFeeQuote, computeAtomicFee } from "@/lib/cctp/iris-client";
 import { CCTP_DOMAIN, STELLAR_USDC_DECIMALS } from "@/lib/cctp/constants";
 import { usdcFloatToStellarInt } from "@/lib/cctp/stellar-cctp";
+import { PAYCREST_SENDER_FEE_RATE } from "@/lib/offramp/fee";
 import {
   validateAmount,
   validateToken,
@@ -72,15 +73,17 @@ export async function POST(request: NextRequest) {
       providerId: provider_id,
     });
 
-    // Platform fee: 0.5%
+    // Paycrest's own sender fee (configured on their dashboard) is deducted
+    // automatically from whatever gross amount we send them — this mirrors
+    // that exact math so the estimate shown here matches what actually gets
+    // paid out, instead of guessing at a separate, unrelated percentage.
     const grossFiat = amountAfterBridge * rate;
-    const platformFeeRate = 0.005;
-    const netFiat = grossFiat * (1 - platformFeeRate);
+    const netFiat = grossFiat * (1 - PAYCREST_SENDER_FEE_RATE);
 
     const sourceAmount = amount;
     const destinationAmount = netFiat.toFixed(2);
     const bridgeFee = (parseFloat(amount) - amountAfterBridge).toString();
-    const payoutFee = (grossFiat * platformFeeRate).toFixed(2);
+    const payoutFee = (grossFiat * PAYCREST_SENDER_FEE_RATE).toFixed(2);
 
     // CCTP Fast Transfer targets ~8-20s attestation (Circle's published range,
     // not a per-quote estimate — Iris's fee endpoint doesn't return one) + the
