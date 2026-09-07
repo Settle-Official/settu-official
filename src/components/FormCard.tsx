@@ -3,10 +3,6 @@
 import { useState, useEffect } from "react";
 import { cn } from "@/lib/cn";
 import { SelectField } from "@/components/SelectField";
-import { PAYCREST_SENDER_FEE_RATE } from "@/lib/offramp/fee";
-
-// e.g. 0.003 -> "0.3%" — drop trailing zeros so 0.5% doesn't render "0.50%".
-const PAYCREST_FEE_PERCENT_LABEL = `${(PAYCREST_SENDER_FEE_RATE * 100).toFixed(2).replace(/\.?0+$/, "")}%`;
 
 export interface FormCardProps {
   readonly isConnected: boolean;
@@ -453,7 +449,7 @@ export function FormCard({
             </div>
             <div className="text-[0.7rem] text-[var(--muted)] mt-1">
               Est. time: {formatEstimatedTime(quote.estimatedTimeMs)}
-              {" · "}Includes {PAYCREST_FEE_PERCENT_LABEL} fee
+              {" · "}Includes 1% platform fee
             </div>
             {gasFeeOptions && (
               <div className="text-[0.65rem] text-[var(--muted)] mt-0.5">
