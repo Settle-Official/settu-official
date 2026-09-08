@@ -787,7 +787,7 @@ git commit -m "feat(offramp): add Base direct-transfer route (no CCTP needed)"
 **Interfaces:**
 - Produces: `OfframpTransactionRecord` interface, `OfframpSourceChain` type, `recordTransaction(fields): Promise<OfframpTransactionRecord>`, `updateTransactionStatus(id, status, patch?): Promise<void>`, `listByAddress(address, opts?): Promise<OfframpTransactionRecord[]>`, `buildTransactionRecord(fields)` (pure, for testing), plus the `POST /api/offramp/bridge/base-direct-register` endpoint — Task 7's register-transfer generalization calls `recordTransaction` directly (same process), and Task 9's Base branch calls the new endpoint over HTTP (client-side, can't import server-only Redis code directly).
 
-- [ ] **Step 1: Write the failing test for the pure builder**
+- [x] **Step 1: Write the failing test for the pure builder**
 
 ```ts
 // src/lib/offramp/transaction-history.test.ts
@@ -828,12 +828,12 @@ test("buildTransactionRecord accepts optional burn/mint hashes and order id", ()
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `node --import ./scripts/register-ts-resolver.mjs --test src/lib/offramp/transaction-history.test.ts`
 Expected: FAIL — module doesn't exist yet.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 ```ts
 // src/lib/offramp/transaction-history.ts
@@ -935,19 +935,19 @@ export async function listByAddress(
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `node --import ./scripts/register-ts-resolver.mjs --test src/lib/offramp/transaction-history.test.ts`
 Expected: PASS, 2/2 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/lib/offramp/transaction-history.ts src/lib/offramp/transaction-history.test.ts
 git commit -m "feat(offramp): add permanent cross-chain transaction history store"
 ```
 
-- [ ] **Step 6: Add the Base direct-transfer registration route**
+- [x] **Step 6: Add the Base direct-transfer registration route**
 
 Base's path has no CCTP tracking record, so it needs its own small route to trigger `recordTransaction` after the transfer confirms — the equivalent of what `register-transfer` does for the CCTP-bridge chains, per Task 9 Step 5's Base branch. Same idempotency-on-retry care as `register-transfer` (Task 7): a second call for the same `txHash` must not create a duplicate record.
 
@@ -1000,12 +1000,12 @@ export async function POST(request: NextRequest) {
 
 Note: `recordTransaction` (Task 6) does an unconditional `redis.set` — for a *first* implementation this is acceptable since Base's flow has no multi-step state to corrupt on a duplicate write (unlike `register-transfer`'s CCTP tracking record, which genuinely can regress an in-progress transfer if blindly overwritten). A duplicate call here just re-writes the same completed record with a fresh `updatedAt`. If that becomes a real problem in practice, add the same check-before-create guard `register-transfer` uses.
 
-- [ ] **Step 7: Verify compilation**
+- [x] **Step 7: Verify compilation**
 
 Run: `npx tsc --noEmit`
 Expected: no errors referencing `base-direct-register`.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/app/api/offramp/bridge/base-direct-register/route.ts
