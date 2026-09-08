@@ -123,9 +123,14 @@ export function isCctpBridgeChain(
   return config.kind === "cctp-bridge";
 }
 
-/** Rollout gate — see Task 11. Only chains listed here are selectable. */
+/**
+ * Rollout gate — see Task 11. Only chains listed in the allowlist are
+ * selectable. NEXT_PUBLIC_ so the same check works in the client dropdown
+ * (which decides what to show) and in the server routes (which reject a
+ * disabled chain regardless of what the client sends).
+ */
 export function isChainEnabled(key: EvmChainKey): boolean {
-  const allowlist = (process.env.EVM_SOURCE_CHAINS_ENABLED || "")
+  const allowlist = (process.env.NEXT_PUBLIC_EVM_SOURCE_CHAINS_ENABLED || "")
     .split(",")
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);

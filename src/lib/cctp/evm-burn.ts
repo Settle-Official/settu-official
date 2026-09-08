@@ -78,12 +78,18 @@ export function buildEvmBurnCalldata(params: {
   const calls: { to: `0x${string}`; data: `0x${string}` }[] = [];
 
   if (params.currentAllowance < amount) {
+    // Approve generous headroom (>= 1000 USDC, or 2x for larger burns) so
+    // repeat offramps from the same wallet skip the approve step entirely —
+    // matches the "approve once" dApp convention and the exact reasoning in
+    // offramp/bridge/build-tx's Stellar path.
+    const ONE_THOUSAND_USDC = BigInt(1_000_000_000); // 1000 * 1e6
+    const approveAmount = amount > ONE_THOUSAND_USDC ? amount * BigInt(2) : ONE_THOUSAND_USDC;
     calls.push({
       to: params.chain.usdcAddress,
       data: encodeFunctionData({
         abi: ERC20_APPROVE_ABI,
         functionName: "approve",
-        args: [EVM_CCTP_TOKEN_MESSENGER_V2, amount],
+        args: [EVM_CCTP_TOKEN_MESSENGER_V2, approveAmount],
       }),
     });
   }

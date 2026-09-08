@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { encodeFunctionData } from "viem";
-import { EVM_SOURCE_CHAINS } from "@/lib/cctp/evm-chains";
+import { EVM_SOURCE_CHAINS, isChainEnabled } from "@/lib/cctp/evm-chains";
 import { usdcFloatToEvmInt } from "@/lib/cctp/evm-burn";
 import { validateAmount, validateAddress } from "@/lib/offramp/utils/validation";
 
@@ -27,6 +27,12 @@ export async function POST(request: NextRequest) {
     }
     if (!validateAddress(toAddress, "base")) {
       return NextResponse.json({ error: "Invalid Paycrest receive address" }, { status: 400 });
+    }
+    if (!isChainEnabled("base")) {
+      return NextResponse.json(
+        { error: "Base is not currently enabled as a source chain" },
+        { status: 400 },
+      );
     }
 
     const base = EVM_SOURCE_CHAINS.base;

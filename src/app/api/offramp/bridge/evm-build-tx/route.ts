@@ -4,6 +4,7 @@ import {
   EVM_SOURCE_CHAINS,
   EVM_CCTP_TOKEN_MESSENGER_V2,
   isCctpBridgeChain,
+  isChainEnabled,
   type EvmChainKey,
 } from "@/lib/cctp/evm-chains";
 import { buildEvmBurnCalldata, usdcFloatToEvmInt } from "@/lib/cctp/evm-burn";
@@ -45,6 +46,12 @@ export async function POST(request: NextRequest) {
     if (!chainConfig || !isCctpBridgeChain(chainConfig)) {
       return NextResponse.json(
         { error: `${sourceChain} is not a supported CCTP-bridge source chain` },
+        { status: 400 },
+      );
+    }
+    if (!isChainEnabled(chainConfig.key)) {
+      return NextResponse.json(
+        { error: `${chainConfig.label} is not currently enabled as a source chain` },
         { status: 400 },
       );
     }
