@@ -1373,20 +1373,20 @@ git commit -m "feat(offramp): add WalletConnect-backed EVM wallet hook"
 - Consumes: `EVM_SOURCE_CHAINS`, `isChainEnabled`, `isCctpBridgeChain` (Task 2); `useEvmWallet` (Task 8)
 - Produces: a `sourceChain` state and dropdown wired into the existing amount/wallet-connect flow; `onInitiateOfframp` now branches by chain before doing any of its existing Stellar-specific work.
 
-- [ ] **Step 1: Read the current wallet-connect/currency UI and the existing submission orchestration to confirm exact insertion points**
+- [x] **Step 1: Read the current wallet-connect/currency UI and the existing submission orchestration to confirm exact insertion points**
 
 Run: `grep -n "isConnected\|OFFRAMP CURRENCY\|onConnect" src/components/FormCard.tsx`
 Run: `grep -n "handleInitiateOfframp\|registerBridgeTransfer\|register-transfer" src/components/StellarampDashboard.tsx`
 
-- [ ] **Step 2: Add the source-chain dropdown (FormCard.tsx)**
+- [x] **Step 2: Add the source-chain dropdown (FormCard.tsx)**
 
 Add a `sourceChain` state (`useState<"stellar" | EvmChainKey>("stellar")`) alongside the existing `amountMode` state, and a `SelectField` for it above the existing amount `InputField`, listing `"Stellar"` plus every `EVM_SOURCE_CHAINS` entry where `isChainEnabled(key)` is true. Changing it calls `disconnect()` on whichever wallet (Stellar or EVM) is currently connected, per the "switching replaces the connection" decision, then clears `amount`/`quote` the same way the existing `amountMode` toggle already does. `sourceChain` is passed up alongside the rest of `tradeData` in the existing `onInitiateOfframp` callback shape.
 
-- [ ] **Step 3: Route the "CONNECT WALLET" button by source chain (FormCard.tsx)**
+- [x] **Step 3: Route the "CONNECT WALLET" button by source chain (FormCard.tsx)**
 
 When `sourceChain === "stellar"`, the button keeps calling the existing Stellar `onConnect` prop, unchanged. When an EVM chain is selected, it calls `useEvmWallet().connect()` instead, and the displayed connected address comes from `useEvmWallet().address` rather than the Stellar wallet's address.
 
-- [ ] **Step 4: Add a retried, idempotency-safe registration helper for the two new source kinds (StellarampDashboard.tsx)**
+- [x] **Step 4: Add a retried, idempotency-safe registration helper for the two new source kinds (StellarampDashboard.tsx)**
 
 This directly reuses the pattern already fixed for the exact same failure mode on Stellar offramp (a confirmed on-chain burn whose registration call fails and never gets retried, permanently stranding it) — same shape as the existing `registerBridgeTransfer` helper already in this file, not a new design:
 
@@ -1429,7 +1429,7 @@ async function registerEvmTransfer(
 }
 ```
 
-- [ ] **Step 5: Branch the submission flow by source chain (StellarampDashboard.tsx)**
+- [x] **Step 5: Branch the submission flow by source chain (StellarampDashboard.tsx)**
 
 In the function that currently builds `onInitiateOfframp` (today, Stellar-only), branch at the top on `tradeData.sourceChain` before any existing Stellar-specific code runs:
 
@@ -1446,11 +1446,11 @@ For `"base"`:
 2. `useEvmWallet().signAndSendCalls([call], chainId)`.
 3. `registerEvmTransfer("/api/offramp/bridge/base-direct-register", { txHash, connectedAddress, amountUsdc: amount, destinationCurrency, destinationAmount, paycrestOrderId })` — the small registration route added in Task 6 Step 6 below.
 
-- [ ] **Step 6: Manual UI check**
+- [x] **Step 6: Manual UI check**
 
 Run: `npm run dev`, open the app, switch to OFF-RAMP, and confirm: the chain dropdown appears, only shows chains with `isChainEnabled(key)` true (should be empty/Stellar-only until Task 11's env var is set), and switching away from Stellar clears any connected Stellar wallet state.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/components/FormCard.tsx src/components/StellarampDashboard.tsx
