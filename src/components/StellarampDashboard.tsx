@@ -850,8 +850,21 @@ export function StellarampDashboard() {
           );
         }
 
-        // Only "settled" means fiat landed. Only these two mean real failure.
-        if (status === "settled") return "resolve";
+        // Fiat has reached the recipient once the payout is validated —
+        // Paycrest's own "payout confirmed by provider". `settled` is them
+        // squaring up onchain with the provider ~16s later, which the user
+        // isn't waiting on. `fulfilled` is the status where the bank is
+        // actually credited; it emits no webhook today, but the API-poll
+        // fallback can surface it, so accept it too.
+        // Deliberately client-side: the webhook computes one status before the
+        // onramp/offramp split, and the onramp bridge triggers on "settled".
+        if (
+          status === "validated" ||
+          status === "fulfilled" ||
+          status === "settled"
+        )
+          return "resolve";
+        // Only these two mean real failure.
         if (status === "refunded" || status === "expired") return "reject";
         return null;
       };
