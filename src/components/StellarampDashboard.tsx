@@ -294,6 +294,11 @@ export function StellarampDashboard() {
   // The shared top header reflects the EVM wallet only for an offramp from a
   // non-Stellar source; onramp is always the Stellar path.
   const headerUsesEvm = mode === "offramp" && sourceChain !== "stellar";
+
+  const activeSourceChainLabel =
+    sourceChain === "stellar"
+      ? "Stellar"
+      : (EVM_SOURCE_CHAINS[sourceChain]?.label ?? "the source chain");
   const [currentTxId, setCurrentTxId] = useState<string | null>(null);
   const [isExecutingOfframp, setIsExecutingOfframp] = useState(false);
   const [formResetKey, setFormResetKey] = useState(0);
@@ -1629,6 +1634,7 @@ export function StellarampDashboard() {
         isOpen={showProgressModal}
         currentStep={offrampStep}
         error={offrampError}
+        sourceChainLabel={activeSourceChainLabel}
         onClose={() => {
           setShowProgressModal(false);
           setOfframpStep("idle");
