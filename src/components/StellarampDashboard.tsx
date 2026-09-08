@@ -21,7 +21,7 @@ import {
 } from "@/lib/cctp/evm-chains";
 import { TransactionStorage, Transaction } from "@/lib/transaction-storage";
 import { ErrorToast } from "@/components/ErrorToast";
-import { WalletConnectPairingModal } from "@/components/WalletConnectPairingModal";
+import { EvmConnectModal } from "@/components/EvmConnectModal";
 import {
   TransactionProgressModal,
   type OfframpStep,
@@ -459,19 +459,11 @@ export function StellarampDashboard() {
   // One path for every platform — the kit's modal picks the wallet and handles
   // extension, in-app browser and mobile deep-link transports itself.
   const handleConnect = async () => {
-    // EVM source chains connect over WalletConnect, entirely separate from the
-    // Stellar Wallets Kit path below.
+    // EVM source chains use their own picker (installed extension via EIP-6963,
+    // or WalletConnect QR), entirely separate from the Stellar Wallets Kit
+    // path below.
     if (sourceChain !== "stellar") {
-      try {
-        await evmWallet.connect();
-      } catch (error: any) {
-        const message: string = error?.message || "Failed to connect wallet";
-        const isUserCancelled =
-          /reject|denied|cancel|closed|dismiss|user (closed|declined)/i.test(
-            message,
-          );
-        if (!isUserCancelled) setToastError(message);
-      }
+      void evmWallet.openConnect();
       return;
     }
 
@@ -1544,9 +1536,23 @@ export function StellarampDashboard() {
 
       <ErrorToast message={toastError} onDismiss={() => setToastError(null)} />
 
-      <WalletConnectPairingModal
-        uri={evmWallet.pairingUri}
-        onCancel={evmWallet.cancelConnect}
+      <EvmConnectModal
+        open={evmWallet.isConnectModalOpen}
+        injectedWallets={evmWallet.injectedWallets}
+        pairingUri={evmWallet.pairingUri}
+        isConnecting={evmWallet.isConnecting}
+        error={evmWallet.error}
+        onPickInjected={(rdns) => {
+          void evmWallet.connectInjected(rdns).catch((e: any) => {
+            setToastError(e?.message || "Failed to connect wallet");
+          });
+        }}
+        onPickWalletConnect={() => {
+          void evmWallet.connectWalletConnect().catch((e: any) => {
+            setToastError(e?.message || "Failed to connect wallet");
+          });
+        }}
+        onClose={evmWallet.closeConnect}
       />
 
       <TransactionProgressModal
