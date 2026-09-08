@@ -468,31 +468,41 @@ export function FormCard({
         {/* Enter either side of the pair. Switching carries the value across
             from the live quote so the user doesn't retype it. */}
         <div className="flex items-center gap-[0.35rem]">
-          {(["crypto", "fiat"] as const).map((mode) => (
-            <button
-              key={mode}
-              type="button"
-              onClick={() => {
-                if (mode === amountMode) return;
-                if (quote) {
-                  setAmount(
-                    mode === "fiat"
-                      ? quote.destinationAmount
-                      : quote.sourceAmount,
-                  );
-                }
-                setAmountMode(mode);
-              }}
-              className={cn(
-                "border px-[0.6rem] py-[0.25rem] text-[0.62rem] font-bold uppercase tracking-[0.08em] transition-colors",
-                mode === amountMode
-                  ? "border-[var(--accent)] text-[var(--accent)]"
-                  : "border-[var(--line)] text-[var(--muted)] hover:text-[var(--text)]",
-              )}
-            >
-              {mode === "crypto" ? "USDC" : currency}
-            </button>
-          ))}
+          {(["crypto", "fiat"] as const).map((mode) => {
+            const isActive = mode === amountMode;
+            return (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => {
+                  if (isActive) return;
+                  if (quote) {
+                    setAmount(
+                      mode === "fiat"
+                        ? quote.destinationAmount
+                        : quote.sourceAmount,
+                    );
+                  }
+                  setAmountMode(mode);
+                }}
+                aria-pressed={isActive}
+                // Inline styles, not bg-*/border-* utility classes — same
+                // reason as the on-ramp/off-ramp toggle above: the global
+                // unlayered `button { background: none; border: 0 }` reset
+                // in globals.css always wins over layered Tailwind utilities
+                // regardless of source order, so a class-based fill/border
+                // here would silently drop just like that one did.
+                style={{
+                  border: `2px solid ${isActive ? "#C9A962" : "#3a3a3a"}`,
+                  backgroundColor: isActive ? "#C9A962" : "#101010",
+                  color: isActive ? "#0a0a0a" : "#f4e1ad",
+                }}
+                className="px-[0.6rem] py-[0.25rem] text-[0.62rem] font-bold uppercase tracking-[0.08em] transition-colors rounded-none"
+              >
+                {mode === "crypto" ? "USDC" : currency}
+              </button>
+            );
+          })}
           <span className="ml-auto text-[0.62rem] text-[var(--muted)]">
             {amountMode === "fiat" ? "Amount to receive" : "Amount to send"}
           </span>
