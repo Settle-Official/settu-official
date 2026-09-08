@@ -99,16 +99,19 @@ const settlementRecordedKey = (orderId: string) =>
   `paycrest:order-settlement-recorded:${orderId}`;
 
 /**
- * Atomically claims "this order's settlement has been recorded in the
+ * Atomically claims "this order's completion has been recorded in the
  * transactions feed" — returns true only for the caller that wins the claim.
  *
- * Paycrest can deliver the same `settled` webhook more than once in close
- * succession (its own retry, or two near-simultaneous deliveries), and a
- * plain read-then-write check (read prior status, decide, write) isn't
- * atomic: two overlapping requests can both read "not yet settled" before
- * either has written, and both proceed to push a duplicate transaction. A
- * Redis `SET NX` is atomic across concurrent requests, so only the first one
- * to arrive ever gets `true`.
+ * Paycrest can deliver the same webhook more than once in close succession
+ * (its own retry, or two near-simultaneous deliveries), and a plain
+ * read-then-write check (read prior status, decide, write) isn't atomic: two
+ * overlapping requests can both read "not yet recorded" before either has
+ * written, and both proceed to push a duplicate transaction. A Redis `SET NX`
+ * is atomic across concurrent requests, so only the first one to arrive ever
+ * gets `true`.
+ *
+ * Fires on `validated` (fiat confirmed delivered), not `settled` — see the
+ * webhook handler for why.
  */
 export async function claimSettlementRecording(
   orderId: string,
