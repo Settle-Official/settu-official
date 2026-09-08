@@ -7,7 +7,10 @@ export interface HeaderProps {
   readonly isConnecting: boolean;
   readonly walletAddress?: string;
   readonly stellarUsdcBalance?: string | null;
+  /** The gas-token balance (Stellar XLM by default, or an EVM native token). */
   readonly stellarXlmBalance?: string | null;
+  /** Ticker for the gas-token row — "XLM" (default), "ETH", "POL", … */
+  readonly nativeCurrencyLabel?: string;
   readonly isBalanceLoading?: boolean;
   readonly onConnect: () => void;
   readonly onDisconnect: () => void;
@@ -20,6 +23,7 @@ export function Header({
   walletAddress,
   stellarUsdcBalance,
   stellarXlmBalance,
+  nativeCurrencyLabel = "XLM",
   isBalanceLoading = false,
   onConnect,
   onDisconnect,
@@ -60,8 +64,8 @@ export function Header({
               </p>
               <p className="m-0 text-right text-[0.85rem] text-[var(--muted)]">
                 {isBalanceLoading
-                  ? "XLM Balance: loading..."
-                  : `XLM Balance: ${stellarXlmBalance ?? "0.00"}`}
+                  ? `${nativeCurrencyLabel} Balance: loading...`
+                  : `${nativeCurrencyLabel} Balance: ${stellarXlmBalance ?? "0.00"}`}
               </p>
             </div>
           ) : null}

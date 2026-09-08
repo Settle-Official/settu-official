@@ -32,54 +32,75 @@ interface Eip6963AnnounceEvent extends Event {
   };
 }
 
+function legacyInjectedWallet(): InjectedWallet | null {
+  const legacy = (window as any).ethereum as Eip1193Provider | undefined;
+  if (!legacy) return null;
+  return {
+    info: {
+      rdns: "injected",
+      name: (legacy as any).isMetaMask
+        ? "MetaMask"
+        : (legacy as any).isCoinbaseWallet
+          ? "Coinbase Wallet"
+          : "Browser Wallet",
+      icon: "",
+    },
+    provider: legacy,
+  };
+}
+
 /**
- * Fires the EIP-6963 request event and collects the wallets that announce
- * themselves within a short window. Falls back to a bare `window.ethereum`
- * (older wallets that predate 6963) when nothing announces.
+ * Subscribes to EIP-6963 announcements and keeps calling `onChange` with the
+ * full deduped list as wallets show up. Wallets can announce at any time
+ * (some are slow, some re-announce), so this stays subscribed rather than
+ * resolving once. Returns an unsubscribe plus a `refresh()` that re-fires the
+ * request event. Also seeds a legacy `window.ethereum` immediately.
  */
-export function discoverInjectedWallets(timeoutMs = 350): Promise<InjectedWallet[]> {
-  if (typeof window === "undefined") return Promise.resolve([]);
+export function subscribeInjectedWallets(
+  onChange: (wallets: InjectedWallet[]) => void,
+): { unsubscribe: () => void; refresh: () => void } {
+  if (typeof window === "undefined") {
+    return { unsubscribe: () => {}, refresh: () => {} };
+  }
 
-  return new Promise((resolve) => {
-    const byRdns = new Map<string, InjectedWallet>();
+  const byRdns = new Map<string, InjectedWallet>();
+  const emit = () => onChange([...byRdns.values()]);
 
-    const onAnnounce = (event: Event) => {
-      const { info, provider } = (event as Eip6963AnnounceEvent).detail;
-      if (info?.rdns && provider) {
-        byRdns.set(info.rdns, {
-          info: { rdns: info.rdns, name: info.name, icon: info.icon },
-          provider,
-        });
-      }
-    };
+  const onAnnounce = (event: Event) => {
+    const { info, provider } = (event as Eip6963AnnounceEvent).detail;
+    if (info?.rdns && provider) {
+      byRdns.set(info.rdns, {
+        info: { rdns: info.rdns, name: info.name, icon: info.icon },
+        provider,
+      });
+      // A real 6963 wallet supersedes the bare-window.ethereum placeholder.
+      byRdns.delete("injected");
+      emit();
+    }
+  };
 
-    window.addEventListener("eip6963:announceProvider", onAnnounce);
+  window.addEventListener("eip6963:announceProvider", onAnnounce);
+
+  const refresh = () => {
     window.dispatchEvent(new Event("eip6963:requestProvider"));
-
+    // If nothing has announced shortly after, fall back to window.ethereum.
     setTimeout(() => {
-      window.removeEventListener("eip6963:announceProvider", onAnnounce);
-
       if (byRdns.size === 0) {
-        const legacy = (window as any).ethereum as Eip1193Provider | undefined;
+        const legacy = legacyInjectedWallet();
         if (legacy) {
-          byRdns.set("injected", {
-            info: {
-              rdns: "injected",
-              name: (legacy as any).isMetaMask
-                ? "MetaMask"
-                : (legacy as any).isCoinbaseWallet
-                  ? "Coinbase Wallet"
-                  : "Browser Wallet",
-              icon: "",
-            },
-            provider: legacy,
-          });
+          byRdns.set(legacy.info.rdns, legacy);
+          emit();
         }
       }
+    }, 400);
+  };
 
-      resolve([...byRdns.values()]);
-    }, timeoutMs);
-  });
+  refresh();
+
+  return {
+    unsubscribe: () => window.removeEventListener("eip6963:announceProvider", onAnnounce),
+    refresh,
+  };
 }
 
 export function toChainIdHex(chainId: number): string {

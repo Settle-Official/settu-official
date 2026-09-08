@@ -8,7 +8,7 @@ import {
   sendTransaction,
 } from "@/lib/evm/walletconnect-adapter";
 import {
-  discoverInjectedWallets,
+  subscribeInjectedWallets,
   toChainIdHex,
   type Eip1193Provider,
   type InjectedWallet,
@@ -37,6 +37,16 @@ export function useEvmWallet() {
   // Bumped on every connect start / cancel — a stale WalletConnect attempt
   // that resolves late (sign-client has no abort) is then ignored.
   const attemptRef = useRef(0);
+  const refreshInjectedRef = useRef<() => void>(() => {});
+
+  // Discover installed browser wallets (EIP-6963) for the lifetime of the
+  // component — they can announce at any time, so we stay subscribed rather
+  // than probing once when the modal opens.
+  useEffect(() => {
+    const { unsubscribe, refresh } = subscribeInjectedWallets(setInjectedWallets);
+    refreshInjectedRef.current = refresh;
+    return unsubscribe;
+  }, []);
 
   const clearConnection = useCallback(() => {
     setAddress(null);
@@ -62,10 +72,11 @@ export function useEvmWallet() {
   }, [transport, address, clearConnection]);
 
   // --- opening / closing the connect picker -------------------------------
-  const openConnect = useCallback(async () => {
+  const openConnect = useCallback(() => {
     setError(null);
     setIsConnectModalOpen(true);
-    setInjectedWallets(await discoverInjectedWallets());
+    // Re-probe in case a wallet loaded after mount.
+    refreshInjectedRef.current();
   }, []);
 
   const closeConnect = useCallback(() => {

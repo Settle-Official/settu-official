@@ -319,6 +319,13 @@ export function StellarampDashboard() {
     number | null
   >(null);
   const [isLoadingBalance, setIsLoadingBalance] = useState(false);
+  // Connected EVM wallet's balances on the current source chain (offramp,
+  // non-Stellar source only) — for the header readout + FormCard's USDC check.
+  const [evmBalances, setEvmBalances] = useState<{
+    usdc: string;
+    native: string;
+    nativeSymbol: string;
+  } | null>(null);
   // Raw numeric balances. The display strings above go through
   // toLocaleString with maximumFractionDigits: 6, but Stellar USDC carries 7
   // decimals — parsing those back can round *up* and pass a balance check the
@@ -377,6 +384,36 @@ export function StellarampDashboard() {
       setUserTransactions(txs);
     }
   }, [wallet?.publicKey]);
+
+  // Poll the connected EVM wallet's balances (offramp, non-Stellar source).
+  const evmWalletAddress = evmWallet.address;
+  useEffect(() => {
+    if (mode !== "offramp" || sourceChain === "stellar" || !evmWalletAddress) {
+      setEvmBalances(null);
+      return;
+    }
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const params = new URLSearchParams({
+          address: evmWalletAddress,
+          chain: sourceChain,
+        });
+        const res = await fetch(`/api/offramp/bridge/evm-balances?${params.toString()}`);
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        if (!cancelled) setEvmBalances(data);
+      } catch {
+        // keep whatever we had
+      }
+    };
+    load();
+    const iv = setInterval(load, 20_000);
+    return () => {
+      cancelled = true;
+      clearInterval(iv);
+    };
+  }, [mode, sourceChain, evmWalletAddress]);
 
   // Load connected wallet USDC balance from Stellar Horizon
   useEffect(() => {
@@ -463,10 +500,10 @@ export function StellarampDashboard() {
   // One path for every platform — the kit's modal picks the wallet and handles
   // extension, in-app browser and mobile deep-link transports itself.
   const handleConnect = async () => {
-    // EVM source chains use their own picker (installed extension via EIP-6963,
-    // or WalletConnect QR), entirely separate from the Stellar Wallets Kit
-    // path below.
-    if (sourceChain !== "stellar") {
+    // Only an offramp from a non-Stellar source uses the EVM picker. Onramp is
+    // always Stellar, and an offramp with the Stellar source keeps the
+    // original Stellar Wallets Kit path below entirely unchanged.
+    if (mode === "offramp" && sourceChain !== "stellar") {
       void evmWallet.openConnect();
       return;
     }
@@ -1437,12 +1474,22 @@ export function StellarampDashboard() {
                 ? (evmWallet.address ?? undefined)
                 : wallet?.publicKey
             }
-            // The header's balance readout is Stellar-specific (USDC + XLM
-            // reserve); an EVM source has neither, so hide it rather than show
-            // stale/empty Stellar figures.
-            stellarUsdcBalance={headerUsesEvm ? null : stellarUsdcBalance}
-            stellarXlmBalance={headerUsesEvm ? null : stellarXlmBalance}
-            isBalanceLoading={headerUsesEvm ? false : isLoadingBalance}
+            // For an EVM source the header shows that chain's USDC + native
+            // gas token instead of the Stellar USDC + XLM reserve.
+            stellarUsdcBalance={
+              headerUsesEvm ? (evmBalances?.usdc ?? null) : stellarUsdcBalance
+            }
+            stellarXlmBalance={
+              headerUsesEvm ? (evmBalances?.native ?? null) : stellarXlmBalance
+            }
+            nativeCurrencyLabel={
+              headerUsesEvm ? (evmBalances?.nativeSymbol ?? "ETH") : "XLM"
+            }
+            isBalanceLoading={
+              headerUsesEvm
+                ? evmWallet.isConnected && !evmBalances
+                : isLoadingBalance
+            }
             onConnect={handleConnect}
             onDisconnect={handleDisconnect}
           />
@@ -1515,10 +1562,16 @@ export function StellarampDashboard() {
                     onInitiateOfframp={handleExecuteTrade}
                     onPricingUpdate={handlePricingUpdate}
                     usdcBalance={
-                      sourceChain === "stellar" ? stellarUsdcBalanceRaw : null
+                      sourceChain === "stellar"
+                        ? stellarUsdcBalanceRaw
+                        : evmBalances
+                          ? Number(evmBalances.usdc)
+                          : null
                     }
                     isLoadingBalance={
-                      sourceChain === "stellar" ? isLoadingBalance : false
+                      sourceChain === "stellar"
+                        ? isLoadingBalance
+                        : evmWallet.isConnected && !evmBalances
                     }
                   />
                 </div>
