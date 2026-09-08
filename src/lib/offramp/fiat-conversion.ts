@@ -36,6 +36,24 @@ export const DEFAULT_FIAT_MIN_STEP = 100;
 /** USDC decimals on Base — the precision an order amount can carry. */
 const USDC_DECIMALS = 6;
 
+/**
+ * Paycrest rounds senderFee to 4 decimals before deducting it. Confirmed on
+ * two live orders: 0.920861 USDC was charged 0.0028 (exact 0.3% is 0.00276258,
+ * rounded up) and 0.773524 was charged 0.0023 (exact 0.00232057, rounded down).
+ *
+ * We model the fee as rounded *up* rather than to-nearest, so the delivered
+ * amount is never below what the user asked for. When Paycrest rounds down
+ * instead, they receive up to ~0.0001 USDC more than quoted — deliberately
+ * erring over rather than under.
+ */
+const SENDER_FEE_DECIMALS = 4;
+
+/** Worst-case fee Paycrest will deduct from an amount it receives. */
+export function senderFeeFor(usdc: number): number {
+  if (!isPositiveFinite(usdc)) return 0;
+  return roundUpTo(usdc * PLATFORM_FEE_RATE, SENDER_FEE_DECIMALS);
+}
+
 function isPositiveFinite(n: unknown): n is number {
   return typeof n === "number" && Number.isFinite(n) && n > 0;
 }
@@ -52,14 +70,22 @@ export function roundUpTo(value: number, decimals: number): number {
   return Math.ceil(value * factor - 1e-9) / factor;
 }
 
-/** Fiat the recipient receives for a given USDC burn. */
+/**
+ * Fiat the recipient receives for a given USDC burn.
+ *
+ * Mirrors Paycrest's own arithmetic — fee deducted from what *arrives* (so
+ * post-bridge), quantised to 4dp, then converted — rather than the simpler
+ * `usdc * rate * 0.997`, which is off by up to a rounding step of the fee.
+ */
 export function usdcToFiat(
   usdc: number,
   rate: number,
   bridgeBps: number,
 ): number {
   if (!isPositiveFinite(usdc) || !isPositiveFinite(rate)) return 0;
-  return usdc * bridgeSurvivalFactor(bridgeBps) * rate * (1 - PLATFORM_FEE_RATE);
+  const afterBridge = usdc * bridgeSurvivalFactor(bridgeBps);
+  const net = afterBridge - senderFeeFor(afterBridge);
+  return net > 0 ? net * rate : 0;
 }
 
 /**
@@ -75,9 +101,20 @@ export function fiatToUsdc(
   bridgeBps: number,
 ): number {
   if (!isPositiveFinite(fiat) || !isPositiveFinite(rate)) return 0;
-  const divisor = bridgeSurvivalFactor(bridgeBps) * rate * (1 - PLATFORM_FEE_RATE);
+  const survival = bridgeSurvivalFactor(bridgeBps);
+  const divisor = survival * rate * (1 - PLATFORM_FEE_RATE);
   if (!isPositiveFinite(divisor)) return 0;
-  return roundUpTo(fiat / divisor, USDC_DECIMALS);
+
+  // First pass against the unrounded fee, then correct for the 4dp quantisation
+  // until the modelled payout actually clears the target. Converges in one or
+  // two passes — each correction moves the amount by less than a fee step.
+  let usdc = roundUpTo(fiat / divisor, USDC_DECIMALS);
+  for (let i = 0; i < 8; i++) {
+    if (usdcToFiat(usdc, rate, bridgeBps) >= fiat) break;
+    const fee = senderFeeFor(usdc * survival);
+    usdc = roundUpTo((fiat / rate + fee) / survival, USDC_DECIMALS);
+  }
+  return usdc;
 }
 
 /** The corridor's minimum fiat input, derived from MIN_USDC_AMOUNT. */

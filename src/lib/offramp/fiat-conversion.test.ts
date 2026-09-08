@@ -7,6 +7,7 @@ import {
   minFiatFor,
   solveUsdcForFiat,
   roundUpTo,
+  senderFeeFor,
   MIN_USDC_AMOUNT,
   PLATFORM_FEE_RATE,
   DEFAULT_FIAT_MIN_STEP,
@@ -16,16 +17,63 @@ import {
 // corridor numbers rather than invented ones.
 const RATE = { NGN: 1361.9, KES: 128.57, UGX: 3753.68, TZS: 2612.05 };
 
-test("forward conversion applies bridge fee then rate then platform fee", () => {
-  // bps = 0 is what Circle currently returns for Stellar->Base fast transfer.
-  assert.equal(usdcToFiat(5, 1000, 0), 5 * 1000 * 0.997);
-  // 13 bps = 0.13% off the top, before the rate.
-  assert.equal(usdcToFiat(5, 1000, 13), 5 * (1 - 0.0013) * 1000 * 0.997);
+test("forward conversion applies bridge fee, then the 4dp fee, then the rate", () => {
+  // 5 USDC: 0.3% is exactly 0.015, so no rounding step applies.
+  assert.equal(usdcToFiat(5, 1000, 0), (5 - 0.015) * 1000);
+  // 13 bps off the top before the fee is computed.
+  const afterBridge = 5 * (1 - 0.0013);
+  assert.equal(
+    usdcToFiat(5, 1000, 13),
+    (afterBridge - senderFeeFor(afterBridge)) * 1000,
+  );
 });
 
 test("platform fee is 0.3%, matching what Paycrest deducts", () => {
   assert.equal(PLATFORM_FEE_RATE, 0.003);
   assert.equal(usdcToFiat(100, 1, 0), 99.7);
+});
+
+// Ground truth from two settled orders. Paycrest quantises senderFee to 4dp,
+// which is what put a 1,250 NGN request 0.05 short before this was modelled.
+test("reproduces the fee Paycrest charged on real orders", () => {
+  // d05de1e1: exact 0.3% = 0.00276258 -> Paycrest charged 0.0028
+  assert.equal(senderFeeFor(0.920861), 0.0028);
+  // 43c28396: exact 0.3% = 0.00232057 -> Paycrest charged 0.0023 (rounded
+  // down). We assume the worst case and charge a step more, so the user is
+  // over rather than under.
+  assert.equal(senderFeeFor(0.773524), 0.0024);
+});
+
+test("the old unrounded model is what under-delivered — the new one does not", () => {
+  const rate = 1361.51;
+  // What actually happened: 0.920861 sent, 0.0028 taken, 1249.95 delivered
+  // against a 1250 target.
+  assert.ok((0.920861 - 0.0028) * rate < 1250);
+  // Solving with the fee model now clears the target instead.
+  const usdc = fiatToUsdc(1250, rate, 0);
+  assert.ok(
+    usdcToFiat(usdc, rate, 0) >= 1250,
+    `1250 NGN resolved to ${usdc} USDC, which delivers only ${usdcToFiat(usdc, rate, 0)}`,
+  );
+});
+
+test("never delivers below the requested fiat, across the range", () => {
+  const rate = 1361.51;
+  for (const target of [1000, 1050, 1250, 1999, 5000, 15000, 123456]) {
+    for (const bps of [0, 13]) {
+      const usdc = fiatToUsdc(target, rate, bps);
+      const delivered = usdcToFiat(usdc, rate, bps);
+      assert.ok(
+        delivered >= target,
+        `bps=${bps} target=${target}: delivered ${delivered}`,
+      );
+      // And never wildly over — at most a fee step plus a rounding unit.
+      assert.ok(
+        delivered - target < 0.0002 * rate,
+        `bps=${bps} target=${target}: overshot by ${delivered - target}`,
+      );
+    }
+  }
 });
 
 test("round-trip usdc -> fiat -> usdc is stable and never short", () => {
@@ -38,7 +86,8 @@ test("round-trip usdc -> fiat -> usdc is stable and never short", () => {
         back >= usdc - 1e-9,
         `bps=${bps} usdc=${usdc}: ${back} < ${usdc}`,
       );
-      assert.ok(back - usdc < 1e-5, `bps=${bps} usdc=${usdc} drifted: ${back}`);
+      // Fee quantisation can push the round-trip up by up to one 4dp fee step.
+      assert.ok(back - usdc < 2e-4, `bps=${bps} usdc=${usdc} drifted: ${back}`);
     }
   }
 });

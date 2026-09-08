@@ -11,10 +11,11 @@ import {
 import { selectTopProviders } from "@/lib/offramp/provider-routing";
 import {
   MIN_USDC_AMOUNT,
-  PLATFORM_FEE_RATE,
   fiatToUsdc,
   minFiatFor,
+  senderFeeFor,
   solveUsdcForFiat,
+  usdcToFiat,
 } from "@/lib/offramp/fiat-conversion";
 import type { MarketOffer } from "@/lib/offramp/types";
 
@@ -216,15 +217,16 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Platform fee: 0.3%. Paycrest deducts this on their side (it is configured
-    // on the account), so this only mirrors the deduction in what we show the
-    // user — the order payload deliberately carries no senderFee.
-    const grossFiat = amountAfterBridge * rate;
-    const netFiat = grossFiat * (1 - PLATFORM_FEE_RATE);
+    // Platform fee: 0.3%, deducted by Paycrest from the account config — the
+    // order payload deliberately carries no senderFee. Modelled with their 4dp
+    // rounding (assumed upward) so the quoted figure is never above what the
+    // recipient actually receives.
+    const feeUsdc = senderFeeFor(amountAfterBridge);
+    const netFiat = usdcToFiat(sourceUsdc, rate, bridgeBps);
 
     const destinationAmount = netFiat.toFixed(2);
     const bridgeFee = (sourceUsdc - amountAfterBridge).toString();
-    const payoutFee = (grossFiat * PLATFORM_FEE_RATE).toFixed(2);
+    const payoutFee = (feeUsdc * rate).toFixed(2);
 
     // CCTP Fast Transfer targets ~8-20s attestation (Circle's published range,
     // not a per-quote estimate — Iris's fee endpoint doesn't return one) + the
