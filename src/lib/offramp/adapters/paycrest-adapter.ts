@@ -23,6 +23,19 @@ const PAYCREST_API_V2_BASE = "https://api.paycrest.io/v2";
 const MARKET_BOOK_TTL_MS = 5_000;
 const marketBookCache = new Map<string, { at: number; book: MarketOffer[] }>();
 
+// The supported-currency list changes very rarely, so it is cached far longer
+// than the book. Shared across adapter instances by design — it is account
+// independent.
+const CURRENCY_TTL_MS = 10 * 60_000;
+let currencyCache: { at: number; codes: string[] } | null = null;
+
+/**
+ * Corridors Paycrest supported when this was written. Only used when the live
+ * lookup fails — a Paycrest outage should degrade the currency check, not
+ * block quoting entirely.
+ */
+export const FALLBACK_CURRENCIES = ["NGN", "KES", "UGX", "TZS"];
+
 class PaycrestHttpError extends Error {
   status: number;
   details: unknown;
@@ -91,6 +104,33 @@ export class PaycrestAdapter implements PayoutProviderAdapter {
 
     const data = await response.json();
         return data.data || data;
+  }
+
+  /**
+   * Supported fiat codes, cached for CURRENCY_TTL_MS. Falls back to
+   * FALLBACK_CURRENCIES if Paycrest is unreachable.
+   */
+  async getSupportedCurrencyCodes(): Promise<string[]> {
+    if (currencyCache && Date.now() - currencyCache.at < CURRENCY_TTL_MS) {
+      return currencyCache.codes;
+    }
+    try {
+      const currencies = await this.getCurrencies();
+      const codes = (Array.isArray(currencies) ? currencies : [])
+        .map((c) => String(c?.code ?? "").toUpperCase())
+        .filter(Boolean);
+      if (codes.length === 0) return FALLBACK_CURRENCIES;
+      currencyCache = { at: Date.now(), codes };
+      return codes;
+    } catch {
+      return FALLBACK_CURRENCIES;
+    }
+  }
+
+  /** Whether Paycrest currently routes this fiat corridor. */
+  async isSupportedCurrency(currency: string): Promise<boolean> {
+    const code = String(currency ?? "").toUpperCase();
+    return (await this.getSupportedCurrencyCodes()).includes(code);
   }
 
   async getCurrencies(): Promise<

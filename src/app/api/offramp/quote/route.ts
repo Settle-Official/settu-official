@@ -9,6 +9,14 @@ import {
   validateCurrency,
 } from "@/lib/offramp/utils/validation";
 import { selectTopProviders } from "@/lib/offramp/provider-routing";
+import {
+  MIN_USDC_AMOUNT,
+  PLATFORM_FEE_RATE,
+  fiatToUsdc,
+  minFiatFor,
+  solveUsdcForFiat,
+} from "@/lib/offramp/fiat-conversion";
+import type { MarketOffer } from "@/lib/offramp/types";
 
 function intToFloat(amountInt: bigint, decimals: number): string {
   const divisor = BigInt(10) ** BigInt(decimals);
@@ -22,6 +30,12 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const { amount, token, currency, network, provider_id } = body;
+    // "fiat" means `amount` is the figure the recipient should be credited, and
+    // the USDC to burn is derived from it.
+    const amountIn =
+      String(body?.amountIn ?? "crypto").toLowerCase() === "fiat"
+        ? "fiat"
+        : "crypto";
 
     if (!validateAmount(amount)) {
       return NextResponse.json({ error: "Invalid amount" }, { status: 400 });
@@ -45,20 +59,105 @@ export async function POST(request: NextRequest) {
     }
     const paycrest = new PaycrestAdapter(paycrestApiKey);
 
-    // CCTP burns 1:1 minus a flat fee (no swap spread) — always deducted from
-    // the source amount, unlike Allbridge Next's native/stablecoin choice.
+    // Which corridors exist is Paycrest's to answer, not ours to hardcode.
+    // Unreachable lookup falls back to a static list rather than blocking.
+    const fiatCode = String(currency).toUpperCase();
+    if (!(await paycrest.isSupportedCurrency(fiatCode))) {
+      return NextResponse.json(
+        { error: `Currency ${fiatCode} is not supported` },
+        { status: 400 },
+      );
+    }
+
+    const resolvedNetwork = (network || "base").toLowerCase();
+
+    // CCTP burns 1:1 minus a proportional fee (no swap spread) — always
+    // deducted from the source amount.
     const feeQuote = await getBurnFeeQuote({
       sourceDomain: CCTP_DOMAIN.stellar,
       destDomain: CCTP_DOMAIN.base,
     });
-    const amountAtomic = usdcFloatToStellarInt(amount);
+    const bridgeBps = feeQuote.minimumFeeBps;
+
+    // One book fetch serves both the rate and, in fiat mode, the reverse solve.
+    let book: MarketOffer[] = [];
+    try {
+      book = await paycrest.getMarketBook({
+        side: "sell",
+        fiat: fiatCode,
+        token,
+        network: resolvedNetwork,
+      });
+    } catch {
+      // Markets is public and rate-limited — an outage there must never break
+      // quoting. Everything below falls back to /v1/rates.
+    }
+
+    /**
+     * Rate the book would give for a burn of `usdcPreBridge`.
+     *
+     * Bands are matched against what Paycrest actually receives, so the bridge
+     * fee has to come off before selecting — otherwise an amount near a band
+     * edge picks the wrong tier.
+     */
+    const resolveRate = (usdcPreBridge: number): number => {
+      if (book.length === 0) return 0;
+      const afterBridge = usdcPreBridge * (1 - (bridgeBps || 0) / 10_000);
+      return selectTopProviders(book, {
+        amount: afterBridge,
+        side: "sell",
+        fiat: fiatCode,
+        token,
+        network: resolvedNetwork,
+      }).rate;
+    };
+
+    // The corridor's floor, expressed in fiat, for the client to enforce.
+    const seedRate = resolveRate(MIN_USDC_AMOUNT);
+    const minFiat = seedRate > 0 ? minFiatFor(fiatCode, seedRate, bridgeBps) : 0;
+
+    // Resolve the USDC to burn. In crypto mode that is what the user typed; in
+    // fiat mode it is solved for, because the rate depends on the amount.
+    let sourceUsdc: number;
+    if (amountIn === "fiat") {
+      const targetFiat = Number.parseFloat(String(amount));
+      const solved = solveUsdcForFiat(targetFiat, { resolveRate, bridgeBps });
+      if (solved.usdc > 0) {
+        sourceUsdc = solved.usdc;
+      } else {
+        // No book. Seed off /v1/rates at the corridor floor — close enough to
+        // quote, and the forward pass below re-prices it honestly.
+        const fallbackRate = await paycrest.getRate(
+          token,
+          MIN_USDC_AMOUNT.toFixed(6),
+          fiatCode,
+          { network: resolvedNetwork, providerId: provider_id },
+        );
+        sourceUsdc = fiatToUsdc(targetFiat, fallbackRate, bridgeBps);
+      }
+      if (!Number.isFinite(sourceUsdc) || sourceUsdc <= 0) {
+        return NextResponse.json(
+          { error: "Could not derive a USDC amount for that payout" },
+          { status: 400 },
+        );
+      }
+    } else {
+      sourceUsdc = Number.parseFloat(String(amount));
+    }
+
+    const sourceAmount = sourceUsdc.toFixed(6);
+
+    // --- Forward path. Authoritative in both modes: whatever the reverse solve
+    // estimated, the figure shown to the user comes from re-pricing the
+    // resolved USDC against the book.
+    const amountAtomic = usdcFloatToStellarInt(sourceAmount);
     const bridgeFeeFloat = parseFloat(
       intToFloat(
-        computeAtomicFee(feeQuote.minimumFeeBps, amountAtomic),
+        computeAtomicFee(bridgeBps, amountAtomic),
         STELLAR_USDC_DECIMALS,
       ),
     );
-    const amountAfterBridge = parseFloat(amount) - bridgeFeeFloat;
+    const amountAfterBridge = sourceUsdc - bridgeFeeFloat;
     if (amountAfterBridge <= 0) {
       return NextResponse.json(
         { error: "Amount is too small to cover the bridge fee" },
@@ -67,27 +166,19 @@ export async function POST(request: NextRequest) {
     }
     const receiveAmount = amountAfterBridge.toFixed(6); // Base USDC, 6 decimals
 
-    // Paycrest: convert post-bridge USDC amount to fiat rate/output.
-    //
-    // Price off the market book so the quoted rate belongs to a provider we would
-    // actually route to, and surface the queue we would use. The order route
-    // re-derives both against the real order amount — these are informational.
-    const resolvedNetwork = (network || "base").toLowerCase();
+    // Price off the market book so the quoted rate belongs to a provider we
+    // would actually route to, and surface the queue we would use. The order
+    // route re-derives both against the real order amount — these are
+    // informational.
     let rate: number | undefined;
     let rateSource: "book" | "rates" = "book";
     let providerIds: string[] = [];
 
-    try {
-      const book = await paycrest.getMarketBook({
-        side: "sell",
-        fiat: currency,
-        token,
-        network: resolvedNetwork,
-      });
+    if (book.length > 0) {
       const selection = selectTopProviders(book, {
         amount: Number.parseFloat(receiveAmount),
         side: "sell",
-        fiat: currency,
+        fiat: fiatCode,
         token,
         network: resolvedNetwork,
       });
@@ -95,14 +186,11 @@ export async function POST(request: NextRequest) {
         rate = selection.rate;
         providerIds = selection.providerIds;
       }
-    } catch {
-      // Markets is a public, rate-limited endpoint — an outage there must never
-      // break quoting. Fall through to /v1/rates below.
     }
 
     if (rate === undefined) {
       rateSource = "rates";
-      rate = await paycrest.getRate(token, receiveAmount, currency, {
+      rate = await paycrest.getRate(token, receiveAmount, fiatCode, {
         network: resolvedNetwork,
         providerId: provider_id,
       });
@@ -112,13 +200,11 @@ export async function POST(request: NextRequest) {
     // on the account), so this only mirrors the deduction in what we show the
     // user — the order payload deliberately carries no senderFee.
     const grossFiat = amountAfterBridge * rate;
-    const platformFeeRate = 0.003;
-    const netFiat = grossFiat * (1 - platformFeeRate);
+    const netFiat = grossFiat * (1 - PLATFORM_FEE_RATE);
 
-    const sourceAmount = amount;
     const destinationAmount = netFiat.toFixed(2);
-    const bridgeFee = (parseFloat(amount) - amountAfterBridge).toString();
-    const payoutFee = (grossFiat * platformFeeRate).toFixed(2);
+    const bridgeFee = (sourceUsdc - amountAfterBridge).toString();
+    const payoutFee = (grossFiat * PLATFORM_FEE_RATE).toFixed(2);
 
     // CCTP Fast Transfer targets ~8-20s attestation (Circle's published range,
     // not a per-quote estimate — Iris's fee endpoint doesn't return one) + the
@@ -129,6 +215,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       quoteId,
+      amountIn,
       sourceAmount,
       destinationAmount,
       bridgeFee,
@@ -137,6 +224,9 @@ export async function POST(request: NextRequest) {
       rate,
       rateSource,
       providerIds,
+      minFiat,
+      minUsdc: MIN_USDC_AMOUNT,
+      bridgeBps,
       estimatedTime,
       validUntil: new Date(Date.now() + 5 * 60 * 1000),
     });

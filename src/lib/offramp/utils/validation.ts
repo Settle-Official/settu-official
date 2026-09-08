@@ -21,23 +21,31 @@ export function validateAddress(address: string, chain: "stellar" | "base"): boo
   return false;
 }
 
+/**
+ * Permissive shape check across every corridor. NGN bank accounts are 10
+ * digits, but UGX is mobile-money only and KES/TZS mix banks with mobile
+ * money, where the identifier is a phone number of varying length — a strict
+ * 10-digit rule makes those corridors unreachable.
+ *
+ * Paycrest's verify-account is the real authority and returns precise
+ * field-level errors; this only catches obvious junk before we call it.
+ */
 export function validateAccountNumber(accountNumber: string): boolean {
-  // Nigerian account numbers are typically 10 digits
-  return /^\d{10}$/.test(accountNumber);
+  return /^\+?\d{6,20}$/.test(String(accountNumber ?? "").trim());
 }
 
 export function sanitizeInput(input: string): string {
   return input.trim().replace(/[^\w\s.-]/g, "");
 }
 
-// Fiat corridors we route offramps into. Each must be a currency Paycrest
-// publishes a market book for.
-export const SUPPORTED_CURRENCIES = ["NGN", "KES"] as const;
-
+/**
+ * Shape check only — ISO 4217, three uppercase letters, per Paycrest's code
+ * standards. Which currencies are actually supported is asked of Paycrest at
+ * runtime (see isSupportedCurrency in the adapter) rather than hardcoded here,
+ * so a corridor they add needs no code change.
+ */
 export function validateCurrency(currency: string): boolean {
-  return (SUPPORTED_CURRENCIES as readonly string[]).includes(
-    String(currency ?? "").toUpperCase(),
-  );
+  return /^[A-Z]{3}$/.test(String(currency ?? "").toUpperCase());
 }
 
 export function validateToken(token: string): boolean {
