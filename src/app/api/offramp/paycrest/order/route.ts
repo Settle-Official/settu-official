@@ -3,6 +3,7 @@ import { PaycrestAdapter } from "@/lib/offramp/adapters/paycrest-adapter";
 import { setOrderMeta } from "@/lib/offramp/order-meta-store";
 import { alertOfframpEvent } from "@/lib/notify/telegram";
 import { selectTopProviders } from "@/lib/offramp/provider-routing";
+import { PLATFORM_FEE_RATE } from "@/lib/offramp/fiat-conversion";
 
 // How far the live book rate may fall below the rate the client was quoted
 // before we refuse to place the order. The quote's own 5-minute validUntil is
@@ -133,7 +134,12 @@ export async function POST(request: NextRequest) {
     });
 
     const orderId: string | undefined = (order as any)?.id;
-    const payoutValue = Number((amount * finalRate).toFixed(2));
+    // Net of the 0.3% Paycrest deducts account-side, so this matches both the
+    // quote the user saw and what actually lands in their bank. Also persisted
+    // to OrderMeta, so later webhook alerts inherit the corrected figure.
+    const payoutValue = Number(
+      (amount * finalRate * (1 - PLATFORM_FEE_RATE)).toFixed(2),
+    );
 
     // Persist metadata (bank details, rate, payout value) so webhook alerts —
     // whose payload lacks these — can be enriched later. Best-effort.

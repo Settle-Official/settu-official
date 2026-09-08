@@ -6,6 +6,7 @@ import type { PayoutStatus, OnrampStatus } from "@/lib/offramp/types";
 import { updateOnrampOrder, getOnrampOrder } from "@/lib/onramp/onramp-store";
 import { handleOnrampSettled } from "@/lib/onramp/handle-settlement";
 import { notify, alertOfframpEvent, alertRampEvent } from "@/lib/notify/telegram";
+import { PLATFORM_FEE_RATE } from "@/lib/offramp/fiat-conversion";
 import { getOrderMeta } from "@/lib/offramp/order-meta-store";
 import { pushRecentTransaction, addVolume } from "@/lib/stats-store";
 
@@ -173,10 +174,15 @@ export async function POST(request: NextRequest) {
     const rcpt = data?.recipient;
     const payloadAmount = data?.amount ? Number(data.amount) : undefined;
     const payloadRate = data?.rate ? Number(data.rate) : undefined;
+    // Fallback for orders with no stored meta (created before the fee fix, or
+    // an expired Redis key). Must apply the same 0.3% as the order route, or
+    // this path silently reintroduces the gross figure.
     const payoutValue =
       meta?.payoutValue ??
       (payloadAmount !== undefined && payloadRate !== undefined
-        ? Number((payloadAmount * payloadRate).toFixed(2))
+        ? Number(
+            (payloadAmount * payloadRate * (1 - PLATFORM_FEE_RATE)).toFixed(2),
+          )
         : undefined);
 
     // Record it in the live transactions feed here (not client-side) so it's

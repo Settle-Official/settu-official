@@ -191,18 +191,44 @@ export async function alertRampEvent(details: {
   reference?: string;
 }): Promise<boolean> {
   const s = (details.status || "unknown").toLowerCase();
-  const level: AlertLevel =
-    s === "settled" || s === "delivered"
-      ? "success"
-      : s === "refunded" ||
-          s === "expired" ||
-          s === "bridge_failed" ||
-          s === "failed"
-        ? "warning"
-        : "info";
+
+  // What counts as done differs by direction. For an offramp the recipient's
+  // bank is credited at `fulfilled`, and `validated` is the first webhook that
+  // follows it — `settled` is Paycrest squaring up onchain with the provider
+  // ~16s later, which the user isn't waiting on. For an onramp `validated`
+  // only means the stablecoin release was authorised, so delivery is still
+  // `settled`/`delivered`.
+  const isSuccess =
+    details.direction === "onramp"
+      ? s === "settled" || s === "delivered"
+      : s === "validated" || s === "fulfilled" || s === "settled";
+
+  const level: AlertLevel = isSuccess
+    ? "success"
+    : s === "refunded" ||
+        s === "expired" ||
+        s === "bridge_failed" ||
+        s === "failed"
+      ? "warning"
+      : "info";
 
   const fmt = (v?: number | string) =>
     v === undefined || v === null ? "—" : escapeHtml(String(v));
+
+  // Money is grouped so a Telegram figure can be compared with the app at a
+  // glance; a bare 1550000 next to the UI's ₦1,550,000.00 reads as a
+  // discrepancy even when the values agree.
+  const fmtMoney = (v?: number | string) => {
+    if (v === undefined || v === null) return "—";
+    const n = typeof v === "number" ? v : Number.parseFloat(String(v));
+    if (!Number.isFinite(n)) return fmt(v);
+    return escapeHtml(
+      n.toLocaleString("en-US", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 6,
+      }),
+    );
+  };
   const label = details.direction === "onramp" ? "ONRAMP" : "OFFRAMP";
   const amountUnit = details.amountInUnit
     ? ` ${escapeHtml(details.amountInUnit)}`
@@ -221,10 +247,10 @@ export async function alertRampEvent(details: {
       `Account: <code>${escapeHtml(details.accountNumber)}</code>` +
         (details.bank ? ` (${escapeHtml(details.bank)})` : ""),
     details.amountIn !== undefined &&
-      `Amount: ${fmt(details.amountIn)}${amountUnit}`,
-    details.rate !== undefined && `Rate: ${fmt(details.rate)}`,
+      `Amount: ${fmtMoney(details.amountIn)}${amountUnit}`,
+    details.rate !== undefined && `Rate: ${fmtMoney(details.rate)}`,
     details.payoutValue !== undefined &&
-      `Payout: ${fmt(details.payoutValue)}${payoutUnit}`,
+      `Payout: ${fmtMoney(details.payoutValue)}${payoutUnit}`,
     details.stellarAddress &&
       `Stellar: <code>${escapeHtml(details.stellarAddress)}</code>`,
     `Time: ${new Date().toISOString()}`,
