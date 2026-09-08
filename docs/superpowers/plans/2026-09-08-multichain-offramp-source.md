@@ -1166,7 +1166,7 @@ git commit -m "feat(offramp): generalize register-transfer for arbitrary EVM sou
 - Consumes: `EvmChainKey`, `EVM_SOURCE_CHAINS` (Task 2)
 - Produces: `useEvmWallet()` returning `{ address: string | null; isConnected: boolean; isConnecting: boolean; connect(): Promise<void>; disconnect(): Promise<void>; switchChain(chainId: number): Promise<void>; signAndSendCalls(calls: {to, data}[], chainId: number): Promise<string[]> }` — Task 10 (UI) consumes this directly, matching `useStellarWallet`'s existing shape.
 
-- [ ] **Step 1: Write the WalletConnect session adapter**
+- [x] **Step 1: Write the WalletConnect session adapter**
 
 ```ts
 // src/lib/evm/walletconnect-adapter.ts
@@ -1277,7 +1277,7 @@ export async function sendTransaction(
 }
 ```
 
-- [ ] **Step 2: Write the hook**
+- [x] **Step 2: Write the hook**
 
 ```ts
 // src/hooks/useEvmWallet.ts
@@ -1349,12 +1349,12 @@ export function useEvmWallet() {
 }
 ```
 
-- [ ] **Step 3: Verify compilation**
+- [x] **Step 3: Verify compilation**
 
 Run: `npx tsc --noEmit`
 Expected: no errors referencing `walletconnect-adapter` or `useEvmWallet`.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/lib/evm/walletconnect-adapter.ts src/hooks/useEvmWallet.ts
