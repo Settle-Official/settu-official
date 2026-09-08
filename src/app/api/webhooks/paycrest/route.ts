@@ -187,17 +187,24 @@ export async function POST(request: NextRequest) {
 
     // Record it in the live transactions feed here (not client-side) so it's
     // captured regardless of whether the user's tab was still open — mirrors
-    // the onramp fix in finalize.ts. Paycrest can deliver the same `settled`
-    // webhook more than once in close succession, so claim it atomically
-    // (Redis SET NX) rather than a read-then-check, which can race when two
-    // deliveries overlap and both read "not yet recorded" before either writes.
-    if (status === "settled" && (await claimSettlementRecording(orderId))) {
+    // the onramp fix in finalize.ts. Fires on "validated" rather than
+    // "settled" — same reasoning as the client-side success signal and the
+    // Telegram alert's success classification above: validated is Paycrest's
+    // own recommended off-ramp completion signal (fiat confirmed delivered),
+    // while settled just follows once the backend protocol releases escrowed
+    // stablecoins, which has nothing to do with whether the recipient got
+    // paid. Paycrest can deliver the same webhook more than once in close
+    // succession, so claim it atomically (Redis SET NX) rather than a
+    // read-then-check, which can race when two deliveries overlap and both
+    // read "not yet recorded" before either writes.
+    if (status === "validated" && (await claimSettlementRecording(orderId))) {
       const usdcAmount = meta?.amountUsdc ?? payloadAmount;
       if (usdcAmount !== undefined && Number.isFinite(usdcAmount)) {
-        // Paycrest doesn't always carry the on-chain hash on the settled
+        // Paycrest doesn't always carry the on-chain hash on the validated
         // event itself; payoutRecord.txHash is the merged value from
-        // whichever event first reported it. Fall back to the order id so a
-        // real identifier is always shown instead of a placeholder.
+        // whichever event first reported it (deposited usually has it).
+        // Fall back to the order id so a real identifier is always shown
+        // instead of a placeholder.
         const displayHash = payoutRecord.txHash || orderId;
         void pushRecentTransaction({
           txHash: `${displayHash.slice(0, 4)}...${displayHash.slice(-4)}`,
