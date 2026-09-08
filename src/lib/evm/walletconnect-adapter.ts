@@ -55,8 +55,13 @@ export async function proposeEvmSession(
 
   const timeout = new Promise<never>((_, reject) =>
     setTimeout(
-      () => reject(new Error("Could not reach the WalletConnect relay. Please try again.")),
-      60_000,
+      () =>
+        reject(
+          new Error(
+            "Wallet connection timed out — the pairing wasn't approved in time. Please try again.",
+          ),
+        ),
+      180_000,
     ),
   );
   const session = await Promise.race([approval(), timeout]);

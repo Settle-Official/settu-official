@@ -21,6 +21,7 @@ import {
 } from "@/lib/cctp/evm-chains";
 import { TransactionStorage, Transaction } from "@/lib/transaction-storage";
 import { ErrorToast } from "@/components/ErrorToast";
+import { WalletConnectPairingModal } from "@/components/WalletConnectPairingModal";
 import {
   TransactionProgressModal,
   type OfframpStep,
@@ -1542,6 +1543,11 @@ export function StellarampDashboard() {
       </section>
 
       <ErrorToast message={toastError} onDismiss={() => setToastError(null)} />
+
+      <WalletConnectPairingModal
+        uri={evmWallet.pairingUri}
+        onCancel={evmWallet.cancelConnect}
+      />
 
       <TransactionProgressModal
         isOpen={showProgressModal}
