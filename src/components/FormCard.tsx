@@ -296,12 +296,16 @@ export function FormCard({
   // Get quote when amount, currency, or input mode changes
   useEffect(() => {
     const getQuote = async () => {
-      // In fiat mode the corridor floor comes from the quote route, which we
-      // do not have until the first successful quote — so only the crypto
-      // floor is enforced before asking.
+      // Don't fire requests we already know will be rejected. Typing "15000"
+      // passes through 1, 15 and 150 — each of which is below the corridor
+      // floor — and blanking the quote on every one of those is what makes the
+      // derived USDC flicker as you type. `minFiat` is unknown until the route
+      // has told us once, so the first sub-minimum amount still asks.
       const parsed = parseFloat(amount);
       const meetsFloor =
-        amountMode === "fiat" ? parsed > 0 : parsed >= MIN_USDC_AMOUNT;
+        amountMode === "fiat"
+          ? parsed > 0 && (!minFiat || parsed >= minFiat)
+          : parsed >= MIN_USDC_AMOUNT;
       if (amount && meetsFloor) {
         setIsLoadingQuote(true);
         try {
@@ -318,6 +322,15 @@ export function FormCard({
           });
           if (!response.ok) {
             const payload = await response.json().catch(() => ({}));
+            // A definitive "too small" answer carries the corridor floor with
+            // it — remember it so subsequent keystrokes are filtered locally.
+            if (payload?.code === "BELOW_MINIMUM") {
+              if (typeof payload.minFiat === "number" && payload.minFiat > 0) {
+                setMinFiat(payload.minFiat);
+              }
+              setQuote(null);
+              return;
+            }
             throw new Error(
               payload?.error || `Quote request failed: ${response.status}`,
             );
@@ -343,7 +356,11 @@ export function FormCard({
           }
           setQuote(directQuote);
         } catch (error) {
-          setQuote(null);
+          // Keep the last good quote on a transient failure. Paycrest and the
+          // markets endpoint both hiccup occasionally, and blanking the payout
+          // and the USDC debit for one failed poll reads as the form resetting
+          // itself. A stale quote is replaced as soon as the next one lands,
+          // and the order route re-derives the rate anyway.
         } finally {
           setIsLoadingQuote(false);
         }

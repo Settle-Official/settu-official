@@ -145,6 +145,26 @@ export async function POST(request: NextRequest) {
       sourceUsdc = Number.parseFloat(String(amount));
     }
 
+    // Below the corridor floor there is no provider band to price against, and
+    // asking Paycrest anyway returns "no provider available" as a 500. That is
+    // the common case while someone is still typing — every keystroke of
+    // "15000" passes through 1, 15 and 150 — so answer it directly, cheaply,
+    // and with the minimum attached so the client can show it.
+    if (sourceUsdc < MIN_USDC_AMOUNT) {
+      return NextResponse.json(
+        {
+          code: "BELOW_MINIMUM",
+          error:
+            amountIn === "fiat" && minFiat > 0
+              ? `Minimum is ${minFiat.toLocaleString("en-US")} ${fiatCode}`
+              : `Minimum is ${MIN_USDC_AMOUNT} USDC`,
+          minFiat,
+          minUsdc: MIN_USDC_AMOUNT,
+        },
+        { status: 400 },
+      );
+    }
+
     const sourceAmount = sourceUsdc.toFixed(6);
 
     // --- Forward path. Authoritative in both modes: whatever the reverse solve
