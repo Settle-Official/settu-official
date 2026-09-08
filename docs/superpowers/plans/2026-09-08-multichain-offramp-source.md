@@ -677,7 +677,7 @@ curl -sS -X POST http://localhost:3000/api/offramp/bridge/evm-build-tx \
 
 Expected: a 200 response with a `calls` array (an `approve` call + a `depositForBurn` call, since the dead-address allowance is 0) and `chainId: 42161`. A malformed/zero address is fine here — this only proves the route builds calldata correctly, not that it's a real transferable wallet.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/app/api/offramp/bridge/evm-build-tx/route.ts
