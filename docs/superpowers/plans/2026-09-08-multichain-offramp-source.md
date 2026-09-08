@@ -697,7 +697,7 @@ git commit -m "feat(offramp): add EVM burn-tx-building route for multi-chain sou
 - Consumes: `EVM_SOURCE_CHAINS.base` (Task 2)
 - Produces: `POST` endpoint returning `{ to, data, chainId }` (a single call, no approve needed) — Task 8 consumes this for the Base-selected case.
 
-- [ ] **Step 1: Write the route**
+- [x] **Step 1: Write the route**
 
 ```ts
 // src/app/api/offramp/bridge/base-direct-tx/route.ts
@@ -753,12 +753,12 @@ export async function POST(request: NextRequest) {
 }
 ```
 
-- [ ] **Step 2: Verify it compiles**
+- [x] **Step 2: Verify it compiles**
 
 Run: `npx tsc --noEmit`
 Expected: no errors referencing `base-direct-tx`.
 
-- [ ] **Step 3: Manual check**
+- [x] **Step 3: Manual check**
 
 ```bash
 curl -sS -X POST http://localhost:3000/api/offramp/bridge/base-direct-tx \
@@ -768,7 +768,7 @@ curl -sS -X POST http://localhost:3000/api/offramp/bridge/base-direct-tx \
 
 Expected: `{"to":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","data":"0xa9059cbb...","chainId":8453}` — `to` is Base's USDC contract, `data` starts with `0xa9059cbb` (the `transfer` function selector).
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/app/api/offramp/bridge/base-direct-tx/route.ts
