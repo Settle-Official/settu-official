@@ -33,7 +33,7 @@
 - Consumes: `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` (existing env var, already used for the earlier Stellar attempt)
 - Produces: a pass/fail finding that gates whether the rest of this plan proceeds as-is
 
-- [ ] **Step 1: Write the smoke test script**
+- [x] **Step 1: Write the smoke test script**
 
 ```js
 // scripts/walletconnect-evm-smoke-test.mjs
@@ -94,7 +94,7 @@ try {
 }
 ```
 
-- [ ] **Step 2: Run it and manually approve from a real wallet**
+- [x] **Step 2: Run it and manually approve from a real wallet**
 
 Run: `node --env-file=.env.local scripts/walletconnect-evm-smoke-test.mjs`
 
@@ -102,11 +102,40 @@ Scan the printed URI with a real EVM wallet (MetaMask mobile, Rainbow, etc.) or 
 
 Expected: `SUCCESS — session established:` printed within 60s, with the approved namespace shown.
 
-- [ ] **Step 3: Record the outcome**
+- [x] **Step 3: Record the outcome**
 
 If it succeeded: proceed to Task 2. Note in the plan (edit this file) which wallet/relay combination was verified working, for future reference.
 
 If it failed or timed out: **stop here**. Do not proceed to Task 8 (UI wiring) or beyond until this is resolved — the spec's wallet-connection section may need revisiting (e.g., checking the WalletConnect/Reown Cloud project's "Allowed Domains" setting, as was suspected but never confirmed during the earlier Stellar attempt). Tasks 2-7 (chain config, burn logic, backend routes, transaction history) don't depend on this and can still proceed while it's investigated.
+
+**Outcome (2026-09-08): FAILED — before pairing URI generation.** The script crashed
+inside `@walletconnect/utils` with `Failed to publish custom payload, please try
+again. id:… tag:undefined` — no pairing URI was ever printed, so a wallet was
+never involved. Root cause is DNS, not the project ID or "Allowed Domains":
+
+- `relay.walletconnect.org` → **SERVFAIL** from both `1.1.1.1` and `8.8.8.8`
+- `relay.walletconnect.com` → **SERVFAIL** from `1.1.1.1`
+- `rpc.walletconnect.org` / `blockchain-api` → intermittent (one HTTP 400, then
+  resolution timeouts)
+- Sibling host `verify.walletconnect.org` resolves fine → not a blanket network block
+- `walletconnect.org` is on Cloudflare nameservers (`adel`/`apollo.ns.cloudflare.com`)
+
+SERVFAIL for the `relay` subdomain specifically, from multiple major public
+resolvers, points to a DNSSEC / authoritative-DNS problem upstream (WalletConnect
+/ Reown or their Cloudflare zone), or transient WalletConnect infra incident —
+**not** something fixable in this repo's code or config.
+
+**Next actions before Tasks 8-11 can start:**
+1. Re-run the smoke test later and/or from a different network (e.g. phone
+   hotspot) to rule out a transient incident or local resolver poisoning.
+2. If it persists: check status.reown.com / WalletConnect status, and confirm
+   whether the relay hostname in `@walletconnect/sign-client@2.23.9` is current
+   (the SDK may hardcode an old `relay.walletconnect.com` that has since been
+   retired in favour of `.org`).
+3. Consider pinning `relayUrl` explicitly in `SignClient.init({ relayUrl })` if a
+   working relay host is identified.
+
+Tasks 2-7 proceed in the meantime.
 
 - [ ] **Step 4: Commit**
 
@@ -126,7 +155,7 @@ git commit -m "chore: add WalletConnect EVM connectivity smoke test"
 **Interfaces:**
 - Produces: `EVM_SOURCE_CHAINS: Record<EvmChainKey, SourceChainConfig>`, `EvmChainKey` type, `EVM_CCTP_TOKEN_MESSENGER_V2` constant, `isCctpBridgeChain(config): config is CctpBridgeSourceChainConfig` type guard — later tasks (3, 4, 8, 9) import all of these.
 
-- [ ] **Step 1: Write the failing config-shape test**
+- [x] **Step 1: Write the failing config-shape test**
 
 ```ts
 // src/lib/cctp/evm-chains.test.ts
@@ -161,12 +190,12 @@ test("isCctpBridgeChain narrows correctly", () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `node --import ./scripts/register-ts-resolver.mjs --test src/lib/cctp/evm-chains.test.ts`
 Expected: FAIL — `evm-chains.ts` doesn't exist yet.
 
-- [ ] **Step 3: Write the config**
+- [x] **Step 3: Write the config**
 
 USDC addresses below were verified against `developers.circle.com/stablecoins/usdc-contract-addresses` on 2026-09-08 — native Circle-issued USDC, not bridged/legacy variants. **Before merging, independently cross-check each address against that chain's own block explorer** (Etherscan/Arbiscan/etc. contract-verification page) — the same two-source standard `constants.ts`'s Stellar/Base addresses were held to.
 
@@ -296,12 +325,12 @@ export function isChainEnabled(key: EvmChainKey): boolean {
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `node --import ./scripts/register-ts-resolver.mjs --test src/lib/cctp/evm-chains.test.ts`
 Expected: PASS, 4/4 tests.
 
-- [ ] **Step 5: Add the new RPC env vars to `.env.example`**
+- [x] **Step 5: Add the new RPC env vars to `.env.example`**
 
 Add below the existing `BASE_RPC_URL` line in `.env.example`:
 
@@ -320,7 +349,7 @@ POLYGON_RPC_URL=
 EVM_SOURCE_CHAINS_ENABLED=
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/lib/cctp/evm-chains.ts src/lib/cctp/evm-chains.test.ts .env.example
