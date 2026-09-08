@@ -10,6 +10,46 @@
 
 **Spec:** `docs/superpowers/specs/2026-09-08-multichain-offramp-source-design.md`
 
+---
+
+## Implementation status & deviations (updated 2026-09-09)
+
+Tasks 1–10 implemented; Task 11 in progress (Arbitrum verified end-to-end with
+real funds — see Task 11 Step 2). Not yet: Base direct-transfer path tested,
+other chains spot-checked, production enabled, `dev` pushed.
+
+Where the build diverged from the plan text below:
+
+- **Wallet connection is not WalletConnect-only.** `useEvmWallet` is
+  dual-transport: EIP-6963 injected providers (MetaMask / Rabby / Coinbase
+  browser extensions — direct `eth_requestAccounts` / `eth_sendTransaction` /
+  `wallet_switchEthereumChain`) **and** WalletConnect (`sign-client`) for mobile.
+  New files: `src/lib/evm/injected.ts`, `src/components/EvmConnectModal.tsx`
+  (picker). The plan's Task 8 returned a `pairingUri` but nothing rendered it —
+  that gap is closed by the modal.
+- **`useEvmWallet` lives in `StellarampDashboard`, not `FormCard`** (one session,
+  not two hook instances). FormCard stays presentational, fed derived props —
+  matching the existing Stellar prop-drilling. The shared top header also
+  reflects the EVM wallet + balances for a non-Stellar offramp.
+- **Rollout gate env var: `NEXT_PUBLIC_EVM_SOURCE_CHAINS_ENABLED`** (client needs
+  it; build-time). Server routes read it too and reject a disabled chain.
+- **`gas-fee-options` route** now takes `?sourceChain` — it was Stellar-domain +
+  7-decimal hardcoded, a 10× fee-display error for EVM (EVM USDC is 6-decimal).
+  Base returns a zero bridge fee (plain transfer).
+- **New routes beyond the plan:** `evm-gas-preflight` (native-balance gate),
+  `evm-balances` (header/FormCard USDC + native readout).
+- **CCTP-bridge submission does approve → wait-for-allowance → burn** (re-polls
+  `evm-build-tx`, whose server-side allowance read is the "approve mined" signal)
+  rather than firing both calls blind — a blind burn reverts on a slow chain.
+- **`buildEvmBurnCalldata` approves ≥1000 USDC headroom** so repeat offramps skip
+  the approve, matching the Stellar `build-tx` path.
+- `handleExecuteEvmTrade` is a **separate function** duplicating the Paycrest
+  quote/order prefix rather than refactoring the working Stellar path; the client
+  `Transaction` record reuses `stellarTxHash` for the EVM burn/transfer hash
+  (no localStorage schema change).
+- Progress modal step label is parameterised (`Submitting on <source chain>`).
+- Commit trailer: none (repo convention), overriding the session default.
+
 ## Global Constraints
 
 - Solana and non-EVM chains are out of scope this phase — do not add them.
@@ -1522,17 +1562,38 @@ git commit -m "feat(offramp): add EVM gas estimation and chain-specific balance 
 **Files:**
 - No new files — this task is about configuration and manual verification, not code.
 
+> **Env var note:** during implementation `EVM_SOURCE_CHAINS_ENABLED` was renamed
+> to **`NEXT_PUBLIC_EVM_SOURCE_CHAINS_ENABLED`** — the client dropdown needs to
+> read it, and a non-public var is `undefined` in the browser. It is `NEXT_PUBLIC_`
+> and therefore **build-time**: changing it needs a redeploy, not just a restart.
+> The server routes (`evm-build-tx`, `base-direct-tx`, `evm-gas-preflight`,
+> `evm-balances`) read the same var and 400 a disabled chain.
+
 - [ ] **Step 1: Enable exactly one chain in production config**
 
-Set `EVM_SOURCE_CHAINS_ENABLED=arbitrum` (only) in the deployment's environment variables, alongside `ARBITRUM_RPC_URL`.
+Set `NEXT_PUBLIC_EVM_SOURCE_CHAINS_ENABLED=arbitrum` (only) in the deployment's environment variables, alongside `ARBITRUM_RPC_URL`.
 
-- [ ] **Step 2: Perform one real, small-amount end-to-end offramp from Arbitrum**
+- [x] **Step 2: Perform one real, small-amount end-to-end offramp from Arbitrum**
 
 Using a real wallet with a small amount of real USDC on Arbitrum (e.g. $1-2): connect via the new dropdown, submit an offramp order, confirm: the approve+burn transaction confirms on Arbitrum, the attestation resolves, the mint lands on Base at Paycrest's receive address, Paycrest settles to a real bank account, and the transaction-history record (Task 6) shows `status: "completed"` with the correct `sourceChain`, `burnTxHash`, and `mintTxHash`.
 
+**Verified 2026-09-09 (local dev against mainnet Arbitrum + live Circle Iris +
+live Paycrest).** A real small-amount offramp from Arbitrum completed the full
+path end to end: MetaMask (browser extension, EIP-6963) connected → approve +
+`depositForBurn` signed on Arbitrum → Circle attestation resolved → mint landed
+on Base at Paycrest's receive address → **Paycrest settled real fiat to a real
+bank account.** BRIDGE FEE line showed the real Arbitrum→Base CCTP fee (~1.4 bps,
+non-zero). Connection also confirmed working via WalletConnect QR (mobile) as an
+alternative transport.
+
+Not yet verified: the Base direct-transfer path (genuinely different code —
+`transfer()`, no CCTP, `base-direct-register`), and Optimism / Avalanche /
+Polygon / Ethereum (config-only difference from Arbitrum). Production env not yet
+switched on — tested locally only; `dev` branch commits not yet pushed.
+
 - [ ] **Step 3: Only after Step 2 succeeds, enable the remaining chains**
 
-Update `EVM_SOURCE_CHAINS_ENABLED=arbitrum,optimism,avalanche,polygon,ethereum,base` (add `ETHEREUM_RPC_URL`, `OPTIMISM_RPC_URL`, `AVALANCHE_RPC_URL`, `POLYGON_RPC_URL` at the same time). Since these chains share identical code paths with Arbitrum (only config differs), a full separate live transaction per chain is lower-priority than Step 2 was, but still worth at least one real small-amount check per chain before considering the feature fully shipped — particularly Base, since its direct-transfer path is genuinely different code from the CCTP-bridge chains.
+Update `NEXT_PUBLIC_EVM_SOURCE_CHAINS_ENABLED=arbitrum,optimism,avalanche,polygon,ethereum,base` (add `ETHEREUM_RPC_URL`, `OPTIMISM_RPC_URL`, `AVALANCHE_RPC_URL`, `POLYGON_RPC_URL` at the same time). Since these chains share identical code paths with Arbitrum (only config differs), a full separate live transaction per chain is lower-priority than Step 2 was, but still worth at least one real small-amount check per chain before considering the feature fully shipped — particularly Base, since its direct-transfer path is genuinely different code from the CCTP-bridge chains.
 
 - [ ] **Step 4: Record the outcome**
 
