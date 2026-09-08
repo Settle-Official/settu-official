@@ -1469,7 +1469,7 @@ git commit -m "feat(offramp): add source-chain dropdown, EVM wallet routing, and
 - Consumes: viem's `publicClient.estimateGas`
 - Produces: `evm-build-tx`'s response gains `estimatedGasNative: string` (in the chain's native token, human-readable) — the UI's pre-flight check and the "BRIDGE FEE" display both read it.
 
-- [ ] **Step 1: Add gas estimation to the build-tx route**
+- [x] **Step 1: Add gas estimation to the build-tx route**
 
 Inside the `withRetry` block in `src/app/api/offramp/bridge/evm-build-tx/route.ts` (Task 4), after `calls` is built, add:
 
@@ -1489,16 +1489,16 @@ Inside the `withRetry` block in `src/app/api/offramp/bridge/evm-build-tx/route.t
       return { calls, chainId: chainConfig.chainId, estimatedGasNative };
 ```
 
-- [ ] **Step 2: Verify compilation**
+- [x] **Step 2: Verify compilation**
 
 Run: `npx tsc --noEmit`
 Expected: no errors.
 
-- [ ] **Step 3: Surface it in FormCard.tsx**
+- [x] **Step 3: Surface it in FormCard.tsx**
 
 In the amount-input section (Task 9), when an EVM chain is selected: fetch the native token balance via a lightweight `eth_getBalance` call (through the existing `useEvmWallet`'s connected client, or a small new read-only route mirroring the pattern of `evm-build-tx`), and block "INITIATE OFFRAMP" with a clear message ("Insufficient ETH for gas — you have X, need ~Y") when the balance is below `estimatedGasNative`, mirroring the existing Stellar XLM-reserve check's shape exactly.
 
-- [ ] **Step 4: Remove the "assume near-zero" bridge-fee framing**
+- [x] **Step 4: Remove the "assume near-zero" bridge-fee framing**
 
 Confirm the existing `getBurnFeeQuote`/`computeAtomicFee` path (already generalized in `evm-build-tx`) is what drives the "BRIDGE FEE" display for EVM sources too — no code change needed here since that machinery already handles arbitrary bps, but manually verify against a live quote for at least one non-Stellar pair:
 
@@ -1508,7 +1508,7 @@ curl -sS "https://iris-api.circle.com/v2/burn/USDC/fees/3/6"
 
 Expected: a real `minimumFee` value (Arbitrum→Base, domains 3→6) — confirm it's non-zero (or note if it happens to also be 0 right now) so the UI's fee line is known to render correctly either way before shipping.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/app/api/offramp/bridge/evm-build-tx/route.ts src/components/FormCard.tsx
