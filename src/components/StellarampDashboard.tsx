@@ -1501,6 +1501,7 @@ export function StellarampDashboard() {
                     onConnect={handleConnect}
                     sourceChain={sourceChain}
                     onSourceChainChange={handleSourceChainChange}
+                    walletAddress={activeUserAddress ?? null}
                     onInitiateOfframp={handleExecuteTrade}
                     onPricingUpdate={handlePricingUpdate}
                     usdcBalance={

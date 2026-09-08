@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createPublicClient, http } from "viem";
+import { createPublicClient, http, formatEther } from "viem";
 import {
   EVM_SOURCE_CHAINS,
   EVM_CCTP_TOKEN_MESSENGER_V2,
@@ -89,7 +89,35 @@ export async function POST(request: NextRequest) {
         currentAllowance: allowance,
       });
 
-      return { calls, chainId: chainConfig.chainId };
+      // Best-effort gas estimate for the pre-flight "do you have enough native
+      // token" check and display. The first call is always estimable (an
+      // approve, or the burn itself when allowance already covers it); a
+      // second call is the burn-after-approve, which can't be estimated
+      // before the approve lands, so add a conservative fixed allowance for
+      // it. +20% buffer — the wallet's own gas price at signing is
+      // authoritative, this is only advisory.
+      let estimatedGasNative: string | null = null;
+      try {
+        const firstGas = await publicClient.estimateGas({
+          account: fromAddress,
+          to: calls[0].to,
+          data: calls[0].data,
+        });
+        const totalGas = calls.length > 1 ? firstGas + BigInt(250_000) : firstGas;
+        const gasPrice = await publicClient.getGasPrice();
+        estimatedGasNative = formatEther(
+          (totalGas * gasPrice * BigInt(120)) / BigInt(100),
+        );
+      } catch {
+        // Estimation is advisory — never fail tx-building over it.
+      }
+
+      return {
+        calls,
+        chainId: chainConfig.chainId,
+        estimatedGasNative,
+        nativeCurrencySymbol: chainConfig.nativeCurrencySymbol,
+      };
     });
 
     return NextResponse.json(result);

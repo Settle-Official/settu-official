@@ -34,6 +34,8 @@ interface DirectSourceChainConfig {
   key: "base";
   label: string;
   chainId: number;
+  /** Ticker of the chain's native gas token — for the "insufficient X for gas" copy. */
+  nativeCurrencySymbol: string;
   usdcAddress: `0x${string}`;
   rpcUrlEnvVar: string;
 }
@@ -44,6 +46,8 @@ interface CctpBridgeSourceChainConfig {
   label: string;
   chainId: number;
   cctpDomain: number;
+  /** Ticker of the chain's native gas token — for the "insufficient X for gas" copy. */
+  nativeCurrencySymbol: string;
   usdcAddress: `0x${string}`;
   rpcUrlEnvVar: string;
 }
@@ -67,6 +71,7 @@ export const EVM_SOURCE_CHAINS: Record<EvmChainKey, SourceChainConfig> = {
     key: "base",
     label: "Base",
     chainId: 8453,
+    nativeCurrencySymbol: "ETH",
     usdcAddress: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", // same as CCTP_CONFIG.baseUsdc
     rpcUrlEnvVar: "BASE_RPC_URL", // reuses the existing var — same chain
   },
@@ -76,6 +81,7 @@ export const EVM_SOURCE_CHAINS: Record<EvmChainKey, SourceChainConfig> = {
     label: "Ethereum",
     chainId: 1,
     cctpDomain: 0,
+    nativeCurrencySymbol: "ETH",
     usdcAddress: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
     rpcUrlEnvVar: "ETHEREUM_RPC_URL",
   },
@@ -85,6 +91,7 @@ export const EVM_SOURCE_CHAINS: Record<EvmChainKey, SourceChainConfig> = {
     label: "Arbitrum",
     chainId: 42161,
     cctpDomain: 3,
+    nativeCurrencySymbol: "ETH",
     usdcAddress: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
     rpcUrlEnvVar: "ARBITRUM_RPC_URL",
   },
@@ -94,6 +101,7 @@ export const EVM_SOURCE_CHAINS: Record<EvmChainKey, SourceChainConfig> = {
     label: "Optimism",
     chainId: 10,
     cctpDomain: 2,
+    nativeCurrencySymbol: "ETH",
     usdcAddress: "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
     rpcUrlEnvVar: "OPTIMISM_RPC_URL",
   },
@@ -103,6 +111,7 @@ export const EVM_SOURCE_CHAINS: Record<EvmChainKey, SourceChainConfig> = {
     label: "Avalanche",
     chainId: 43114,
     cctpDomain: 1,
+    nativeCurrencySymbol: "AVAX",
     usdcAddress: "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E",
     rpcUrlEnvVar: "AVALANCHE_RPC_URL",
   },
@@ -112,6 +121,7 @@ export const EVM_SOURCE_CHAINS: Record<EvmChainKey, SourceChainConfig> = {
     label: "Polygon",
     chainId: 137,
     cctpDomain: 7,
+    nativeCurrencySymbol: "POL",
     usdcAddress: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
     rpcUrlEnvVar: "POLYGON_RPC_URL",
   },

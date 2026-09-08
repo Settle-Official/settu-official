@@ -35,6 +35,8 @@ export interface FormCardProps {
   /** Which chain the USDC is coming from. "stellar" is the default/legacy path. */
   readonly sourceChain: OfframpSourceChainKey;
   readonly onSourceChainChange: (next: OfframpSourceChainKey) => void;
+  /** Connected wallet address for the current source chain (EVM 0x… or Stellar G…). */
+  readonly walletAddress?: string | null;
   readonly onInitiateOfframp?: (tradeData: {
     amount: string;
     rate: number;
@@ -128,6 +130,7 @@ export function FormCard({
   onConnect,
   sourceChain,
   onSourceChainChange,
+  walletAddress = null,
   onInitiateOfframp,
   onPricingUpdate,
   usdcBalance = null,
@@ -184,6 +187,16 @@ export function FormCard({
   );
   const [isLoadingFees, setIsLoadingFees] = useState(false);
 
+  // EVM-only: does the connected wallet hold enough of the source chain's
+  // native token to pay gas for the burn/transfer it's about to sign?
+  const [evmGasCheck, setEvmGasCheck] = useState<{
+    sufficient: boolean;
+    nativeBalance: string;
+    estimatedGasNative: string;
+    nativeCurrencySymbol: string;
+  } | null>(null);
+  const isEvmSource = sourceChain !== "stellar";
+
   // Reset form fields when resetKey changes (after successful transaction)
   useEffect(() => {
     if (resetKey === 0) return; // skip initial mount
@@ -203,11 +216,11 @@ export function FormCard({
     const fetchGasFees = async () => {
       setIsLoadingFees(true);
       try {
-        const query =
-          burnUsdc && burnUsdc > 0
-            ? `?amount=${encodeURIComponent(String(burnUsdc))}`
-            : "";
-        const res = await fetch(`/api/offramp/bridge/gas-fee-options${query}`);
+        const params = new URLSearchParams({ sourceChain });
+        if (burnUsdc && burnUsdc > 0) params.set("amount", String(burnUsdc));
+        const res = await fetch(
+          `/api/offramp/bridge/gas-fee-options?${params.toString()}`,
+        );
         if (res.ok) {
           const data = await res.json();
           setGasFeeOptions(data.feeOptions);
@@ -219,7 +232,42 @@ export function FormCard({
     };
     const debounce = setTimeout(fetchGasFees, 500);
     return () => clearTimeout(debounce);
-  }, [burnUsdc]);
+  }, [burnUsdc, sourceChain]);
+
+  // EVM gas pre-flight — mirrors the Stellar XLM-reserve check's intent: don't
+  // let the user start an offramp that will fail when the wallet asks them to
+  // pay gas. Advisory (the wallet's own gas price at signing is authoritative)
+  // but a hard block on INITIATE when the balance is clearly short.
+  useEffect(() => {
+    if (!isEvmSource || !isConnected || !walletAddress || !(burnUsdc && burnUsdc > 0)) {
+      setEvmGasCheck(null);
+      return;
+    }
+    let cancelled = false;
+    const run = async () => {
+      try {
+        const params = new URLSearchParams({
+          address: walletAddress,
+          chain: sourceChain,
+          amount: String(burnUsdc),
+        });
+        const res = await fetch(
+          `/api/offramp/bridge/evm-gas-preflight?${params.toString()}`,
+        );
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        if (!cancelled) setEvmGasCheck(data);
+      } catch {
+        // Network hiccup — leave the last known result (or null) rather than
+        // hard-blocking on a failed check.
+      }
+    };
+    const debounce = setTimeout(run, 500);
+    return () => {
+      cancelled = true;
+      clearTimeout(debounce);
+    };
+  }, [isEvmSource, isConnected, walletAddress, sourceChain, burnUsdc]);
 
   // Fetch supported currencies on mount
   useEffect(() => {
@@ -427,11 +475,17 @@ export function FormCard({
       ? !minFiat || Number.parseFloat(amount) >= minFiat
       : Number.parseFloat(amount) >= MIN_USDC_AMOUNT;
 
+  // Only a definitive "insufficient" result blocks — a null check (not run
+  // yet, or the check itself errored) never hard-blocks.
+  const evmGasShort = isEvmSource && evmGasCheck?.sufficient === false;
+
   const getButtonText = () => {
     if (isExecutingOfframp) return "INITIATING OFFRAMP...";
     if (isConnecting) return "WAITING FOR SIGNATURE...";
     if (!isConnected) return "CONNECT WALLET";
     if (hasInsufficientBalance) return "INSUFFICIENT USDC BALANCE";
+    if (evmGasShort)
+      return `INSUFFICIENT ${evmGasCheck?.nativeCurrencySymbol ?? "GAS"} FOR GAS`;
     return "INITIATE OFFRAMP →";
   };
 
@@ -442,6 +496,7 @@ export function FormCard({
     !!quote &&
     meetsMinimum &&
     !hasInsufficientBalance &&
+    !evmGasShort &&
     /^\+?\d{6,20}$/.test(accountNumber.trim()) &&
     !!bank &&
     !!accountName;
@@ -606,14 +661,34 @@ export function FormCard({
                 Balance {usdcBalance.toFixed(6)} USDC
               </span>
             ) : null}
+            {/* EVM gas pre-flight — native token, separate from the USDC balance above. */}
+            {isEvmSource && evmGasCheck && (
+              <span
+                className={cn(
+                  "text-[0.68rem]",
+                  evmGasCheck.sufficient
+                    ? "text-[var(--muted)]"
+                    : "text-red-400",
+                )}
+              >
+                {evmGasCheck.sufficient
+                  ? `Gas: ~${Number(evmGasCheck.estimatedGasNative).toFixed(6)} ${evmGasCheck.nativeCurrencySymbol} (you have ${Number(evmGasCheck.nativeBalance).toFixed(6)})`
+                  : `Insufficient ${evmGasCheck.nativeCurrencySymbol} for gas — you have ${Number(evmGasCheck.nativeBalance).toFixed(6)}, need ~${Number(evmGasCheck.estimatedGasNative).toFixed(6)}`}
+              </span>
+            )}
           </div>
         )}
-        {/* Bridge fee — CCTP charges one real fee, deducted from the amount */}
+        {/* Bridge fee — CCTP charges one real fee, deducted from the amount.
+            Base as a source does a plain transfer with no bridge, so no fee. */}
         <div className="flex flex-col gap-[0.4rem]">
           <label className="text-[0.75rem] tracking-[0.08em] text-[var(--muted)]">
             BRIDGE FEE
           </label>
-          {isLoadingFees ? (
+          {sourceChain === "base" ? (
+            <p className="m-0 text-[0.8rem] text-[var(--muted)]">
+              None — direct transfer on Base
+            </p>
+          ) : isLoadingFees ? (
             <p className="m-0 text-[0.8rem] text-[var(--muted)]">Loading...</p>
           ) : (
             gasFeeOptions &&
