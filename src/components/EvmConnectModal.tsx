@@ -89,6 +89,11 @@ export function EvmConnectModal({
         {error && (
           <p className="mt-0 mb-3 text-[0.72rem] text-red-400">{error}</p>
         )}
+        {!showQr && isConnecting && !error && (
+          <p className="mt-0 mb-3 text-[0.72rem] text-[var(--accent)]">
+            Check your wallet — approve the connection request…
+          </p>
+        )}
 
         {showQr ? (
           <>

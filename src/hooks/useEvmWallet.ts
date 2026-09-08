@@ -85,10 +85,27 @@ export function useEvmWallet() {
       }
       setIsConnecting(true);
       setError(null);
+      console.log("[useEvmWallet] connecting via injected:", rdns);
       try {
-        const accounts = (await wallet.provider.request({
+        // Some wallets never resolve/reject eth_requestAccounts if their popup
+        // is suppressed (locked extension, already-open request). Time out so
+        // the UI can tell the user to open the extension manually.
+        const accountsPromise = wallet.provider.request({
           method: "eth_requestAccounts",
-        })) as string[];
+        }) as Promise<string[]>;
+        const timeout = new Promise<never>((_, reject) =>
+          setTimeout(
+            () =>
+              reject(
+                new Error(
+                  "No response from your wallet. Open the extension from your toolbar (unlock it if needed) and approve the connection, then try again.",
+                ),
+              ),
+            60_000,
+          ),
+        );
+        const accounts = await Promise.race([accountsPromise, timeout]);
+        console.log("[useEvmWallet] eth_requestAccounts ->", accounts);
         if (!accounts || accounts.length === 0) {
           throw new Error("Wallet returned no account");
         }
@@ -98,6 +115,7 @@ export function useEvmWallet() {
         setIsConnectModalOpen(false);
       } catch (err: any) {
         const msg = err?.message || "Failed to connect wallet";
+        console.error("[useEvmWallet] injected connect failed:", err);
         setError(msg);
         if (!/reject|denied|cancel|4001/i.test(msg)) throw err;
       } finally {
