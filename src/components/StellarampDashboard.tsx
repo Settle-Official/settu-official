@@ -290,6 +290,10 @@ export function StellarampDashboard() {
     sourceChain === "stellar" ? wallet?.publicKey : evmWallet.address ?? undefined;
 
   const [mode, setMode] = useState<"offramp" | "onramp">("offramp");
+
+  // The shared top header reflects the EVM wallet only for an offramp from a
+  // non-Stellar source; onramp is always the Stellar path.
+  const headerUsesEvm = mode === "offramp" && sourceChain !== "stellar";
   const [currentTxId, setCurrentTxId] = useState<string | null>(null);
   const [isExecutingOfframp, setIsExecutingOfframp] = useState(false);
   const [formResetKey, setFormResetKey] = useState(0);
@@ -494,7 +498,13 @@ export function StellarampDashboard() {
   };
 
   const handleDisconnect = async () => {
-    await disconnect();
+    // Disconnect whichever wallet is actually in use — the EVM path only
+    // applies to an offramp with a non-Stellar source; onramp is always Stellar.
+    if (mode === "offramp" && sourceChain !== "stellar") {
+      await evmWallet.disconnect();
+    } else {
+      await disconnect();
+    }
     setUserTransactions([]);
   };
 
@@ -1420,12 +1430,19 @@ export function StellarampDashboard() {
         <div className="flex flex-col gap-6 px-[2.6rem] py-8 max-[720px]:p-4">
           <Header
             subtitle={getSubtitle()}
-            isConnected={isConnected}
-            isConnecting={isConnecting}
-            walletAddress={wallet?.publicKey}
-            stellarUsdcBalance={stellarUsdcBalance}
-            stellarXlmBalance={stellarXlmBalance}
-            isBalanceLoading={isLoadingBalance}
+            isConnected={headerUsesEvm ? evmWallet.isConnected : isConnected}
+            isConnecting={headerUsesEvm ? evmWallet.isConnecting : isConnecting}
+            walletAddress={
+              headerUsesEvm
+                ? (evmWallet.address ?? undefined)
+                : wallet?.publicKey
+            }
+            // The header's balance readout is Stellar-specific (USDC + XLM
+            // reserve); an EVM source has neither, so hide it rather than show
+            // stale/empty Stellar figures.
+            stellarUsdcBalance={headerUsesEvm ? null : stellarUsdcBalance}
+            stellarXlmBalance={headerUsesEvm ? null : stellarXlmBalance}
+            isBalanceLoading={headerUsesEvm ? false : isLoadingBalance}
             onConnect={handleConnect}
             onDisconnect={handleDisconnect}
           />
