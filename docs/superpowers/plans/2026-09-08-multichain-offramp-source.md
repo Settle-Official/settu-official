@@ -568,7 +568,7 @@ git commit -m "feat(cctp): add chain-agnostic EVM burn calldata builder"
 - Consumes: `EVM_SOURCE_CHAINS`, `isCctpBridgeChain` (Task 2); `buildEvmBurnCalldata`, `usdcFloatToEvmInt` (Task 3); `getBurnFeeQuote`, `computeAtomicFee` (existing, `src/lib/cctp/iris-client.ts`); `withRetry`, `isNetworkFetchError` (existing, `src/lib/cctp/retry.ts`)
 - Produces: `POST` endpoint returning `{ calls: { to, data }[], chainId: number }` — Task 8 (UI) calls this before asking the wallet to sign.
 
-- [ ] **Step 1: Write the route**
+- [x] **Step 1: Write the route**
 
 ```ts
 // src/app/api/offramp/bridge/evm-build-tx/route.ts
@@ -662,12 +662,12 @@ export async function POST(request: NextRequest) {
 }
 ```
 
-- [ ] **Step 2: Verify it compiles**
+- [x] **Step 2: Verify it compiles**
 
 Run: `npx tsc --noEmit`
 Expected: no errors referencing `evm-build-tx`.
 
-- [ ] **Step 3: Manual live check against one chain (requires `ARBITRUM_RPC_URL` set)**
+- [x] **Step 3: Manual live check against one chain (requires `ARBITRUM_RPC_URL` set)**
 
 ```bash
 curl -sS -X POST http://localhost:3000/api/offramp/bridge/evm-build-tx \
