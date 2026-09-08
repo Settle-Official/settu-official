@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { usdcFloatToEvmInt, buildEvmBurnCalldata } from "./evm-burn";
 import { EVM_SOURCE_CHAINS } from "./evm-chains";
 
+const MINT_RECIPIENT = `0x${"11".repeat(20)}` as const;
+
 test("usdcFloatToEvmInt converts using 6 decimals, same as Base", () => {
   assert.equal(usdcFloatToEvmInt("1.5"), BigInt(1_500_000));
   assert.equal(usdcFloatToEvmInt("0.000001"), BigInt(1));
@@ -13,7 +15,7 @@ test("buildEvmBurnCalldata includes an approve call when allowance is insufficie
   const calls = buildEvmBurnCalldata({
     chain: EVM_SOURCE_CHAINS.arbitrum,
     amountFloat: "10",
-    mintRecipient: "0x" + "11".repeat(20),
+    mintRecipient: MINT_RECIPIENT,
     maxFeeAtomic: BigInt(0),
     currentAllowance: BigInt(0),
   });
@@ -26,7 +28,7 @@ test("buildEvmBurnCalldata skips approve when allowance already covers the amoun
   const calls = buildEvmBurnCalldata({
     chain: EVM_SOURCE_CHAINS.arbitrum,
     amountFloat: "10",
-    mintRecipient: "0x" + "11".repeat(20),
+    mintRecipient: MINT_RECIPIENT,
     maxFeeAtomic: BigInt(0),
     currentAllowance: BigInt(20_000_000), // 20 USDC, more than the 10 being burned
   });
@@ -39,7 +41,7 @@ test("buildEvmBurnCalldata rejects a direct-kind chain", () => {
     buildEvmBurnCalldata({
       chain: EVM_SOURCE_CHAINS.base as any,
       amountFloat: "10",
-      mintRecipient: "0x" + "11".repeat(20),
+      mintRecipient: MINT_RECIPIENT,
       maxFeeAtomic: BigInt(0),
       currentAllowance: BigInt(0),
     }),
