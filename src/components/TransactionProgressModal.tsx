@@ -17,6 +17,33 @@ interface StepConfig {
   key: OfframpStep;
 }
 
+// Brand palette (globals.css :root) — gold, its light highlight, and white.
+const CONFETTI_COLORS = ["#c9a962", "#f4e1ad", "#ffffff"];
+
+/**
+ * Pre-computed so the burst is scattered but identical on server and client —
+ * calling Math.random() during render would desync hydration. A tiny LCG gives
+ * the scatter without any runtime animation work; the motion itself is CSS.
+ */
+const CONFETTI_PIECES = (() => {
+  let seed = 20260908;
+  const next = () => {
+    seed = (seed * 1103515245 + 12345) % 2147483648;
+    return seed / 2147483648;
+  };
+  return Array.from({ length: 40 }, (_, i) => ({
+    id: i,
+    left: `${next() * 100}%`,
+    color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
+    drift: `${(next() - 0.5) * 140}px`,
+    delay: `${next() * 1.1}s`,
+    duration: `${1.9 + next() * 1.2}s`,
+    spin: `${360 + next() * 540}deg`,
+    width: `${5 + next() * 4}px`,
+    round: next() > 0.7,
+  }));
+})();
+
 const STEPS: StepConfig[] = [
   { key: "initiating", label: "Initiating Offramp..." },
   { key: "awaiting-signature", label: "Confirm transaction in wallet" },
@@ -148,7 +175,27 @@ export function TransactionProgressModal({
 
           {/* Success state */}
           {isSuccess && (
-            <div className="mt-5 flex flex-col items-center gap-3 py-4">
+            <div className="relative mt-5 flex flex-col items-center gap-3 py-4">
+              <div className="confetti-layer" aria-hidden="true">
+                {CONFETTI_PIECES.map((p) => (
+                  <span
+                    key={p.id}
+                    className="confetti-piece"
+                    style={
+                      {
+                        left: p.left,
+                        width: p.width,
+                        background: p.color,
+                        borderRadius: p.round ? "9999px" : "1px",
+                        "--confetti-drift": p.drift,
+                        "--confetti-delay": p.delay,
+                        "--confetti-duration": p.duration,
+                        "--confetti-spin": p.spin,
+                      } as React.CSSProperties
+                    }
+                  />
+                ))}
+              </div>
               <div className="flex h-14 w-14 items-center justify-center rounded-full border-2 border-[var(--accent)] text-[1.6rem] text-[var(--accent)] animate-scale-in">
                 ✓
               </div>
@@ -156,7 +203,7 @@ export function TransactionProgressModal({
                 Transaction Successful
               </p>
               <p className="m-0 text-[0.75rem] text-[var(--muted)]">
-                Fiat has been settled to your bank account
+                Fiat has been sent to your bank account
               </p>
             </div>
           )}

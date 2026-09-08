@@ -62,6 +62,11 @@ export interface BeneficiaryInfo {
   accountName: string;
   currency: string;
   memo?: string;
+  // Pin the order to a single provider, bypassing rate-based routing.
+  providerId?: string;
+  // Corridor-specific hints Paycrest forwards to the provider (e.g. mobile-money
+  // `channel` / `businessNumber`).
+  metadata?: Record<string, unknown>;
 }
 
 export interface ExecuteRequest {
@@ -188,4 +193,59 @@ export interface OnrampOrderResponse {
   rate?: string;
   reference?: string;
   providerAccount: OnrampProviderAccount;
+}
+
+// ---------------------------------------------------------------------------
+// Market book / provider routing — Paycrest v2 `GET /markets`
+// ---------------------------------------------------------------------------
+
+export type MarketSide = "sell" | "buy";
+
+/**
+ * One row of the market book. Paycrest returns every numeric as a string, so
+ * they are kept as strings here and parsed at the point of comparison.
+ *
+ * A row is a *tier*, not a provider: one providerId appears many times with
+ * different min/max bands at different rates.
+ */
+export interface MarketOffer {
+  providerId: string;
+  side: MarketSide;
+  token: string;
+  fiat: string;
+  network: string;
+  rate: string;
+  rateType: string;
+  min: string;
+  max: string;
+  /** Available liquidity — fiat for `sell`, token for `buy`. */
+  balance: string;
+  balanceCurrency: string;
+  balanceUsd: string;
+  settled: number;
+  /** Null when the provider has no settlement history in this corridor. */
+  successPercent: string | null;
+}
+
+export interface ProviderSelection {
+  /** Ordered fallback queue, best first. Empty when nothing qualifies. */
+  providerIds: string[];
+  /** Rate of the top-ranked offer; 0 when nothing qualifies. */
+  rate: number;
+  /** The winning offer per provider, in the same order as `providerIds`. */
+  offers: MarketOffer[];
+  /** True when the success-rate floor had to be dropped to return anything. */
+  relaxedSuccessFloor: boolean;
+}
+
+export interface CreateOfframpOrderV2Params {
+  amount: number;
+  token: string;
+  network: string;
+  rate: number;
+  currency: string;
+  recipient: BeneficiaryInfo;
+  refundAddress: string;
+  reference?: string;
+  providerIds?: string[];
 }

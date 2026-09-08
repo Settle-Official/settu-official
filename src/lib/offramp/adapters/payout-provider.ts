@@ -2,6 +2,8 @@
 
 import type {
   BeneficiaryInfo,
+  MarketOffer,
+  MarketSide,
   PayoutOrderRequest,
   PayoutOrderResponse,
   PayoutStatus,
@@ -45,6 +47,16 @@ export interface PayoutProviderAdapter {
       providerId?: string;
     }
   ): Promise<number>;
+
+  /**
+   * Get the market book for a corridor, for rate-based provider selection
+   */
+  getMarketBook(params: {
+    side: MarketSide;
+    fiat: string;
+    token: string;
+    network: string;
+  }): Promise<MarketOffer[]>;
 
   /**
    * Create payout order
