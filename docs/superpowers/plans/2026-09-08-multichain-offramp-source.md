@@ -108,36 +108,28 @@ If it succeeded: proceed to Task 2. Note in the plan (edit this file) which wall
 
 If it failed or timed out: **stop here**. Do not proceed to Task 8 (UI wiring) or beyond until this is resolved — the spec's wallet-connection section may need revisiting (e.g., checking the WalletConnect/Reown Cloud project's "Allowed Domains" setting, as was suspected but never confirmed during the earlier Stellar attempt). Tasks 2-7 (chain config, burn logic, backend routes, transaction history) don't depend on this and can still proceed while it's investigated.
 
-**Outcome (2026-09-08): FAILED — before pairing URI generation.** The script crashed
-inside `@walletconnect/utils` with `Failed to publish custom payload, please try
-again. id:… tag:undefined` — no pairing URI was ever printed, so a wallet was
-never involved. Root cause is DNS, not the project ID or "Allowed Domains":
+**Outcome (2026-09-08): PASSED on retry.** Verified working combination:
 
-- `relay.walletconnect.org` → **SERVFAIL** from both `1.1.1.1` and `8.8.8.8`
-- `relay.walletconnect.com` → **SERVFAIL** from `1.1.1.1`
-- `rpc.walletconnect.org` / `blockchain-api` → intermittent (one HTTP 400, then
-  resolution timeouts)
-- Sibling host `verify.walletconnect.org` resolves fine → not a blanket network block
-- `walletconnect.org` is on Cloudflare nameservers (`adel`/`apollo.ns.cloudflare.com`)
+- Relay: default `wss://relay.walletconnect.org` (no `relayUrl` override needed)
+- Project ID: `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` from `.env.local` (the
+  `44fc7f05…` value), no "Allowed Domains" change required for a Node script
+- Wallet: MetaMask mobile, scanning a QR (the script now renders the pairing URI
+  as a PNG at `/tmp/wc-evm-smoke-qr.png` + a terminal QR — recent MetaMask mobile
+  dropped the manual URI-paste field, scanner-only)
+- Result: session established on `eip155:1`, account returned, full method set
+  incl. `eth_sendTransaction` / `wallet_switchEthereumChain` / `personal_sign`
 
-SERVFAIL for the `relay` subdomain specifically, from multiple major public
-resolvers, points to a DNSSEC / authoritative-DNS problem upstream (WalletConnect
-/ Reown or their Cloudflare zone), or transient WalletConnect infra incident —
-**not** something fixable in this repo's code or config.
+**First attempt earlier the same day FAILED** and was a red herring: the script
+crashed inside `@walletconnect/utils` with `Failed to publish custom payload …
+tag:undefined` because `relay.walletconnect.org` was returning **SERVFAIL** from
+`1.1.1.1` and `8.8.8.8` — a transient WalletConnect/Cloudflare authoritative-DNS
+incident (sibling `verify.walletconnect.org` resolved fine throughout). It
+cleared within a few hours with no code change. If this recurs: it's upstream
+DNS, not this repo — retry later or from another network before touching config.
 
-**Next actions before Tasks 8-11 can start:**
-1. Re-run the smoke test later and/or from a different network (e.g. phone
-   hotspot) to rule out a transient incident or local resolver poisoning.
-2. If it persists: check status.reown.com / WalletConnect status, and confirm
-   whether the relay hostname in `@walletconnect/sign-client@2.23.9` is current
-   (the SDK may hardcode an old `relay.walletconnect.com` that has since been
-   retired in favour of `.org`).
-3. Consider pinning `relayUrl` explicitly in `SignClient.init({ relayUrl })` if a
-   working relay host is identified.
+Tasks 8-11 are unblocked.
 
-Tasks 2-7 proceed in the meantime.
-
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add scripts/walletconnect-evm-smoke-test.mjs

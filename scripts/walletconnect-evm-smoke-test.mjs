@@ -5,6 +5,10 @@
 // console output and (if a wallet is available) approve the pairing on
 // your phone/extension.
 import { SignClient } from "@walletconnect/sign-client";
+import QRCode from "qrcode";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { execSync } from "node:child_process";
 
 const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID;
 if (!projectId) {
@@ -34,14 +38,32 @@ const { uri, approval } = await client.connect({
   },
 });
 
-console.log("Pairing URI (scan with a wallet, or open on mobile):");
-console.log(uri);
-console.log("Waiting up to 60s for approval...");
+const qrPath = join(tmpdir(), "wc-evm-smoke-qr.png");
+await QRCode.toFile(qrPath, uri, { width: 512, margin: 2 });
+
+console.log("\n=== QR code saved. Open it and scan with your phone wallet: ===\n");
+console.log(`    ${qrPath}\n`);
+try {
+  execSync(`xdg-open "${qrPath}"`, { stdio: "ignore" });
+  console.log("(tried to open it in your default image viewer automatically)");
+} catch {
+  console.log(`(open it manually: xdg-open "${qrPath}")`);
+}
+console.log("\nMetaMask mobile: tap the scan icon (top-left of the home screen),");
+console.log("point it at the image on your screen, approve the connection.\n");
+console.log("Terminal QR fallback (if your terminal renders ANSI backgrounds):\n");
+console.log(await QRCode.toString(uri, { type: "terminal", small: true }));
+console.log("Raw URI:\n" + uri);
+console.log("\nWaiting up to 180s for approval...\n");
 
 const timeout = setTimeout(() => {
-  console.error("TIMED OUT waiting for wallet approval — relay or pairing issue.");
+  console.error(
+    "TIMED OUT after 180s. If you never got the approval prompt in your\n" +
+    "wallet, that's a relay/pairing issue. If you just ran out of time,\n" +
+    "re-run and approve faster.",
+  );
   process.exit(1);
-}, 60_000);
+}, 180_000);
 
 try {
   const session = await approval();
