@@ -246,6 +246,17 @@ export function StellarampDashboard() {
     number | null
   >(null);
   const [isLoadingBalance, setIsLoadingBalance] = useState(false);
+  // Raw numeric balances. The display strings above go through
+  // toLocaleString with maximumFractionDigits: 6, but Stellar USDC carries 7
+  // decimals — parsing those back can round *up* and pass a balance check the
+  // wallet cannot actually cover, failing later on-chain instead. Every
+  // comparison must use these.
+  const [stellarUsdcBalanceRaw, setStellarUsdcBalanceRaw] = useState<
+    number | null
+  >(null);
+  const [stellarXlmBalanceRaw, setStellarXlmBalanceRaw] = useState<
+    number | null
+  >(null);
   const [pricingState, setPricingState] = useState<{
     amount: string;
     quote: {
@@ -300,6 +311,8 @@ export function StellarampDashboard() {
       if (!wallet?.publicKey) {
         setStellarUsdcBalance(null);
         setStellarXlmBalance(null);
+        setStellarUsdcBalanceRaw(null);
+        setStellarXlmBalanceRaw(null);
         setStellarSubentryCount(null);
         return;
       }
@@ -340,6 +353,7 @@ export function StellarampDashboard() {
             })
           : "0.00";
         setStellarUsdcBalance(displayValue);
+        setStellarUsdcBalanceRaw(Number.isFinite(parsed) ? parsed : 0);
 
         // Find XLM (native) balance
         const nativeBalance = balances.find(
@@ -353,6 +367,7 @@ export function StellarampDashboard() {
             })
           : "0.00";
         setStellarXlmBalance(xlmDisplay);
+        setStellarXlmBalanceRaw(Number.isFinite(xlmParsed) ? xlmParsed : 0);
 
         const subentryCount = Number.parseInt(account?.subentry_count, 10);
         setStellarSubentryCount(
@@ -361,6 +376,8 @@ export function StellarampDashboard() {
       } catch (error) {
                 setStellarUsdcBalance("0.00");
         setStellarXlmBalance("0.00");
+        setStellarUsdcBalanceRaw(null);
+        setStellarXlmBalanceRaw(null);
         setStellarSubentryCount(null);
       } finally {
         setIsLoadingBalance(false);
@@ -424,8 +441,9 @@ export function StellarampDashboard() {
       return;
     }
 
-    // Pre-flight: check USDC balance
-    const usdcBal = parseFloat((stellarUsdcBalance ?? "0").replace(/,/g, ""));
+    // Pre-flight: check USDC balance against the raw figure, never the
+    // formatted display string (which rounds, and can round up).
+    const usdcBal = stellarUsdcBalanceRaw ?? 0;
     const sendAmount = parseFloat(tradeData.amount);
     if (usdcBal < sendAmount) {
       setToastError(
@@ -454,7 +472,7 @@ export function StellarampDashboard() {
     // Soroban resource fees are typically a small fraction of an XLM; this
     // covers an approve tx + a burn tx with comfortable headroom.
     const NETWORK_FEE_BUFFER_XLM = 0.5;
-    const xlmBal = parseFloat((stellarXlmBalance ?? "0").replace(/,/g, ""));
+    const xlmBal = stellarXlmBalanceRaw ?? 0;
     const needed = minReserve + NETWORK_FEE_BUFFER_XLM;
     if (xlmBal < needed) {
       setToastError(
@@ -1036,6 +1054,8 @@ export function StellarampDashboard() {
                     onConnect={handleConnect}
                     onInitiateOfframp={handleExecuteTrade}
                     onPricingUpdate={handlePricingUpdate}
+                    usdcBalance={stellarUsdcBalanceRaw}
+                    isLoadingBalance={isLoadingBalance}
                   />
                 </div>
                 <div className="row-span-2 col-start-2 max-[1100px]:order-2 max-[1100px]:row-auto max-[1100px]:col-auto">

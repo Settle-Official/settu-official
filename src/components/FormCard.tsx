@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { cn } from "@/lib/cn";
 import { SelectField } from "@/components/SelectField";
+import { MIN_USDC_AMOUNT } from "@/lib/offramp/fiat-conversion";
 
 export interface FormCardProps {
   readonly isConnected: boolean;
@@ -30,7 +31,13 @@ export interface FormCardProps {
     currency: string;
     gasFeeOptions: GasFeeOptions | null;
   }) => void;
+  /** Raw USDC balance — never the formatted display string. */
+  readonly usdcBalance?: number | null;
+  readonly isLoadingBalance?: boolean;
 }
+
+/** Which side of the pair the user is typing in. */
+export type AmountMode = "crypto" | "fiat";
 
 export interface GasFeeOptions {
   fee: { int: string; float: string };
@@ -39,6 +46,8 @@ export interface GasFeeOptions {
 interface Bank {
   code: string;
   name: string;
+  /** "bank" or "mobile_money" — UGX is mobile money only. */
+  type?: string;
 }
 
 interface Currency {
@@ -54,6 +63,8 @@ interface Quote {
   rate: number;
   currency: string;
   estimatedTimeMs: number;
+  /** Corridor floor in fiat, from the quote route. 0 when unknown. */
+  minFiat?: number;
 }
 
 const PAYCREST_API_BASE = "https://api.paycrest.io/v1";
@@ -93,13 +104,14 @@ export function FormCard({
   onConnect,
   onInitiateOfframp,
   onPricingUpdate,
+  usdcBalance = null,
+  isLoadingBalance = false,
 }: Readonly<FormCardProps>) {
-  const getCurrencyPrefix = (code?: string) =>
-    (code || "NGN").toUpperCase() === "NGN"
-      ? "₦"
-      : (code || "NGN").toUpperCase();
-
   const [amount, setAmount] = useState("");
+  const [amountMode, setAmountMode] = useState<AmountMode>("crypto");
+  // Held outside `quote` so the corridor floor still shows when the amount is
+  // blank or below it — i.e. exactly when the user needs to see it.
+  const [minFiat, setMinFiat] = useState<number | null>(null);
   const [accountNumber, setAccountNumber] = useState("");
   const [bank, setBank] = useState("");
   const [accountName, setAccountName] = useState("");
@@ -111,6 +123,35 @@ export function FormCard({
   const [isVerifyingAccount, setIsVerifyingAccount] = useState(false);
   const [quote, setQuote] = useState<Quote | null>(null);
   const [isLoadingQuote, setIsLoadingQuote] = useState(false);
+
+  /**
+   * The USDC actually being burned. In crypto mode that is what the user
+   * typed; in fiat mode it is the amount the quote resolved, so anything
+   * denominated in USDC (bridge fee, balance check, the order itself) must
+   * read this rather than `amount`.
+   */
+  const burnUsdc =
+    amountMode === "fiat"
+      ? quote
+        ? Number.parseFloat(quote.sourceAmount)
+        : null
+      : Number.parseFloat(amount) || null;
+
+  // Paycrest supplies the symbol for every corridor (₦, KSh, USh, TSh), so
+  // there is no need to hardcode one per currency.
+  const getCurrencyPrefix = (code?: string) => {
+    const target = (code || currency || "NGN").toUpperCase();
+    return currencies.find((c) => c.code === target)?.symbol || target;
+  };
+
+  const selectedBank = banks.find((b) => b.code === bank);
+  const isMobileMoney = selectedBank?.type === "mobile_money";
+  // Every UGX option is a mobile network, so "Bank" would be plainly wrong.
+  const institutionLabel = banks.some((b) => b.type === "mobile_money")
+    ? banks.every((b) => b.type === "mobile_money")
+      ? "MOBILE NETWORK"
+      : "BANK / MOBILE MONEY"
+    : "BANK";
 
   const [gasFeeOptions, setGasFeeOptions] = useState<GasFeeOptions | null>(
     null,
@@ -128,14 +169,17 @@ export function FormCard({
   }, [resetKey]);
 
   // Fetch gas fee options — the fee is a rate of the burn amount, so refetch
-  // (debounced, same pattern as the quote fetch below) whenever amount changes.
+  // (debounced, same pattern as the quote fetch below) whenever it changes.
+  // Driven by the resolved USDC rather than the raw input: in fiat mode
+  // `amount` is naira, and sending it here would price the fee against a
+  // number thousands of times too large.
   useEffect(() => {
     const fetchGasFees = async () => {
       setIsLoadingFees(true);
       try {
         const query =
-          amount && parseFloat(amount) > 0
-            ? `?amount=${encodeURIComponent(amount)}`
+          burnUsdc && burnUsdc > 0
+            ? `?amount=${encodeURIComponent(String(burnUsdc))}`
             : "";
         const res = await fetch(`/api/offramp/bridge/gas-fee-options${query}`);
         if (res.ok) {
@@ -149,7 +193,7 @@ export function FormCard({
     };
     const debounce = setTimeout(fetchGasFees, 500);
     return () => clearTimeout(debounce);
-  }, [amount]);
+  }, [burnUsdc]);
 
   // Fetch supported currencies on mount
   useEffect(() => {
@@ -211,7 +255,9 @@ export function FormCard({
   // Verify account when both account number and bank are provided
   useEffect(() => {
     const verifyAccount = async () => {
-      if (accountNumber.length === 10 && bank) {
+      // Not every corridor uses 10-digit account numbers — UGX is mobile
+      // money only, and KES/TZS mix banks with phone-number identifiers.
+      if (/^\+?\d{6,20}$/.test(accountNumber.trim()) && bank) {
         setIsVerifyingAccount(true);
         try {
           const response = await fetch(`${PAYCREST_API_BASE}/verify-account`, {
@@ -228,9 +274,12 @@ export function FormCard({
           const data = await response.json();
           const resolvedAccountName =
             data?.data?.accountName || data?.data || data?.accountName || "";
-          setAccountName(
-            typeof resolvedAccountName === "string" ? resolvedAccountName : "",
-          );
+          // Some corridors (e.g. KES M-Pesa) return "OK" instead of a name.
+          // Leave the field empty so the user can type it rather than
+          // submitting the literal "OK" as the account holder.
+          const name =
+            typeof resolvedAccountName === "string" ? resolvedAccountName : "";
+          setAccountName(name.trim().toUpperCase() === "OK" ? "" : name);
         } catch (error) {
           setAccountName("");
         } finally {
@@ -244,10 +293,16 @@ export function FormCard({
     verifyAccount();
   }, [accountNumber, bank]);
 
-  // Get quote when amount, currency, or fee method changes
+  // Get quote when amount, currency, or input mode changes
   useEffect(() => {
     const getQuote = async () => {
-      if (amount && parseFloat(amount) >= 0.7) {
+      // In fiat mode the corridor floor comes from the quote route, which we
+      // do not have until the first successful quote — so only the crypto
+      // floor is enforced before asking.
+      const parsed = parseFloat(amount);
+      const meetsFloor =
+        amountMode === "fiat" ? parsed > 0 : parsed >= MIN_USDC_AMOUNT;
+      if (amount && meetsFloor) {
         setIsLoadingQuote(true);
         try {
           const response = await fetch("/api/offramp/quote", {
@@ -255,6 +310,7 @@ export function FormCard({
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               amount,
+              amountIn: amountMode,
               token: "USDC",
               currency,
               network: "base",
@@ -274,7 +330,12 @@ export function FormCard({
             rate: payload.rate,
             currency,
             estimatedTimeMs: payload.estimatedTime,
+            minFiat:
+              typeof payload.minFiat === "number" ? payload.minFiat : undefined,
           };
+          if (typeof payload.minFiat === "number" && payload.minFiat > 0) {
+            setMinFiat(payload.minFiat);
+          }
 
           if (!isValidQuote(directQuote)) {
             setQuote(null);
@@ -293,7 +354,7 @@ export function FormCard({
 
     const debounce = setTimeout(getQuote, 500);
     return () => clearTimeout(debounce);
-  }, [amount, currency]);
+  }, [amount, currency, amountMode]);
 
   useEffect(() => {
     onPricingUpdate?.({
@@ -305,11 +366,30 @@ export function FormCard({
     });
   }, [amount, quote, isLoadingQuote, currency, gasFeeOptions, onPricingUpdate]);
 
+  // What actually leaves the wallet — always the quote's resolved USDC.
+  const debitUsdc = quote ? Number.parseFloat(quote.sourceAmount) : null;
+
+  // Advisory only — the balance can move between quote and signature, so
+  // handleExecuteTrade keeps its own pre-flight as the authoritative gate.
+  // A null balance means "still loading" or Horizon is unreachable: fall
+  // through rather than making the form permanently unsubmittable.
+  const shortfall =
+    usdcBalance !== null && debitUsdc !== null && debitUsdc > usdcBalance
+      ? debitUsdc - usdcBalance
+      : 0;
+  const hasInsufficientBalance = shortfall > 0;
+
+  const meetsMinimum =
+    amountMode === "fiat"
+      ? !minFiat || Number.parseFloat(amount) >= minFiat
+      : Number.parseFloat(amount) >= MIN_USDC_AMOUNT;
+
   const getButtonText = () => {
     if (isExecutingOfframp) return "INITIATING OFFRAMP...";
     if (isConnecting) return "WAITING FOR SIGNATURE...";
-    if (isConnected) return "INITIATE OFFRAMP →";
-    return "CONNECT WALLET";
+    if (!isConnected) return "CONNECT WALLET";
+    if (hasInsufficientBalance) return "INSUFFICIENT USDC BALANCE";
+    return "INITIATE OFFRAMP →";
   };
 
   const canInitiateOfframp =
@@ -317,8 +397,9 @@ export function FormCard({
     !isConnecting &&
     !isExecutingOfframp &&
     !!quote &&
-    Number.parseFloat(amount) >= 0.7 &&
-    accountNumber.length === 10 &&
+    meetsMinimum &&
+    !hasInsufficientBalance &&
+    /^\+?\d{6,20}$/.test(accountNumber.trim()) &&
     !!bank &&
     !!accountName;
 
@@ -331,7 +412,10 @@ export function FormCard({
     if (!canInitiateOfframp || !quote || !onInitiateOfframp) return;
 
     await onInitiateOfframp({
-      amount,
+      // Always the resolved USDC, never the raw input — in fiat mode `amount`
+      // is naira and would otherwise be bridged as USDC. In crypto mode the
+      // route echoes the input back, so this is correct for both.
+      amount: quote.sourceAmount,
       rate: quote.rate,
       token: "USDC",
       beneficiary: {
@@ -364,22 +448,87 @@ export function FormCard({
       </div>
 
       <div className="flex flex-col gap-[0.6rem]">
+        {/* Enter either side of the pair. Switching carries the value across
+            from the live quote so the user doesn't retype it. */}
+        <div className="flex items-center gap-[0.35rem]">
+          {(["crypto", "fiat"] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => {
+                if (mode === amountMode) return;
+                if (quote) {
+                  setAmount(
+                    mode === "fiat"
+                      ? quote.destinationAmount
+                      : quote.sourceAmount,
+                  );
+                }
+                setAmountMode(mode);
+              }}
+              className={cn(
+                "border px-[0.6rem] py-[0.25rem] text-[0.62rem] font-bold uppercase tracking-[0.08em] transition-colors",
+                mode === amountMode
+                  ? "border-[var(--accent)] text-[var(--accent)]"
+                  : "border-[var(--line)] text-[var(--muted)] hover:text-[var(--text)]",
+              )}
+            >
+              {mode === "crypto" ? "USDC" : currency}
+            </button>
+          ))}
+          <span className="ml-auto text-[0.62rem] text-[var(--muted)]">
+            {amountMode === "fiat" ? "Amount to receive" : "Amount to send"}
+          </span>
+        </div>
         <InputField
-          label="AMOUNT IN USDC"
+          label={
+            amountMode === "fiat" ? `AMOUNT IN ${currency}` : "AMOUNT IN USDC"
+          }
           value={amount}
           onChange={setAmount}
           type="number"
-          min={0.7}
-          step="0.000001"
+          min={amountMode === "fiat" ? (minFiat ?? 0) : MIN_USDC_AMOUNT}
+          step={amountMode === "fiat" ? "1" : "0.000001"}
           placeholder="0.00"
           suffix={
             isLoadingQuote
               ? "..."
               : quote
-                ? `≈ ${getCurrencyPrefix(quote.currency)} ${quote.destinationAmount}`
-                : "Min 0.7 USDC"
+                ? amountMode === "fiat"
+                  ? `≈ ${quote.sourceAmount} USDC`
+                  : `≈ ${getCurrencyPrefix(quote.currency)} ${quote.destinationAmount}`
+                : amountMode === "fiat"
+                  ? `Min ${getCurrencyPrefix(currency)} ${minFiat?.toLocaleString("en-US") ?? "—"}`
+                  : `Min ${MIN_USDC_AMOUNT} USDC`
           }
         />
+        {/* What actually leaves the wallet, plus whether it is covered. */}
+        {quote && debitUsdc !== null && (
+          <div className="flex flex-col gap-[0.2rem]">
+            <div className="flex items-baseline justify-between">
+              <span className="text-[0.75rem] tracking-[0.08em] text-[var(--muted)]">
+                YOU PAY
+              </span>
+              <span className="font-space-grotesk text-[0.9rem] font-bold">
+                {quote.sourceAmount} USDC
+              </span>
+            </div>
+            {isLoadingBalance ? (
+              <span className="text-[0.68rem] text-[var(--muted)]">
+                Checking balance...
+              </span>
+            ) : hasInsufficientBalance ? (
+              <span className="text-[0.68rem] text-red-400">
+                Short by {shortfall.toFixed(6)} USDC — you have{" "}
+                {(usdcBalance ?? 0).toFixed(6)} USDC
+              </span>
+            ) : usdcBalance !== null ? (
+              <span className="text-[0.68rem] text-[var(--muted)]">
+                Balance {usdcBalance.toFixed(6)} USDC
+              </span>
+            ) : null}
+          </div>
+        )}
         {/* Bridge fee — CCTP charges one real fee, deducted from the amount */}
         <div className="flex flex-col gap-[0.4rem]">
           <label className="text-[0.75rem] tracking-[0.08em] text-[var(--muted)]">
@@ -389,12 +538,13 @@ export function FormCard({
             <p className="m-0 text-[0.8rem] text-[var(--muted)]">Loading...</p>
           ) : (
             gasFeeOptions &&
-            parseFloat(amount) > 0 && (
+            burnUsdc !== null &&
+            burnUsdc > 0 && (
               <p className="m-0 text-[0.8rem] text-[var(--muted)]">
                 {parseFloat(gasFeeOptions.fee.float).toFixed(4)} USDC — ~
                 {Math.max(
                   0,
-                  parseFloat(amount) - parseFloat(gasFeeOptions.fee.float),
+                  burnUsdc - parseFloat(gasFeeOptions.fee.float),
                 ).toFixed(4)}{" "}
                 USDC bridged
               </p>
@@ -409,6 +559,7 @@ export function FormCard({
               setCurrency(value);
               setBank("");
               setAccountName("");
+              setMinFiat(null);
             }}
             options={currencies.map((c) => ({
               code: c.code,
@@ -418,19 +569,21 @@ export function FormCard({
             placeholder="Select currency"
           />
           <InputField
-            label="ACCOUNT NUMBER"
+            label={isMobileMoney ? "PHONE NUMBER" : "ACCOUNT NUMBER"}
             value={accountNumber}
             onChange={setAccountNumber}
-            placeholder="0000000000"
-            maxLength={10}
+            placeholder={isMobileMoney ? "0700000000" : "0000000000"}
+            maxLength={20}
           />
           <SelectField
-            label="BANK"
+            label={institutionLabel}
             value={bank}
             onChange={setBank}
             options={banks}
             isLoading={isLoadingBanks}
-            placeholder="Select bank"
+            placeholder={
+              isLoadingBanks ? "Loading..." : `Select ${institutionLabel.toLowerCase()}`
+            }
           />
         </div>
         <Field
@@ -449,14 +602,14 @@ export function FormCard({
             </div>
             <div className="text-[0.7rem] text-[var(--muted)] mt-1">
               Est. time: {formatEstimatedTime(quote.estimatedTimeMs)}
-              {" · "}Includes 1% platform fee
+              {" · "}Includes 0.3% platform fee
             </div>
             {gasFeeOptions && (
               <div className="text-[0.65rem] text-[var(--muted)] mt-0.5">
                 Bridged: ~
                 {Math.max(
                   0,
-                  parseFloat(amount) - parseFloat(gasFeeOptions.fee.float),
+                  (burnUsdc ?? 0) - parseFloat(gasFeeOptions.fee.float),
                 ).toFixed(4)}{" "}
                 USDC → Base
               </div>
