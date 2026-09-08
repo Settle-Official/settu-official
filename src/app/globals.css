@@ -132,6 +132,49 @@ button {
   animation: scale-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
 }
 
+/* Success confetti — brand gold, hand-rolled to avoid an animation dep.
+   Each piece gets its drift, delay, duration and rotation from inline custom
+   properties so the burst looks scattered without any JS animation loop. */
+@keyframes confetti-fall {
+  0% {
+    transform: translate3d(0, -10%, 0) rotate(0deg);
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate3d(var(--confetti-drift, 0), 320px, 0)
+      rotate(var(--confetti-spin, 540deg));
+    opacity: 0;
+  }
+}
+
+.confetti-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  /* Never intercept the DONE button underneath. */
+  pointer-events: none;
+}
+
+.confetti-piece {
+  position: absolute;
+  top: 0;
+  width: 7px;
+  height: 12px;
+  opacity: 0;
+  will-change: transform, opacity;
+  animation: confetti-fall var(--confetti-duration, 2.4s)
+    cubic-bezier(0.2, 0.6, 0.5, 1) var(--confetti-delay, 0s) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .confetti-layer {
+    display: none;
+  }
+}
+
 /* Marquee for mobile/tablet banner */
 @keyframes marquee {
   from { transform: translateX(0); }
