@@ -370,7 +370,7 @@ git commit -m "feat(cctp): add EVM source chain configuration for multi-chain of
 - Consumes: `EVM_SOURCE_CHAINS`, `EVM_CCTP_TOKEN_MESSENGER_V2`, `CctpBridgeSourceChainConfig` from Task 2; `CCTP_DOMAIN`, `FINALITY_THRESHOLD` from `src/lib/cctp/constants.ts`
 - Produces: `usdcFloatToEvmInt(amount: string): bigint`, `buildEvmBurnCalldata(params): { to: \`0x${string}\`; data: \`0x${string}\` }[]` (returns an ordered array — an optional `approve` call, then the `depositForBurn` call, for the client to sign in sequence) — Task 4's route consumes this directly.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```ts
 // src/lib/cctp/evm-burn.test.ts
@@ -423,12 +423,12 @@ test("buildEvmBurnCalldata rejects a direct-kind chain", () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `node --import ./scripts/register-ts-resolver.mjs --test src/lib/cctp/evm-burn.test.ts`
 Expected: FAIL — `evm-burn.ts` doesn't exist yet.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 ```ts
 // src/lib/cctp/evm-burn.ts
@@ -543,12 +543,12 @@ export function buildEvmBurnCalldata(params: {
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `node --import ./scripts/register-ts-resolver.mjs --test src/lib/cctp/evm-burn.test.ts`
 Expected: PASS, 4/4 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/lib/cctp/evm-burn.ts src/lib/cctp/evm-burn.test.ts
