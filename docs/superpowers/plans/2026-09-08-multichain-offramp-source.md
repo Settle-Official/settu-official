@@ -1024,13 +1024,13 @@ git commit -m "feat(offramp): add registration route for Base's direct-transfer 
 - Consumes: `OfframpSourceChain`, `recordTransaction` (Task 6)
 - Produces: the route now accepts `sourceDomain: number` and `sourceChain: OfframpSourceChain` in its body, defaulting to Stellar's values when omitted (backward-compatible with the existing Stellar-only client) — Task 8's UI passes these explicitly for EVM sources.
 
-- [ ] **Step 1: Read the current route to confirm the exact diff target**
+- [x] **Step 1: Read the current route to confirm the exact diff target**
 
 Run: `cat src/app/api/offramp/bridge/register-transfer/route.ts`
 
 (No test to write first here — this is a small, mechanical widening of an existing route with no new pure logic; verified via the manual check in Step 3 instead, consistent with how this route has no existing test coverage.)
 
-- [ ] **Step 2: Widen the route to accept an explicit source domain/chain**
+- [x] **Step 2: Widen the route to accept an explicit source domain/chain**
 
 Replace the body of `POST` in `src/app/api/offramp/bridge/register-transfer/route.ts` — keep the existing idempotency check (`getCctpTransfer` before `createCctpTransfer`) exactly as-is, and change only the domain/chain handling:
 
@@ -1122,7 +1122,7 @@ export async function POST(request: NextRequest) {
 }
 ```
 
-- [ ] **Step 3: Widen `funds-ledger.ts`'s `chain` field type**
+- [x] **Step 3: Widen `funds-ledger.ts`'s `chain` field type**
 
 In `src/lib/ledger/funds-ledger.ts`, change:
 
@@ -1138,12 +1138,12 @@ import type { OfframpSourceChain } from "@/lib/offramp/transaction-history";
 chain: "base" | OfframpSourceChain; // "base" kept for onramp's own base_hot_wallet entries
 ```
 
-- [ ] **Step 4: Verify compilation and existing tests still pass**
+- [x] **Step 4: Verify compilation and existing tests still pass**
 
 Run: `npx tsc --noEmit && npm test`
 Expected: no errors, all existing tests still passing (this task adds no new tests of its own — it's a widening of existing, previously Stellar-only behavior; the existing `register-transfer` idempotency behavior is unchanged and was never unit-tested before this task either).
 
-- [ ] **Step 5: Manual check that the Stellar path still works unchanged**
+- [x] **Step 5: Manual check that the Stellar path still works unchanged**
 
 ```bash
 curl -sS -X POST http://localhost:3000/api/offramp/bridge/register-transfer \
@@ -1153,7 +1153,7 @@ curl -sS -X POST http://localhost:3000/api/offramp/bridge/register-transfer \
 
 Expected: `{"transferId":"testhash123"}` — omitting `sourceChain` defaults to Stellar's domain, exactly matching pre-change behavior.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/app/api/offramp/bridge/register-transfer/route.ts src/lib/ledger/funds-ledger.ts
