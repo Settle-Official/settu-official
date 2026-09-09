@@ -191,20 +191,20 @@ family as `useEvmWallet`, no chain-switch.
 `src/components/StellarampDashboard.tsx` (`handleExecuteSolanaTrade`, `useSolanaWallet`,
 connect/disconnect routing, header/preflight props).
 
-- [ ] **Step 1:** `FormCard` `SOURCE_CHAIN_OPTIONS` gains `{ code: "solana", name: "Solana" }`
+- [x] **Step 1:** `FormCard` `SOURCE_CHAIN_OPTIONS` gains `{ code: "solana", name: "Solana" }`
   when enabled. `OfframpSourceChainKey` includes `"solana"`.
-- [ ] **Step 2:** Connect modal: when `sourceChain === "solana"`, list `useSolanaWallet().detectedWallets`
+- [x] **Step 2:** Connect modal: when `sourceChain === "solana"`, list `useSolanaWallet().detectedWallets`
   (Phantom/Solflare/Backpack) instead of the EVM/WalletConnect list.
-- [ ] **Step 3:** `StellarampDashboard`: `useSolanaWallet()` alongside the other two (still only one
+- [x] **Step 3:** `StellarampDashboard`: `useSolanaWallet()` alongside the other two (still only one
   connected at a time — `handleSourceChainChange` tears down whichever). `headerUsesEvm` becomes
   `headerUsesExternal` covering both EVM and Solana.
-- [ ] **Step 4:** `handleExecuteSolanaTrade` — same shape as `handleExecuteEvmTrade`: Paycrest
+- [x] **Step 4:** `handleExecuteSolanaTrade` — same shape as `handleExecuteEvmTrade`: Paycrest
   quote + order (shared), then: generate event `Keypair` client-side →
   `POST solana-build-tx { ..., eventAccountPubkey }` → `useSolanaWallet().signAndSendBurn(tx,
   eventKeypair)` → `registerEvmTransfer("/api/offramp/bridge/register-transfer", { burnTxHash: sig,
   mintRecipient, amount, paycrestOrderId, sourceChain: "solana", connectedAddress })` →
   `new EventSource(/api/offramp/bridge/stream/<sig>)` → same bridge+payout polling.
-- [ ] **Step 5:** Manual UI check (dropdown, connect, teardown on switch). Commit.
+- [x] **Step 5:** Manual UI check (dropdown, connect, teardown on switch). Commit.
 
 ---
 
