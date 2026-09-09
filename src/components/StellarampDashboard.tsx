@@ -14,6 +14,8 @@ import { PlatformStatsCard } from "@/components/PlatformStatsCard";
 import { OnrampPanel } from "@/components/OnrampPanel";
 import { useStellarWallet } from "@/hooks/useStellarWallet";
 import { useEvmWallet } from "@/hooks/useEvmWallet";
+import { useSolanaWallet } from "@/hooks/useSolanaWallet";
+import { Keypair } from "@solana/web3.js";
 import {
   EVM_SOURCE_CHAINS,
   isCctpBridgeChain,
@@ -22,6 +24,7 @@ import {
 import { TransactionStorage, Transaction } from "@/lib/transaction-storage";
 import { ErrorToast } from "@/components/ErrorToast";
 import { EvmConnectModal } from "@/components/EvmConnectModal";
+import { SolanaConnectModal } from "@/components/SolanaConnectModal";
 import {
   TransactionProgressModal,
   type OfframpStep,
@@ -149,7 +152,9 @@ async function submitAndConfirmSoroban(signedXdr: string): Promise<string> {
     const statusData = await statusRes.json().catch(() => ({}));
     if (statusData?.status === "SUCCESS") return txHash;
     if (statusData?.status === "FAILED") {
-      throw new Error("Transaction failed on-chain. Your wallet was not debited.");
+      throw new Error(
+        "Transaction failed on-chain. Your wallet was not debited.",
+      );
     }
     // NOT_FOUND — keep polling
   }
@@ -271,34 +276,56 @@ export function StellarampDashboard() {
     signTransaction,
   } = useStellarWallet();
 
-  // Parallel, independent EVM wallet path (WalletConnect). Only one of the
-  // two is ever connected at a time — switching the source-chain dropdown
-  // tears the other one down (see handleSourceChainChange).
+  // Parallel, independent non-Stellar wallet paths — EVM (EIP-6963 /
+  // WalletConnect) and Solana (Wallet Standard). Only one wallet of the three
+  // is ever connected at a time; switching the source-chain dropdown tears
+  // the others down (see handleSourceChainChange).
   const evmWallet = useEvmWallet();
+  const solanaWallet = useSolanaWallet();
+  const [solanaConnectOpen, setSolanaConnectOpen] = useState(false);
 
   const [sourceChain, setSourceChain] =
     useState<OfframpSourceChainKey>("stellar");
 
+  const isSolanaSource = sourceChain === "solana";
+  const isEvmSource = sourceChain !== "stellar" && !isSolanaSource;
+  const isExternalSource = isEvmSource || isSolanaSource;
+
+  // Unified view of whichever non-Stellar wallet the current source uses.
+  const externalWallet = isSolanaSource
+    ? {
+        isConnected: solanaWallet.isConnected,
+        isConnecting: solanaWallet.isConnecting,
+        address: solanaWallet.address ?? undefined,
+      }
+    : {
+        isConnected: evmWallet.isConnected,
+        isConnecting: evmWallet.isConnecting,
+        address: evmWallet.address ?? undefined,
+      };
+
   // What the offramp UI (FormCard, RightPanel, ProgressSteps) should treat as
-  // "connected" / "connecting" — whichever wallet path the current source
-  // chain uses.
+  // "connected" / "connecting" — whichever wallet path the current source uses.
   const uiIsConnected =
-    sourceChain === "stellar" ? isConnected : evmWallet.isConnected;
+    sourceChain === "stellar" ? isConnected : externalWallet.isConnected;
   const uiIsConnecting =
-    sourceChain === "stellar" ? isConnecting : evmWallet.isConnecting;
+    sourceChain === "stellar" ? isConnecting : externalWallet.isConnecting;
   const activeUserAddress =
-    sourceChain === "stellar" ? wallet?.publicKey : evmWallet.address ?? undefined;
+    sourceChain === "stellar" ? wallet?.publicKey : externalWallet.address;
 
   const [mode, setMode] = useState<"offramp" | "onramp">("offramp");
 
-  // The shared top header reflects the EVM wallet only for an offramp from a
-  // non-Stellar source; onramp is always the Stellar path.
-  const headerUsesEvm = mode === "offramp" && sourceChain !== "stellar";
+  // The shared top header reflects the external wallet only for an offramp
+  // from a non-Stellar source; onramp is always the Stellar path.
+  const headerUsesExternal = mode === "offramp" && isExternalSource;
 
   const activeSourceChainLabel =
     sourceChain === "stellar"
       ? "Stellar"
-      : (EVM_SOURCE_CHAINS[sourceChain]?.label ?? "the source chain");
+      : isSolanaSource
+        ? "Solana"
+        : (EVM_SOURCE_CHAINS[sourceChain as EvmChainKey]?.label ??
+          "the source chain");
   const [currentTxId, setCurrentTxId] = useState<string | null>(null);
   const [isExecutingOfframp, setIsExecutingOfframp] = useState(false);
   const [formResetKey, setFormResetKey] = useState(0);
@@ -324,9 +351,9 @@ export function StellarampDashboard() {
     number | null
   >(null);
   const [isLoadingBalance, setIsLoadingBalance] = useState(false);
-  // Connected EVM wallet's balances on the current source chain (offramp,
-  // non-Stellar source only) — for the header readout + FormCard's USDC check.
-  const [evmBalances, setEvmBalances] = useState<{
+  // Connected non-Stellar wallet's balances on the current source chain
+  // (offramp only) — for the header readout + FormCard's USDC check.
+  const [externalBalances, setExternalBalances] = useState<{
     usdc: string;
     native: string;
     nativeSymbol: string;
@@ -361,7 +388,9 @@ export function StellarampDashboard() {
     gasFeeOptions: null,
   });
 
-  const [platformStats, setPlatformStats] = useState<PlatformStats | null>(null);
+  const [platformStats, setPlatformStats] = useState<PlatformStats | null>(
+    null,
+  );
 
   // Fetch stats on mount
   useEffect(() => {
@@ -390,24 +419,49 @@ export function StellarampDashboard() {
     }
   }, [wallet?.publicKey]);
 
-  // Poll the connected EVM wallet's balances (offramp, non-Stellar source).
-  const evmWalletAddress = evmWallet.address;
+  // Poll the connected non-Stellar wallet's balances (offramp only). EVM ->
+  // evm-balances, Solana -> solana-balances; both normalised to
+  // { usdc, native, nativeSymbol }.
+  const externalWalletAddress = isSolanaSource
+    ? solanaWallet.address
+    : evmWallet.address;
   useEffect(() => {
-    if (mode !== "offramp" || sourceChain === "stellar" || !evmWalletAddress) {
-      setEvmBalances(null);
+    if (mode !== "offramp" || !isExternalSource || !externalWalletAddress) {
+      setExternalBalances(null);
       return;
     }
     let cancelled = false;
     const load = async () => {
       try {
-        const params = new URLSearchParams({
-          address: evmWalletAddress,
-          chain: sourceChain,
-        });
-        const res = await fetch(`/api/offramp/bridge/evm-balances?${params.toString()}`);
-        if (!res.ok || cancelled) return;
-        const data = await res.json();
-        if (!cancelled) setEvmBalances(data);
+        let normalised: {
+          usdc: string;
+          native: string;
+          nativeSymbol: string;
+        } | null = null;
+        if (isSolanaSource) {
+          const res = await fetch(
+            `/api/offramp/bridge/solana-balances?address=${externalWalletAddress}`,
+          );
+          if (!res.ok || cancelled) return;
+          const d = await res.json();
+          normalised = { usdc: d.usdc, native: d.sol, nativeSymbol: "SOL" };
+        } else {
+          const params = new URLSearchParams({
+            address: externalWalletAddress,
+            chain: sourceChain,
+          });
+          const res = await fetch(
+            `/api/offramp/bridge/evm-balances?${params.toString()}`,
+          );
+          if (!res.ok || cancelled) return;
+          const d = await res.json();
+          normalised = {
+            usdc: d.usdc,
+            native: d.native,
+            nativeSymbol: d.nativeSymbol,
+          };
+        }
+        if (!cancelled) setExternalBalances(normalised);
       } catch {
         // keep whatever we had
       }
@@ -418,7 +472,13 @@ export function StellarampDashboard() {
       cancelled = true;
       clearInterval(iv);
     };
-  }, [mode, sourceChain, evmWalletAddress]);
+  }, [
+    mode,
+    sourceChain,
+    isExternalSource,
+    isSolanaSource,
+    externalWalletAddress,
+  ]);
 
   // Load connected wallet USDC balance from Stellar Horizon
   useEffect(() => {
@@ -489,7 +549,7 @@ export function StellarampDashboard() {
           Number.isFinite(subentryCount) ? subentryCount : null,
         );
       } catch (error) {
-                setStellarUsdcBalance("0.00");
+        setStellarUsdcBalance("0.00");
         setStellarXlmBalance("0.00");
         setStellarUsdcBalanceRaw(null);
         setStellarXlmBalanceRaw(null);
@@ -505,10 +565,14 @@ export function StellarampDashboard() {
   // One path for every platform — the kit's modal picks the wallet and handles
   // extension, in-app browser and mobile deep-link transports itself.
   const handleConnect = async () => {
-    // Only an offramp from a non-Stellar source uses the EVM picker. Onramp is
-    // always Stellar, and an offramp with the Stellar source keeps the
-    // original Stellar Wallets Kit path below entirely unchanged.
-    if (mode === "offramp" && sourceChain !== "stellar") {
+    // Onramp is always Stellar; an offramp with the Stellar source keeps the
+    // original Stellar Wallets Kit path below entirely unchanged. A
+    // non-Stellar offramp source opens its own picker.
+    if (mode === "offramp" && isSolanaSource) {
+      setSolanaConnectOpen(true);
+      return;
+    }
+    if (mode === "offramp" && isEvmSource) {
       void evmWallet.openConnect();
       return;
     }
@@ -540,9 +604,11 @@ export function StellarampDashboard() {
   };
 
   const handleDisconnect = async () => {
-    // Disconnect whichever wallet is actually in use — the EVM path only
-    // applies to an offramp with a non-Stellar source; onramp is always Stellar.
-    if (mode === "offramp" && sourceChain !== "stellar") {
+    // Disconnect whichever wallet is actually in use — a non-Stellar path
+    // only applies to an offramp; onramp is always Stellar.
+    if (mode === "offramp" && isSolanaSource) {
+      await solanaWallet.disconnect();
+    } else if (mode === "offramp" && isEvmSource) {
       await evmWallet.disconnect();
     } else {
       await disconnect();
@@ -552,7 +618,7 @@ export function StellarampDashboard() {
 
   /**
    * Switching the source chain tears down whichever wallet is currently
-   * connected — Stellar and EVM can't be connected at the same time, and a
+   * connected — Stellar / EVM / Solana can't be connected at once, and a
    * fresh connect is required for the new chain either way.
    */
   const handleSourceChainChange = async (next: OfframpSourceChainKey) => {
@@ -560,6 +626,8 @@ export function StellarampDashboard() {
     try {
       if (sourceChain === "stellar") {
         if (isConnected) await disconnect();
+      } else if (sourceChain === "solana") {
+        if (solanaWallet.isConnected) await solanaWallet.disconnect();
       } else if (evmWallet.isConnected) {
         await evmWallet.disconnect();
       }
@@ -567,6 +635,7 @@ export function StellarampDashboard() {
       // A teardown failure shouldn't block the switch — worst case a stale
       // session lingers in the other adapter until its own next connect.
     }
+    setSolanaConnectOpen(false);
     setUserTransactions([]);
     setSourceChain(next);
   };
@@ -584,8 +653,11 @@ export function StellarampDashboard() {
       memo?: string;
     };
   }) => {
-    // EVM source chains take a completely separate path — branch before any
+    // Non-Stellar sources take completely separate paths — branch before any
     // of the Stellar-specific wallet/balance/XLM-reserve logic below.
+    if (tradeData.sourceChain === "solana") {
+      return handleExecuteSolanaTrade(tradeData);
+    }
     if (tradeData.sourceChain && tradeData.sourceChain !== "stellar") {
       return handleExecuteEvmTrade(tradeData);
     }
@@ -781,13 +853,16 @@ export function StellarampDashboard() {
           if (!res.ok) {
             const payload = await res.json().catch(() => ({}));
             throw new Error(
-              payload?.error || `Failed to build bridge transaction: ${res.status}`,
+              payload?.error ||
+                `Failed to build bridge transaction: ${res.status}`,
             );
           }
           return res.json();
         } catch (fetchErr: any) {
           if (fetchErr?.name === "AbortError") {
-            throw new Error("Build transaction timed out (30s). Please try again.");
+            throw new Error(
+              "Build transaction timed out (30s). Please try again.",
+            );
           }
           throw fetchErr;
         } finally {
@@ -833,8 +908,7 @@ export function StellarampDashboard() {
             (op: any) => op.type === "invokeHostFunction",
           );
         }
-      } catch (parseErr) {
-              }
+      } catch (parseErr) {}
 
       if (hasSorobanOps) {
         stellarTxHash = await submitAndConfirmSoroban(signedXdr);
@@ -888,7 +962,7 @@ export function StellarampDashboard() {
       // Payout polling is what actually matters (Paycrest settling to the bank).
       const bridgeResult = pollBridgeStatus(txId, stellarTxHash).catch(
         (err) => {
-                    // Don't fail the overall flow — bridge may still complete in background
+          // Don't fail the overall flow — bridge may still complete in background
         },
       );
       const payoutResult = pollPayoutStatus(txId, payoutOrderId);
@@ -919,10 +993,9 @@ export function StellarampDashboard() {
       // Reset the form so the user can start a fresh offramp
       setFormResetKey((k) => k + 1);
     } catch (error: any) {
-      
       // Log detailed Horizon error if available
       if (error?.response?.data) {
-              }
+      }
 
       setTradeState((prev) => ({ ...prev, error: error.message }));
       setOfframpStep("error");
@@ -1132,7 +1205,8 @@ export function StellarampDashboard() {
           if (!res.ok) {
             const payload = await res.json().catch(() => ({}));
             throw new Error(
-              payload?.error || `Failed to build burn transaction: ${res.status}`,
+              payload?.error ||
+                `Failed to build burn transaction: ${res.status}`,
             );
           }
           return res.json() as Promise<{
@@ -1273,6 +1347,240 @@ export function StellarampDashboard() {
     }
   };
 
+  /**
+   * Offramp from Solana. Always CCTP-bridge (Solana -> Base). Shares the
+   * Paycrest order + polling machinery with the Stellar/EVM paths; the
+   * on-chain leg is: client generates the ephemeral MessageSent event
+   * keypair -> server builds an unsigned VersionedTransaction -> client
+   * partial-signs with the keypair -> the wallet signs + sends.
+   */
+  const handleExecuteSolanaTrade = async (tradeData: {
+    amount: string;
+    rate: number;
+    token: string;
+    sourceChain: OfframpSourceChainKey;
+    beneficiary: {
+      institution: string;
+      accountIdentifier: string;
+      accountName: string;
+      currency: string;
+      memo?: string;
+    };
+  }) => {
+    const connectedAddress = solanaWallet.address;
+    if (!connectedAddress) {
+      setToastError("Connect your Solana wallet first.");
+      return;
+    }
+    if (!pricingState.quote) {
+      setToastError("Quote unavailable. Please enter an amount first.");
+      return;
+    }
+    const baseReturnAddress = process.env.NEXT_PUBLIC_BASE_RETURN_ADDRESS;
+    if (!baseReturnAddress) {
+      throw new Error("NEXT_PUBLIC_BASE_RETURN_ADDRESS is missing");
+    }
+
+    const txId = TransactionStorage.generateId();
+    setCurrentTxId(txId);
+    setIsExecutingOfframp(true);
+    setOfframpStep("initiating");
+    setOfframpError(null);
+    setShowProgressModal(true);
+
+    const transaction: Transaction = {
+      id: txId,
+      timestamp: Date.now(),
+      userAddress: connectedAddress,
+      amount: tradeData.amount,
+      currency: "NGN",
+      beneficiary: tradeData.beneficiary,
+      status: "pending",
+    };
+    TransactionStorage.save(transaction);
+    setUserTransactions(TransactionStorage.getByUser(connectedAddress));
+
+    try {
+      setTradeState({ bridgeStatus: "building", payoutStatus: "pending" });
+
+      // 1) Bridge quote → Paycrest order amount (identical to the other paths).
+      const bridgeQuoteResponse = await withTimeout(
+        fetch("/api/offramp/bridge/quote", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ amount: tradeData.amount }),
+        }),
+        15_000,
+        "Bridge quote",
+      );
+      if (!bridgeQuoteResponse.ok) {
+        const payload = await bridgeQuoteResponse.json().catch(() => ({}));
+        throw new Error(
+          payload?.error ||
+            `Bridge quote request failed: ${bridgeQuoteResponse.status}`,
+        );
+      }
+      const bridgeQuotePayload = await bridgeQuoteResponse.json();
+      const paycrestOrderAmount = Number.parseFloat(
+        bridgeQuotePayload?.receiveAmount,
+      );
+      if (!Number.isFinite(paycrestOrderAmount) || paycrestOrderAmount <= 0) {
+        throw new Error("Invalid bridge receive amount for payout order");
+      }
+      const normalizedOrderAmount = Math.floor(paycrestOrderAmount * 1e6) / 1e6;
+      const normalizedRate = Number(tradeData.rate.toFixed(6));
+
+      // 2) Create the Paycrest order (identical to the other paths).
+      const orderAbort = new AbortController();
+      const orderTimer = setTimeout(() => orderAbort.abort(), 20_000);
+      let orderResponse: Response;
+      try {
+        orderResponse = await fetch("/api/offramp/paycrest/order", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: orderAbort.signal,
+          body: JSON.stringify({
+            amount: normalizedOrderAmount,
+            token: tradeData.token,
+            network: "base",
+            rate: normalizedRate,
+            reference: txId,
+            recipient: {
+              institution: tradeData.beneficiary.institution,
+              accountIdentifier: tradeData.beneficiary.accountIdentifier,
+              accountName: tradeData.beneficiary.accountName,
+              memo: tradeData.beneficiary.memo || "Settu offramp",
+              currency: tradeData.beneficiary.currency,
+            },
+            returnAddress: baseReturnAddress,
+          }),
+        });
+      } catch (fetchErr: any) {
+        if (fetchErr?.name === "AbortError") {
+          throw new Error(
+            "Paycrest order request timed out (20s). Please try again.",
+          );
+        }
+        throw new Error(`Paycrest order network error: ${fetchErr.message}`);
+      } finally {
+        clearTimeout(orderTimer);
+      }
+      if (!orderResponse.ok) {
+        const payload = await orderResponse.json().catch(() => ({}));
+        const details =
+          payload?.details && typeof payload.details === "object"
+            ? ` | details=${JSON.stringify(payload.details)}`
+            : payload?.details
+              ? ` | details=${String(payload.details)}`
+              : "";
+        throw new Error(
+          `${payload?.message || payload?.error || `Paycrest order failed: ${orderResponse.status}`}${details}`,
+        );
+      }
+      const orderPayload = await orderResponse.json();
+      const paycrestOrder = orderPayload?.data || orderPayload;
+      const payoutOrderId: string | undefined = paycrestOrder?.id;
+      const settlementAddress: string | undefined =
+        paycrestOrder?.receiveAddress;
+      if (!payoutOrderId || !settlementAddress) {
+        throw new Error("Paycrest order response missing id/receiveAddress");
+      }
+      setTradeState((prev) => ({
+        ...prev,
+        payoutOrderId,
+        payoutStatus: "pending",
+      }));
+      TransactionStorage.update(txId, {
+        payoutOrderId,
+        payoutStatus: "pending",
+      });
+      setUserTransactions(TransactionStorage.getByUser(connectedAddress));
+
+      // 3) Build the unsigned burn tx (client generates the event keypair).
+      setOfframpStep("awaiting-signature");
+      const eventKeypair = Keypair.generate();
+      const buildRes = await fetch("/api/offramp/bridge/solana-build-tx", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          amount: tradeData.amount,
+          ownerAddress: connectedAddress,
+          toAddress: settlementAddress,
+          eventAccountPubkey: eventKeypair.publicKey.toBase58(),
+        }),
+      });
+      if (!buildRes.ok) {
+        const payload = await buildRes.json().catch(() => ({}));
+        throw new Error(
+          payload?.error ||
+            `Failed to build burn transaction: ${buildRes.status}`,
+        );
+      }
+      const { transactionBase64 } = await buildRes.json();
+
+      // 4) Partial-sign with the event keypair + wallet signs + sends.
+      const burnSignature = await solanaWallet.signAndSendBurn(
+        transactionBase64,
+        eventKeypair,
+      );
+      console.log("[offramp] Solana burn signature:", burnSignature);
+      setOfframpStep("submitting");
+      setTradeState((prev) => ({
+        ...prev,
+        stellarTxHash: burnSignature,
+        bridgeStatus: "pending",
+      }));
+
+      // 5) Register the burn (same permanent-strand risk + retry/sendBeacon).
+      await registerEvmTransfer("/api/offramp/bridge/register-transfer", {
+        burnTxHash: burnSignature,
+        mintRecipient: settlementAddress,
+        amount: tradeData.amount,
+        paycrestOrderId: payoutOrderId,
+        sourceChain: "solana",
+        connectedAddress,
+      });
+      new EventSource(`/api/offramp/bridge/stream/${burnSignature}`);
+
+      TransactionStorage.update(txId, {
+        stellarTxHash: burnSignature, // reused field — Solana burn signature
+        bridgeStatus: "pending",
+      });
+      setUserTransactions(TransactionStorage.getByUser(connectedAddress));
+
+      // 6) Poll payout (critical) + bridge status (best-effort background).
+      setOfframpStep("processing");
+      pollBridgeStatus(txId, burnSignature)
+        .then(() => {
+          setOfframpStep((prev) => (prev === "processing" ? "settling" : prev));
+        })
+        .catch(() => {});
+      await pollPayoutStatus(txId, payoutOrderId);
+
+      setOfframpStep("success");
+      TransactionStorage.update(txId, { status: "completed" });
+      setUserTransactions(TransactionStorage.getByUser(connectedAddress));
+
+      fetch("/api/stats")
+        .then((r) => r.json())
+        .then(setPlatformStats)
+        .catch(() => {});
+      setFormResetKey((k) => k + 1);
+    } catch (error: any) {
+      setTradeState((prev) => ({ ...prev, error: error.message }));
+      setOfframpStep("error");
+      setOfframpError(error.message);
+      TransactionStorage.update(txId, {
+        status: "failed",
+        error: error.message,
+      });
+      setUserTransactions(TransactionStorage.getByUser(connectedAddress));
+    } finally {
+      setIsExecutingOfframp(false);
+      setCurrentTxId(null);
+    }
+  };
+
   const pollBridgeStatus = async (txId: string, txHash: string) => {
     const maxAttempts = 60;
     let attempts = 0;
@@ -1284,8 +1592,8 @@ export function StellarampDashboard() {
         const response = await fetch(`/api/offramp/bridge/status/${txHash}`);
         if (!response.ok) {
           consecutiveErrors++;
-                    if (consecutiveErrors >= MAX_ERRORS) {
-                        return; // soft exit — don't throw
+          if (consecutiveErrors >= MAX_ERRORS) {
+            return; // soft exit — don't throw
           }
           await new Promise((resolve) => setTimeout(resolve, 10000));
           attempts++;
@@ -1299,9 +1607,7 @@ export function StellarampDashboard() {
         setTradeState((prev) => ({ ...prev, bridgeStatus: status.status }));
         TransactionStorage.update(txId, { bridgeStatus: status.status });
         if (activeUserAddress)
-          setUserTransactions(
-            TransactionStorage.getByUser(activeUserAddress),
-          );
+          setUserTransactions(TransactionStorage.getByUser(activeUserAddress));
 
         if (status.status === "completed") return;
         if (status.status === "failed")
@@ -1309,8 +1615,8 @@ export function StellarampDashboard() {
       } catch (error: any) {
         if (error?.message === "Bridge transfer failed") throw error;
         consecutiveErrors++;
-                if (consecutiveErrors >= MAX_ERRORS) {
-                    return; // soft exit
+        if (consecutiveErrors >= MAX_ERRORS) {
+          return; // soft exit
         }
       }
 
@@ -1319,7 +1625,7 @@ export function StellarampDashboard() {
     }
 
     // Timeout is NOT fatal — bridge may still complete
-      };
+  };
 
   const pollPayoutStatus = (txId: string, orderId: string) => {
     // Webhook-driven: the server persists Paycrest events to Redis and streams
@@ -1344,9 +1650,7 @@ export function StellarampDashboard() {
         setTradeState((prev) => ({ ...prev, payoutStatus: status }));
         TransactionStorage.update(txId, { payoutStatus: status });
         if (activeUserAddress)
-          setUserTransactions(
-            TransactionStorage.getByUser(activeUserAddress),
-          );
+          setUserTransactions(TransactionStorage.getByUser(activeUserAddress));
 
         // Advance the modal to "settling" once the deposit is validated or the
         // onchain release is underway.
@@ -1445,7 +1749,7 @@ export function StellarampDashboard() {
 
   const getSubtitle = () => {
     if (isConnecting) return "Connecting to wallet...";
-    return "Convert Stellar USDC to your bank account in minutes.";
+    return "Convert USDC to your bank account in minutes.";
   };
 
   const handlePricingUpdate = useCallback(
@@ -1472,27 +1776,36 @@ export function StellarampDashboard() {
         <div className="flex flex-col gap-6 px-[2.6rem] py-8 max-[720px]:p-4">
           <Header
             subtitle={getSubtitle()}
-            isConnected={headerUsesEvm ? evmWallet.isConnected : isConnected}
-            isConnecting={headerUsesEvm ? evmWallet.isConnecting : isConnecting}
-            walletAddress={
-              headerUsesEvm
-                ? (evmWallet.address ?? undefined)
-                : wallet?.publicKey
+            isConnected={
+              headerUsesExternal ? externalWallet.isConnected : isConnected
             }
-            // For an EVM source the header shows that chain's USDC + native
-            // gas token instead of the Stellar USDC + XLM reserve.
+            isConnecting={
+              headerUsesExternal ? externalWallet.isConnecting : isConnecting
+            }
+            walletAddress={
+              headerUsesExternal ? externalWallet.address : wallet?.publicKey
+            }
+            // For a non-Stellar source the header shows that chain's USDC +
+            // native gas token instead of the Stellar USDC + XLM reserve.
             stellarUsdcBalance={
-              headerUsesEvm ? (evmBalances?.usdc ?? null) : stellarUsdcBalance
+              headerUsesExternal
+                ? (externalBalances?.usdc ?? null)
+                : stellarUsdcBalance
             }
             stellarXlmBalance={
-              headerUsesEvm ? (evmBalances?.native ?? null) : stellarXlmBalance
+              headerUsesExternal
+                ? (externalBalances?.native ?? null)
+                : stellarXlmBalance
             }
             nativeCurrencyLabel={
-              headerUsesEvm ? (evmBalances?.nativeSymbol ?? "ETH") : "XLM"
+              headerUsesExternal
+                ? (externalBalances?.nativeSymbol ??
+                  (isSolanaSource ? "SOL" : "ETH"))
+                : "XLM"
             }
             isBalanceLoading={
-              headerUsesEvm
-                ? evmWallet.isConnected && !evmBalances
+              headerUsesExternal
+                ? externalWallet.isConnected && !externalBalances
                 : isLoadingBalance
             }
             onConnect={handleConnect}
@@ -1569,14 +1882,14 @@ export function StellarampDashboard() {
                     usdcBalance={
                       sourceChain === "stellar"
                         ? stellarUsdcBalanceRaw
-                        : evmBalances
-                          ? Number(evmBalances.usdc)
+                        : externalBalances
+                          ? Number(externalBalances.usdc)
                           : null
                     }
                     isLoadingBalance={
                       sourceChain === "stellar"
                         ? isLoadingBalance
-                        : evmWallet.isConnected && !evmBalances
+                        : externalWallet.isConnected && !externalBalances
                     }
                   />
                 </div>
@@ -1628,6 +1941,22 @@ export function StellarampDashboard() {
           });
         }}
         onClose={evmWallet.closeConnect}
+      />
+
+      <SolanaConnectModal
+        open={solanaConnectOpen}
+        wallets={solanaWallet.detectedWallets}
+        isConnecting={solanaWallet.isConnecting}
+        error={solanaWallet.error}
+        onPick={(name) => {
+          void solanaWallet
+            .connect(name)
+            .then(() => setSolanaConnectOpen(false))
+            .catch((e: any) =>
+              setToastError(e?.message || "Failed to connect wallet"),
+            );
+        }}
+        onClose={() => setSolanaConnectOpen(false)}
       />
 
       <TransactionProgressModal

@@ -134,15 +134,36 @@ export function isCctpBridgeChain(
 }
 
 /**
- * Rollout gate — see Task 11. Only chains listed in the allowlist are
- * selectable. NEXT_PUBLIC_ so the same check works in the client dropdown
- * (which decides what to show) and in the server routes (which reject a
- * disabled chain regardless of what the client sends).
+ * Comma-separated allowlist of non-Stellar offramp source chains that are
+ * currently selectable. `NEXT_PUBLIC_OFFRAMP_SOURCE_CHAINS_ENABLED` is the
+ * name (covers EVM + Solana); the older `…_EVM_SOURCE_CHAINS_ENABLED` is
+ * still honoured for one release so production keeps working until the
+ * Vercel env is updated. NEXT_PUBLIC_ so the client dropdown and the server
+ * routes read the same value.
  */
-export function isChainEnabled(key: EvmChainKey): boolean {
-  const allowlist = (process.env.NEXT_PUBLIC_EVM_SOURCE_CHAINS_ENABLED || "")
+export function offrampSourceAllowlist(): string[] {
+  const raw =
+    process.env.NEXT_PUBLIC_OFFRAMP_SOURCE_CHAINS_ENABLED ??
+    process.env.NEXT_PUBLIC_EVM_SOURCE_CHAINS_ENABLED ??
+    "";
+  return raw
     .split(",")
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
-  return allowlist.includes(key);
+}
+
+/** Rollout gate — see the multichain / Solana plans. */
+export function isChainEnabled(key: EvmChainKey): boolean {
+  return offrampSourceAllowlist().includes(key);
+}
+
+/**
+ * Display names of the non-Stellar offramp source chains currently enabled —
+ * for the header announcement marquee. Empty when only Stellar is live.
+ */
+export function enabledOfframpChainLabels(): string[] {
+  const all = EVM_SOURCE_CHAINS as Record<string, SourceChainConfig>;
+  return offrampSourceAllowlist()
+    .map((key) => (key === "solana" ? "Solana" : all[key]?.label))
+    .filter((label): label is string => Boolean(label));
 }

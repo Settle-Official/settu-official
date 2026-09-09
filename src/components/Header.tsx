@@ -1,5 +1,19 @@
-const MOBILE_ANNOUNCEMENT =
-  "Settu is now available on mobile. You can add to home screen for easy access.";
+import { enabledOfframpChainLabels } from "@/lib/cctp/evm-chains";
+
+function formatList(items: string[]): string {
+  if (items.length <= 1) return items[0] ?? "";
+  return `${items.slice(0, -1).join(", ")} & ${items[items.length - 1]}`;
+}
+
+// Announces the multi-chain offramp when any non-Stellar source is enabled
+// (reads the same NEXT_PUBLIC_OFFRAMP_SOURCE_CHAINS_ENABLED allowlist, so it
+// never names a chain that isn't actually live); falls back to the
+// mobile-install message otherwise. Computed at module load — build-time config.
+const _offrampChains = enabledOfframpChainLabels();
+const ANNOUNCEMENT =
+  _offrampChains.length > 0
+    ? `New — offramp your USDC straight from ${formatList(_offrampChains)}, on top of Stellar. Convert to your bank in minutes.`
+    : "Settu is now available on mobile. You can add to home screen for easy access.";
 
 export interface HeaderProps {
   readonly subtitle: string;
@@ -71,10 +85,16 @@ export function Header({
           ) : null}
         </div>
       </header>
-      <div className="marquee-outer -mx-[2.6rem] max-[720px]:-mx-4 bg-[#C9A962] lg:hidden">
+      {/* Mobile-install message stays mobile-only; the chain announcement is
+          shown on every viewport — it's the point. */}
+      <div
+        className={`marquee-outer -mx-[2.6rem] max-[720px]:-mx-4 bg-[#C9A962] ${
+          _offrampChains.length > 0 ? "" : "lg:hidden"
+        }`}
+      >
         <div className="marquee-inner">
-          <span>{MOBILE_ANNOUNCEMENT}</span>
-          <span>{MOBILE_ANNOUNCEMENT}</span>
+          <span>{ANNOUNCEMENT}</span>
+          <span>{ANNOUNCEMENT}</span>
         </div>
       </div>
     </>

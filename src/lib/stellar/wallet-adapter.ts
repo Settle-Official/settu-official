@@ -22,7 +22,8 @@ export interface StellarWallet {
   isConnected: boolean;
 }
 
-export const NETWORK_PASSPHRASE = "Public Global Stellar Network ; September 2015";
+export const NETWORK_PASSPHRASE =
+  "Public Global Stellar Network ; September 2015";
 
 type Kit = typeof import("@creit.tech/stellar-wallets-kit").StellarWalletsKit;
 
@@ -150,7 +151,7 @@ async function initKit(): Promise<Kit> {
         projectId,
         metadata: {
           name: "Settu",
-          description: "Convert Stellar USDC to your bank account in minutes.",
+          description: "Convert USDC to your bank account in minutes.",
           url: window.location.origin,
           icons: [`${window.location.origin}/icons/icon-192.png`],
         },

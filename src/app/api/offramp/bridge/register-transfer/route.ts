@@ -3,6 +3,7 @@ import { createCctpTransfer, getCctpTransfer } from "@/lib/cctp/cctp-store";
 import { recordLedgerEntry } from "@/lib/ledger/funds-ledger";
 import { CCTP_DOMAIN } from "@/lib/cctp/constants";
 import { EVM_SOURCE_CHAINS, isCctpBridgeChain, type EvmChainKey } from "@/lib/cctp/evm-chains";
+import { SOLANA_CCTP_DOMAIN } from "@/lib/solana/config";
 import { recordTransaction, type OfframpSourceChain } from "@/lib/offramp/transaction-history";
 
 export async function POST(request: NextRequest) {
@@ -33,6 +34,8 @@ export async function POST(request: NextRequest) {
     let sourceDomain: number | undefined;
     if (resolvedSourceChain === "stellar") {
       sourceDomain = CCTP_DOMAIN.stellar;
+    } else if (resolvedSourceChain === "solana") {
+      sourceDomain = SOLANA_CCTP_DOMAIN;
     } else {
       const chainConfig = EVM_SOURCE_CHAINS[resolvedSourceChain as EvmChainKey];
       // Only CCTP-bridge chains route through this attest/mint pipeline —
