@@ -9,14 +9,7 @@ import { notify, alertOfframpEvent, alertRampEvent } from "@/lib/notify/telegram
 import { PLATFORM_FEE_RATE } from "@/lib/offramp/fiat-conversion";
 import { getOrderMeta } from "@/lib/offramp/order-meta-store";
 import { pushRecentTransaction, addVolume } from "@/lib/stats-store";
-
-function formatFiat(amount: number | undefined, currency?: string): string {
-  if (amount === undefined || !Number.isFinite(amount)) return "--";
-  const code = (currency || "NGN").toUpperCase();
-  return code === "NGN"
-    ? `₦${amount.toLocaleString("en-NG", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-    : `${code} ${amount.toFixed(2)}`;
-}
+import { formatFiat } from "@/lib/format/currency";
 
 // Needs Node's crypto and the raw request body; keep off the edge runtime.
 export const runtime = "nodejs";
