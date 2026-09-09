@@ -52,11 +52,46 @@ const TMM_IDL = JSON.parse(
   ),
 );
 
+function keypairFromBytes(bytes) {
+  if (bytes.length === 64) return Keypair.fromSecretKey(bytes);
+  if (bytes.length === 32) return Keypair.fromSeed(bytes);
+  throw new Error(
+    `key is ${bytes.length} bytes — expected 32 (seed) or 64 (secret key)`,
+  );
+}
+
 function loadKeypair() {
   const path =
     process.env.SOLANA_SMOKE_KEYPAIR || join(homedir(), ".config/solana/id.json");
-  const secret = JSON.parse(readFileSync(path, "utf8"));
-  return Keypair.fromSecretKey(Uint8Array.from(secret));
+  const raw = readFileSync(path, "utf8").trim();
+  const bs58 = anchor.utils.bytes.bs58;
+
+  const coerce = (v) => {
+    if (Array.isArray(v)) return keypairFromBytes(Uint8Array.from(v));
+    if (typeof v === "string") return keypairFromBytes(bs58.decode(v.trim()));
+    throw new Error("unrecognised key value type");
+  };
+
+  // 1. solana-keygen JSON: array of 32 or 64 numbers.
+  // 2. JSON-quoted base58 string.
+  // 3. Wallet export object: { privateKey | secretKey | secret_key | seed: ... }.
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) || typeof parsed === "string") return coerce(parsed);
+    if (parsed && typeof parsed === "object") {
+      for (const k of ["privateKey", "secretKey", "secret_key", "seed", "key", "id"]) {
+        if (parsed[k] != null) return coerce(parsed[k]);
+      }
+      throw new Error(
+        `keypair JSON object has no recognised key field (keys: ${Object.keys(parsed).join(", ")})`,
+      );
+    }
+  } catch (err) {
+    if (err.message?.includes("recognised") || err.message?.includes("bytes"))
+      throw err;
+    // not JSON — try bare base58
+  }
+  return keypairFromBytes(bs58.decode(raw));
 }
 
 function pda(label, programId, extra = []) {
