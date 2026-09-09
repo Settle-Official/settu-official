@@ -1,7 +1,11 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { FormCard, type GasFeeOptions } from "@/components/FormCard";
+import {
+  FormCard,
+  type GasFeeOptions,
+  type OfframpSourceChainKey,
+} from "@/components/FormCard";
 import { Header } from "@/components/Header";
 import { ProgressSteps } from "@/components/ProgressSteps";
 import { RecentTransactionsTable } from "@/components/RecentTransactionsTable";
@@ -9,8 +13,15 @@ import { RightPanel, type PlatformStats } from "@/components/RightPanel";
 import { PlatformStatsCard } from "@/components/PlatformStatsCard";
 import { OnrampPanel } from "@/components/OnrampPanel";
 import { useStellarWallet } from "@/hooks/useStellarWallet";
+import { useEvmWallet } from "@/hooks/useEvmWallet";
+import {
+  EVM_SOURCE_CHAINS,
+  isCctpBridgeChain,
+  type EvmChainKey,
+} from "@/lib/cctp/evm-chains";
 import { TransactionStorage, Transaction } from "@/lib/transaction-storage";
 import { ErrorToast } from "@/components/ErrorToast";
+import { EvmConnectModal } from "@/components/EvmConnectModal";
 import {
   TransactionProgressModal,
   type OfframpStep,
@@ -210,6 +221,46 @@ async function registerBridgeTransfer(payload: {
   }
 }
 
+/**
+ * The EVM-source equivalent of registerBridgeTransfer above — same reasoning
+ * and shape (a confirmed on-chain burn/transfer whose registration call
+ * silently fails is orphaned exactly the way a real Stellar offramp burn once
+ * was). Generic over the endpoint: CCTP-bridge chains register at
+ * /register-transfer (which drives the same attest/mint state machine),
+ * Base's direct transfer at /base-direct-register (record-only). Never
+ * throws — a registration failure must not abort the rest of the flow.
+ */
+async function registerEvmTransfer(
+  endpoint: string,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  const attempts = 3;
+  const delaysMs = [1000, 3000];
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) return;
+    } catch {
+      // network error — fall through to retry/backoff below
+    }
+    if (i < delaysMs.length) {
+      await new Promise((resolve) => setTimeout(resolve, delaysMs[i]));
+    }
+  }
+  try {
+    navigator.sendBeacon?.(
+      endpoint,
+      new Blob([JSON.stringify(payload)], { type: "application/json" }),
+    );
+  } catch {
+    // nothing more to do client-side
+  }
+}
+
 export function StellarampDashboard() {
   const {
     wallet,
@@ -220,7 +271,34 @@ export function StellarampDashboard() {
     signTransaction,
   } = useStellarWallet();
 
+  // Parallel, independent EVM wallet path (WalletConnect). Only one of the
+  // two is ever connected at a time — switching the source-chain dropdown
+  // tears the other one down (see handleSourceChainChange).
+  const evmWallet = useEvmWallet();
+
+  const [sourceChain, setSourceChain] =
+    useState<OfframpSourceChainKey>("stellar");
+
+  // What the offramp UI (FormCard, RightPanel, ProgressSteps) should treat as
+  // "connected" / "connecting" — whichever wallet path the current source
+  // chain uses.
+  const uiIsConnected =
+    sourceChain === "stellar" ? isConnected : evmWallet.isConnected;
+  const uiIsConnecting =
+    sourceChain === "stellar" ? isConnecting : evmWallet.isConnecting;
+  const activeUserAddress =
+    sourceChain === "stellar" ? wallet?.publicKey : evmWallet.address ?? undefined;
+
   const [mode, setMode] = useState<"offramp" | "onramp">("offramp");
+
+  // The shared top header reflects the EVM wallet only for an offramp from a
+  // non-Stellar source; onramp is always the Stellar path.
+  const headerUsesEvm = mode === "offramp" && sourceChain !== "stellar";
+
+  const activeSourceChainLabel =
+    sourceChain === "stellar"
+      ? "Stellar"
+      : (EVM_SOURCE_CHAINS[sourceChain]?.label ?? "the source chain");
   const [currentTxId, setCurrentTxId] = useState<string | null>(null);
   const [isExecutingOfframp, setIsExecutingOfframp] = useState(false);
   const [formResetKey, setFormResetKey] = useState(0);
@@ -246,6 +324,13 @@ export function StellarampDashboard() {
     number | null
   >(null);
   const [isLoadingBalance, setIsLoadingBalance] = useState(false);
+  // Connected EVM wallet's balances on the current source chain (offramp,
+  // non-Stellar source only) — for the header readout + FormCard's USDC check.
+  const [evmBalances, setEvmBalances] = useState<{
+    usdc: string;
+    native: string;
+    nativeSymbol: string;
+  } | null>(null);
   // Raw numeric balances. The display strings above go through
   // toLocaleString with maximumFractionDigits: 6, but Stellar USDC carries 7
   // decimals — parsing those back can round *up* and pass a balance check the
@@ -304,6 +389,36 @@ export function StellarampDashboard() {
       setUserTransactions(txs);
     }
   }, [wallet?.publicKey]);
+
+  // Poll the connected EVM wallet's balances (offramp, non-Stellar source).
+  const evmWalletAddress = evmWallet.address;
+  useEffect(() => {
+    if (mode !== "offramp" || sourceChain === "stellar" || !evmWalletAddress) {
+      setEvmBalances(null);
+      return;
+    }
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const params = new URLSearchParams({
+          address: evmWalletAddress,
+          chain: sourceChain,
+        });
+        const res = await fetch(`/api/offramp/bridge/evm-balances?${params.toString()}`);
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        if (!cancelled) setEvmBalances(data);
+      } catch {
+        // keep whatever we had
+      }
+    };
+    load();
+    const iv = setInterval(load, 20_000);
+    return () => {
+      cancelled = true;
+      clearInterval(iv);
+    };
+  }, [mode, sourceChain, evmWalletAddress]);
 
   // Load connected wallet USDC balance from Stellar Horizon
   useEffect(() => {
@@ -390,6 +505,14 @@ export function StellarampDashboard() {
   // One path for every platform — the kit's modal picks the wallet and handles
   // extension, in-app browser and mobile deep-link transports itself.
   const handleConnect = async () => {
+    // Only an offramp from a non-Stellar source uses the EVM picker. Onramp is
+    // always Stellar, and an offramp with the Stellar source keeps the
+    // original Stellar Wallets Kit path below entirely unchanged.
+    if (mode === "offramp" && sourceChain !== "stellar") {
+      void evmWallet.openConnect();
+      return;
+    }
+
     try {
       const connected = await connect();
       if (connected?.publicKey) {
@@ -417,14 +540,42 @@ export function StellarampDashboard() {
   };
 
   const handleDisconnect = async () => {
-    await disconnect();
+    // Disconnect whichever wallet is actually in use — the EVM path only
+    // applies to an offramp with a non-Stellar source; onramp is always Stellar.
+    if (mode === "offramp" && sourceChain !== "stellar") {
+      await evmWallet.disconnect();
+    } else {
+      await disconnect();
+    }
     setUserTransactions([]);
+  };
+
+  /**
+   * Switching the source chain tears down whichever wallet is currently
+   * connected — Stellar and EVM can't be connected at the same time, and a
+   * fresh connect is required for the new chain either way.
+   */
+  const handleSourceChainChange = async (next: OfframpSourceChainKey) => {
+    if (next === sourceChain) return;
+    try {
+      if (sourceChain === "stellar") {
+        if (isConnected) await disconnect();
+      } else if (evmWallet.isConnected) {
+        await evmWallet.disconnect();
+      }
+    } catch {
+      // A teardown failure shouldn't block the switch — worst case a stale
+      // session lingers in the other adapter until its own next connect.
+    }
+    setUserTransactions([]);
+    setSourceChain(next);
   };
 
   const handleExecuteTrade = async (tradeData: {
     amount: string;
     rate: number;
     token: string;
+    sourceChain: OfframpSourceChainKey;
     beneficiary: {
       institution: string;
       accountIdentifier: string;
@@ -433,6 +584,12 @@ export function StellarampDashboard() {
       memo?: string;
     };
   }) => {
+    // EVM source chains take a completely separate path — branch before any
+    // of the Stellar-specific wallet/balance/XLM-reserve logic below.
+    if (tradeData.sourceChain && tradeData.sourceChain !== "stellar") {
+      return handleExecuteEvmTrade(tradeData);
+    }
+
     if (!wallet) {
       throw new Error("Wallet not connected");
     }
@@ -787,6 +944,335 @@ export function StellarampDashboard() {
     }
   };
 
+  /**
+   * Offramp from an EVM source chain. Shares the Paycrest order + payout
+   * polling machinery with the Stellar path, but the on-chain leg is
+   * different: CCTP-bridge chains do approve(if needed) + depositForBurn and
+   * feed the same attest/mint state machine; Base does a plain USDC
+   * transfer() straight to Paycrest's receive address with no bridge at all.
+   * Every signature is the user's own WalletConnect-connected wallet.
+   */
+  const handleExecuteEvmTrade = async (tradeData: {
+    amount: string;
+    rate: number;
+    token: string;
+    sourceChain: OfframpSourceChainKey;
+    beneficiary: {
+      institution: string;
+      accountIdentifier: string;
+      accountName: string;
+      currency: string;
+      memo?: string;
+    };
+  }) => {
+    const chainKey = tradeData.sourceChain as EvmChainKey;
+    const chainConfig = EVM_SOURCE_CHAINS[chainKey];
+    if (!chainConfig) {
+      setToastError(`Unsupported source chain: ${chainKey}`);
+      return;
+    }
+    const connectedAddress = evmWallet.address;
+    if (!connectedAddress) {
+      setToastError("Connect your EVM wallet first.");
+      return;
+    }
+    if (!pricingState.quote) {
+      setToastError("Quote unavailable. Please enter an amount first.");
+      return;
+    }
+
+    const baseReturnAddress = process.env.NEXT_PUBLIC_BASE_RETURN_ADDRESS;
+    if (!baseReturnAddress) {
+      throw new Error("NEXT_PUBLIC_BASE_RETURN_ADDRESS is missing");
+    }
+
+    const isBridge = isCctpBridgeChain(chainConfig);
+    const txId = TransactionStorage.generateId();
+    setCurrentTxId(txId);
+    setIsExecutingOfframp(true);
+    setOfframpStep("initiating");
+    setOfframpError(null);
+    setShowProgressModal(true);
+
+    const transaction: Transaction = {
+      id: txId,
+      timestamp: Date.now(),
+      userAddress: connectedAddress,
+      amount: tradeData.amount,
+      currency: "NGN",
+      beneficiary: tradeData.beneficiary,
+      status: "pending",
+    };
+    TransactionStorage.save(transaction);
+    setUserTransactions(TransactionStorage.getByUser(connectedAddress));
+
+    try {
+      setTradeState({ bridgeStatus: "building", payoutStatus: "pending" });
+
+      // 1) Bridge quote → Paycrest order amount (identical to the Stellar path).
+      const bridgeQuoteResponse = await withTimeout(
+        fetch("/api/offramp/bridge/quote", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ amount: tradeData.amount }),
+        }),
+        15_000,
+        "Bridge quote",
+      );
+      if (!bridgeQuoteResponse.ok) {
+        const payload = await bridgeQuoteResponse.json().catch(() => ({}));
+        throw new Error(
+          payload?.error ||
+            `Bridge quote request failed: ${bridgeQuoteResponse.status}`,
+        );
+      }
+      const bridgeQuotePayload = await bridgeQuoteResponse.json();
+      const paycrestOrderAmount = Number.parseFloat(
+        bridgeQuotePayload?.receiveAmount,
+      );
+      if (!Number.isFinite(paycrestOrderAmount) || paycrestOrderAmount <= 0) {
+        throw new Error("Invalid bridge receive amount for payout order");
+      }
+      const normalizedOrderAmount = Math.floor(paycrestOrderAmount * 1e6) / 1e6;
+      const normalizedRate = Number(tradeData.rate.toFixed(6));
+
+      // 2) Create the Paycrest order (identical to the Stellar path — the
+      // payout side has no idea what chain the USDC came from).
+      const orderAbort = new AbortController();
+      const orderTimer = setTimeout(() => orderAbort.abort(), 20_000);
+      let orderResponse: Response;
+      try {
+        orderResponse = await fetch("/api/offramp/paycrest/order", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: orderAbort.signal,
+          body: JSON.stringify({
+            amount: normalizedOrderAmount,
+            token: tradeData.token,
+            network: "base",
+            rate: normalizedRate,
+            reference: txId,
+            recipient: {
+              institution: tradeData.beneficiary.institution,
+              accountIdentifier: tradeData.beneficiary.accountIdentifier,
+              accountName: tradeData.beneficiary.accountName,
+              memo: tradeData.beneficiary.memo || "Settu offramp",
+              currency: tradeData.beneficiary.currency,
+            },
+            returnAddress: baseReturnAddress,
+          }),
+        });
+      } catch (fetchErr: any) {
+        if (fetchErr?.name === "AbortError") {
+          throw new Error(
+            "Paycrest order request timed out (20s). Please try again.",
+          );
+        }
+        throw new Error(`Paycrest order network error: ${fetchErr.message}`);
+      } finally {
+        clearTimeout(orderTimer);
+      }
+      if (!orderResponse.ok) {
+        const payload = await orderResponse.json().catch(() => ({}));
+        const details =
+          payload?.details && typeof payload.details === "object"
+            ? ` | details=${JSON.stringify(payload.details)}`
+            : payload?.details
+              ? ` | details=${String(payload.details)}`
+              : "";
+        throw new Error(
+          `${payload?.message || payload?.error || `Paycrest order failed: ${orderResponse.status}`}${details}`,
+        );
+      }
+      const orderPayload = await orderResponse.json();
+      const paycrestOrder = orderPayload?.data || orderPayload;
+      const payoutOrderId: string | undefined = paycrestOrder?.id;
+      const settlementAddress: string | undefined =
+        paycrestOrder?.receiveAddress;
+      if (!payoutOrderId || !settlementAddress) {
+        throw new Error("Paycrest order response missing id/receiveAddress");
+      }
+      setTradeState((prev) => ({
+        ...prev,
+        payoutOrderId,
+        payoutStatus: "pending",
+      }));
+      TransactionStorage.update(txId, {
+        payoutOrderId,
+        payoutStatus: "pending",
+      });
+      setUserTransactions(TransactionStorage.getByUser(connectedAddress));
+
+      // 3) Make sure the wallet is on the right chain BEFORE asking for a
+      // signature — the spec's explicit wrong-network handling.
+      setOfframpStep("awaiting-signature");
+      try {
+        await evmWallet.switchChain(chainConfig.chainId);
+      } catch {
+        throw new Error(
+          `Please switch your wallet to ${chainConfig.label} and try again.`,
+        );
+      }
+
+      // 4) Build + sign the on-chain leg.
+      let settlementTxHash: string;
+
+      if (isBridge) {
+        const buildEvmTx = async () => {
+          const res = await fetch("/api/offramp/bridge/evm-build-tx", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              amount: tradeData.amount,
+              fromAddress: connectedAddress,
+              toAddress: settlementAddress,
+              sourceChain: chainKey,
+            }),
+          });
+          if (!res.ok) {
+            const payload = await res.json().catch(() => ({}));
+            throw new Error(
+              payload?.error || `Failed to build burn transaction: ${res.status}`,
+            );
+          }
+          return res.json() as Promise<{
+            calls: { to: `0x${string}`; data: `0x${string}` }[];
+            chainId: number;
+          }>;
+        };
+
+        let built = await buildEvmTx();
+        if (built.calls.length > 1) {
+          // Send the approve on its own, then wait until the server sees the
+          // new allowance (i.e. the approve actually mined) before the burn —
+          // firing both blind would revert the burn on a slow chain.
+          await evmWallet.signAndSendCalls([built.calls[0]], built.chainId);
+          setOfframpStep("submitting");
+          const start = Date.now();
+          while (Date.now() - start < 120_000) {
+            await new Promise((r) => setTimeout(r, 4000));
+            built = await buildEvmTx();
+            if (built.calls.length === 1) break;
+          }
+          if (built.calls.length > 1) {
+            throw new Error(
+              "The approval didn't confirm in time. Please try again.",
+            );
+          }
+          setOfframpStep("awaiting-signature");
+        }
+
+        const hashes = await evmWallet.signAndSendCalls(
+          built.calls,
+          built.chainId,
+        );
+        settlementTxHash = hashes[hashes.length - 1];
+        setOfframpStep("submitting");
+
+        setTradeState((prev) => ({
+          ...prev,
+          stellarTxHash: settlementTxHash,
+          bridgeStatus: "pending",
+        }));
+
+        // Register the burn so the attest/mint state machine picks it up —
+        // same permanent-strand risk as the Stellar path, so same retry +
+        // sendBeacon fallback (registerEvmTransfer).
+        await registerEvmTransfer("/api/offramp/bridge/register-transfer", {
+          burnTxHash: settlementTxHash,
+          mintRecipient: settlementAddress,
+          amount: tradeData.amount,
+          paycrestOrderId: payoutOrderId,
+          sourceChain: chainKey,
+          connectedAddress,
+        });
+        new EventSource(`/api/offramp/bridge/stream/${settlementTxHash}`);
+      } else {
+        // Base: plain USDC transfer() straight to Paycrest's receive address.
+        const res = await fetch("/api/offramp/bridge/base-direct-tx", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            amount: tradeData.amount,
+            toAddress: settlementAddress,
+          }),
+        });
+        if (!res.ok) {
+          const payload = await res.json().catch(() => ({}));
+          throw new Error(
+            payload?.error || `Failed to build transfer: ${res.status}`,
+          );
+        }
+        const { to, data, chainId } = await res.json();
+        const hashes = await evmWallet.signAndSendCalls(
+          [{ to, data }],
+          chainId,
+        );
+        settlementTxHash = hashes[0];
+        setOfframpStep("submitting");
+
+        setTradeState((prev) => ({
+          ...prev,
+          stellarTxHash: settlementTxHash,
+          bridgeStatus: "completed",
+        }));
+
+        await registerEvmTransfer("/api/offramp/bridge/base-direct-register", {
+          txHash: settlementTxHash,
+          connectedAddress,
+          amountUsdc: tradeData.amount,
+          destinationCurrency: tradeData.beneficiary.currency,
+          destinationAmount: String(pricingState.quote.destinationAmount),
+          paycrestOrderId: payoutOrderId,
+        });
+      }
+
+      TransactionStorage.update(txId, {
+        stellarTxHash: settlementTxHash, // reused field — EVM burn/transfer hash
+        bridgeStatus: isBridge ? "pending" : "completed",
+      });
+      setUserTransactions(TransactionStorage.getByUser(connectedAddress));
+
+      // 5) Poll payout (the critical path). For the CCTP path also poll bridge
+      // status as best-effort background info.
+      setOfframpStep("processing");
+      if (isBridge) {
+        pollBridgeStatus(txId, settlementTxHash)
+          .then(() => {
+            setOfframpStep((prev) =>
+              prev === "processing" ? "settling" : prev,
+            );
+          })
+          .catch(() => {
+            // Bridge may still complete in the background — don't fail the flow.
+          });
+      }
+      await pollPayoutStatus(txId, payoutOrderId);
+
+      setOfframpStep("success");
+      TransactionStorage.update(txId, { status: "completed" });
+      setUserTransactions(TransactionStorage.getByUser(connectedAddress));
+
+      fetch("/api/stats")
+        .then((r) => r.json())
+        .then(setPlatformStats)
+        .catch(() => {});
+      setFormResetKey((k) => k + 1);
+    } catch (error: any) {
+      setTradeState((prev) => ({ ...prev, error: error.message }));
+      setOfframpStep("error");
+      setOfframpError(error.message);
+      TransactionStorage.update(txId, {
+        status: "failed",
+        error: error.message,
+      });
+      setUserTransactions(TransactionStorage.getByUser(connectedAddress));
+    } finally {
+      setIsExecutingOfframp(false);
+      setCurrentTxId(null);
+    }
+  };
+
   const pollBridgeStatus = async (txId: string, txHash: string) => {
     const maxAttempts = 60;
     let attempts = 0;
@@ -812,7 +1298,10 @@ export function StellarampDashboard() {
 
         setTradeState((prev) => ({ ...prev, bridgeStatus: status.status }));
         TransactionStorage.update(txId, { bridgeStatus: status.status });
-        setUserTransactions(TransactionStorage.getByUser(wallet!.publicKey));
+        if (activeUserAddress)
+          setUserTransactions(
+            TransactionStorage.getByUser(activeUserAddress),
+          );
 
         if (status.status === "completed") return;
         if (status.status === "failed")
@@ -854,7 +1343,10 @@ export function StellarampDashboard() {
       const applyStatus = (status: string): "resolve" | "reject" | null => {
         setTradeState((prev) => ({ ...prev, payoutStatus: status }));
         TransactionStorage.update(txId, { payoutStatus: status });
-        setUserTransactions(TransactionStorage.getByUser(wallet!.publicKey));
+        if (activeUserAddress)
+          setUserTransactions(
+            TransactionStorage.getByUser(activeUserAddress),
+          );
 
         // Advance the modal to "settling" once the deposit is validated or the
         // onchain release is underway.
@@ -980,12 +1472,29 @@ export function StellarampDashboard() {
         <div className="flex flex-col gap-6 px-[2.6rem] py-8 max-[720px]:p-4">
           <Header
             subtitle={getSubtitle()}
-            isConnected={isConnected}
-            isConnecting={isConnecting}
-            walletAddress={wallet?.publicKey}
-            stellarUsdcBalance={stellarUsdcBalance}
-            stellarXlmBalance={stellarXlmBalance}
-            isBalanceLoading={isLoadingBalance}
+            isConnected={headerUsesEvm ? evmWallet.isConnected : isConnected}
+            isConnecting={headerUsesEvm ? evmWallet.isConnecting : isConnecting}
+            walletAddress={
+              headerUsesEvm
+                ? (evmWallet.address ?? undefined)
+                : wallet?.publicKey
+            }
+            // For an EVM source the header shows that chain's USDC + native
+            // gas token instead of the Stellar USDC + XLM reserve.
+            stellarUsdcBalance={
+              headerUsesEvm ? (evmBalances?.usdc ?? null) : stellarUsdcBalance
+            }
+            stellarXlmBalance={
+              headerUsesEvm ? (evmBalances?.native ?? null) : stellarXlmBalance
+            }
+            nativeCurrencyLabel={
+              headerUsesEvm ? (evmBalances?.nativeSymbol ?? "ETH") : "XLM"
+            }
+            isBalanceLoading={
+              headerUsesEvm
+                ? evmWallet.isConnected && !evmBalances
+                : isLoadingBalance
+            }
             onConnect={handleConnect}
             onDisconnect={handleDisconnect}
           />
@@ -1047,22 +1556,35 @@ export function StellarampDashboard() {
               <div className="grid grid-cols-[1fr_370px] gap-3 max-[1100px]:grid-cols-1">
                 <div className="max-[1100px]:order-1">
                   <FormCard
-                    isConnected={isConnected}
-                    isConnecting={isConnecting}
+                    isConnected={uiIsConnected}
+                    isConnecting={uiIsConnecting}
                     isExecutingOfframp={isExecutingOfframp}
                     resetKey={formResetKey}
                     onConnect={handleConnect}
+                    sourceChain={sourceChain}
+                    onSourceChainChange={handleSourceChainChange}
+                    walletAddress={activeUserAddress ?? null}
                     onInitiateOfframp={handleExecuteTrade}
                     onPricingUpdate={handlePricingUpdate}
-                    usdcBalance={stellarUsdcBalanceRaw}
-                    isLoadingBalance={isLoadingBalance}
+                    usdcBalance={
+                      sourceChain === "stellar"
+                        ? stellarUsdcBalanceRaw
+                        : evmBalances
+                          ? Number(evmBalances.usdc)
+                          : null
+                    }
+                    isLoadingBalance={
+                      sourceChain === "stellar"
+                        ? isLoadingBalance
+                        : evmWallet.isConnected && !evmBalances
+                    }
                   />
                 </div>
                 <div className="row-span-2 col-start-2 max-[1100px]:order-2 max-[1100px]:row-auto max-[1100px]:col-auto">
                   <RightPanel
                     stats={platformStats}
-                    isConnected={isConnected}
-                    isConnecting={isConnecting}
+                    isConnected={uiIsConnected}
+                    isConnecting={uiIsConnecting}
                     amount={pricingState.amount}
                     quote={pricingState.quote}
                     isLoadingQuote={pricingState.isLoadingQuote}
@@ -1079,8 +1601,8 @@ export function StellarampDashboard() {
               </div>
 
               <ProgressSteps
-                isConnected={isConnected}
-                isConnecting={isConnecting}
+                isConnected={uiIsConnected}
+                isConnecting={uiIsConnecting}
               />
             </>
           )}
@@ -1089,10 +1611,30 @@ export function StellarampDashboard() {
 
       <ErrorToast message={toastError} onDismiss={() => setToastError(null)} />
 
+      <EvmConnectModal
+        open={evmWallet.isConnectModalOpen}
+        injectedWallets={evmWallet.injectedWallets}
+        pairingUri={evmWallet.pairingUri}
+        isConnecting={evmWallet.isConnecting}
+        error={evmWallet.error}
+        onPickInjected={(rdns) => {
+          void evmWallet.connectInjected(rdns).catch((e: any) => {
+            setToastError(e?.message || "Failed to connect wallet");
+          });
+        }}
+        onPickWalletConnect={() => {
+          void evmWallet.connectWalletConnect().catch((e: any) => {
+            setToastError(e?.message || "Failed to connect wallet");
+          });
+        }}
+        onClose={evmWallet.closeConnect}
+      />
+
       <TransactionProgressModal
         isOpen={showProgressModal}
         currentStep={offrampStep}
         error={offrampError}
+        sourceChainLabel={activeSourceChainLabel}
         onClose={() => {
           setShowProgressModal(false);
           setOfframpStep("idle");

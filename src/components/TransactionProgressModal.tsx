@@ -44,16 +44,26 @@ const CONFETTI_PIECES = (() => {
   }));
 })();
 
-const STEPS: StepConfig[] = [
-  { key: "initiating", label: "Initiating Offramp..." },
-  { key: "awaiting-signature", label: "Confirm transaction in wallet" },
-  { key: "submitting", label: "Submitting on Stellar" },
-  { key: "processing", label: "Transaction processing" },
-  { key: "settling", label: "Confirming settlement in fiat" },
+const STEP_KEYS: OfframpStep[] = [
+  "initiating",
+  "awaiting-signature",
+  "submitting",
+  "processing",
+  "settling",
 ];
 
+function buildSteps(sourceChainLabel: string): StepConfig[] {
+  return [
+    { key: "initiating", label: "Initiating Offramp..." },
+    { key: "awaiting-signature", label: "Confirm transaction in wallet" },
+    { key: "submitting", label: `Submitting on ${sourceChainLabel}` },
+    { key: "processing", label: "Transaction processing" },
+    { key: "settling", label: "Confirming settlement in fiat" },
+  ];
+}
+
 function getStepIndex(step: OfframpStep): number {
-  const idx = STEPS.findIndex((s) => s.key === step);
+  const idx = STEP_KEYS.indexOf(step);
   return idx === -1 ? -1 : idx;
 }
 
@@ -61,6 +71,8 @@ interface TransactionProgressModalProps {
   readonly isOpen: boolean;
   readonly currentStep: OfframpStep;
   readonly error?: string | null;
+  /** Where the burn/transfer is signed — "Stellar" (default), "Arbitrum", … */
+  readonly sourceChainLabel?: string;
   readonly onClose?: () => void;
 }
 
@@ -68,8 +80,10 @@ export function TransactionProgressModal({
   isOpen,
   currentStep,
   error,
+  sourceChainLabel = "Stellar",
   onClose,
 }: TransactionProgressModalProps) {
+  const STEPS = buildSteps(sourceChainLabel);
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {

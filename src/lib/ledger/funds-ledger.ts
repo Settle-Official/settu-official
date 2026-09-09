@@ -7,6 +7,7 @@
 
 import { Redis } from "@upstash/redis";
 import { randomUUID } from "crypto";
+import type { OfframpSourceChain } from "@/lib/offramp/transaction-history";
 
 const redis = new Redis({
   url: process.env.UPSTASH_REDIS_REST_URL!,
@@ -21,7 +22,9 @@ export interface FundsLedgerEntry {
   direction: "onramp" | "offramp";
   /** Only set when funds actually land in a wallet we control. */
   wallet?: "base_hot_wallet" | "stellar_hot_wallet";
-  chain: "base" | "stellar";
+  // "base" kept explicitly for onramp's own base_hot_wallet entries;
+  // OfframpSourceChain covers "stellar" + every EVM offramp source chain.
+  chain: "base" | OfframpSourceChain;
   asset: "USDC";
   amount: string;
   txHash: string;

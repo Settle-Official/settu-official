@@ -4,6 +4,26 @@ import { useState, useEffect } from "react";
 import { cn } from "@/lib/cn";
 import { SelectField } from "@/components/SelectField";
 import { MIN_USDC_AMOUNT } from "@/lib/offramp/fiat-conversion";
+import {
+  EVM_SOURCE_CHAINS,
+  isChainEnabled,
+  type EvmChainKey,
+} from "@/lib/cctp/evm-chains";
+
+export type OfframpSourceChainKey = "stellar" | EvmChainKey;
+
+/**
+ * "Stellar" plus every EVM chain turned on via
+ * NEXT_PUBLIC_EVM_SOURCE_CHAINS_ENABLED. Until that var is set this is just
+ * `[{ stellar }]` and the dropdown looks exactly like today's single-source
+ * flow. Computed once at module load — the allowlist is build-time config.
+ */
+const SOURCE_CHAIN_OPTIONS: { code: OfframpSourceChainKey; name: string }[] = [
+  { code: "stellar", name: "Stellar" },
+  ...Object.values(EVM_SOURCE_CHAINS)
+    .filter((c) => isChainEnabled(c.key))
+    .map((c) => ({ code: c.key as OfframpSourceChainKey, name: c.label })),
+];
 
 export interface FormCardProps {
   readonly isConnected: boolean;
@@ -12,10 +32,16 @@ export interface FormCardProps {
   /** Increment to reset the form after a successful transaction */
   readonly resetKey?: number;
   readonly onConnect: () => void;
+  /** Which chain the USDC is coming from. "stellar" is the default/legacy path. */
+  readonly sourceChain: OfframpSourceChainKey;
+  readonly onSourceChainChange: (next: OfframpSourceChainKey) => void;
+  /** Connected wallet address for the current source chain (EVM 0x… or Stellar G…). */
+  readonly walletAddress?: string | null;
   readonly onInitiateOfframp?: (tradeData: {
     amount: string;
     rate: number;
     token: string;
+    sourceChain: OfframpSourceChainKey;
     beneficiary: {
       institution: string;
       accountIdentifier: string;
@@ -102,6 +128,9 @@ export function FormCard({
   isExecutingOfframp = false,
   resetKey = 0,
   onConnect,
+  sourceChain,
+  onSourceChainChange,
+  walletAddress = null,
   onInitiateOfframp,
   onPricingUpdate,
   usdcBalance = null,
@@ -158,6 +187,16 @@ export function FormCard({
   );
   const [isLoadingFees, setIsLoadingFees] = useState(false);
 
+  // EVM-only: does the connected wallet hold enough of the source chain's
+  // native token to pay gas for the burn/transfer it's about to sign?
+  const [evmGasCheck, setEvmGasCheck] = useState<{
+    sufficient: boolean;
+    nativeBalance: string;
+    estimatedGasNative: string;
+    nativeCurrencySymbol: string;
+  } | null>(null);
+  const isEvmSource = sourceChain !== "stellar";
+
   // Reset form fields when resetKey changes (after successful transaction)
   useEffect(() => {
     if (resetKey === 0) return; // skip initial mount
@@ -177,11 +216,11 @@ export function FormCard({
     const fetchGasFees = async () => {
       setIsLoadingFees(true);
       try {
-        const query =
-          burnUsdc && burnUsdc > 0
-            ? `?amount=${encodeURIComponent(String(burnUsdc))}`
-            : "";
-        const res = await fetch(`/api/offramp/bridge/gas-fee-options${query}`);
+        const params = new URLSearchParams({ sourceChain });
+        if (burnUsdc && burnUsdc > 0) params.set("amount", String(burnUsdc));
+        const res = await fetch(
+          `/api/offramp/bridge/gas-fee-options?${params.toString()}`,
+        );
         if (res.ok) {
           const data = await res.json();
           setGasFeeOptions(data.feeOptions);
@@ -193,7 +232,42 @@ export function FormCard({
     };
     const debounce = setTimeout(fetchGasFees, 500);
     return () => clearTimeout(debounce);
-  }, [burnUsdc]);
+  }, [burnUsdc, sourceChain]);
+
+  // EVM gas pre-flight — mirrors the Stellar XLM-reserve check's intent: don't
+  // let the user start an offramp that will fail when the wallet asks them to
+  // pay gas. Advisory (the wallet's own gas price at signing is authoritative)
+  // but a hard block on INITIATE when the balance is clearly short.
+  useEffect(() => {
+    if (!isEvmSource || !isConnected || !walletAddress || !(burnUsdc && burnUsdc > 0)) {
+      setEvmGasCheck(null);
+      return;
+    }
+    let cancelled = false;
+    const run = async () => {
+      try {
+        const params = new URLSearchParams({
+          address: walletAddress,
+          chain: sourceChain,
+          amount: String(burnUsdc),
+        });
+        const res = await fetch(
+          `/api/offramp/bridge/evm-gas-preflight?${params.toString()}`,
+        );
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        if (!cancelled) setEvmGasCheck(data);
+      } catch {
+        // Network hiccup — leave the last known result (or null) rather than
+        // hard-blocking on a failed check.
+      }
+    };
+    const debounce = setTimeout(run, 500);
+    return () => {
+      cancelled = true;
+      clearTimeout(debounce);
+    };
+  }, [isEvmSource, isConnected, walletAddress, sourceChain, burnUsdc]);
 
   // Fetch supported currencies on mount
   useEffect(() => {
@@ -401,11 +475,17 @@ export function FormCard({
       ? !minFiat || Number.parseFloat(amount) >= minFiat
       : Number.parseFloat(amount) >= MIN_USDC_AMOUNT;
 
+  // Only a definitive "insufficient" result blocks — a null check (not run
+  // yet, or the check itself errored) never hard-blocks.
+  const evmGasShort = isEvmSource && evmGasCheck?.sufficient === false;
+
   const getButtonText = () => {
     if (isExecutingOfframp) return "INITIATING OFFRAMP...";
     if (isConnecting) return "WAITING FOR SIGNATURE...";
     if (!isConnected) return "CONNECT WALLET";
     if (hasInsufficientBalance) return "INSUFFICIENT USDC BALANCE";
+    if (evmGasShort)
+      return `INSUFFICIENT ${evmGasCheck?.nativeCurrencySymbol ?? "GAS"} FOR GAS`;
     return "INITIATE OFFRAMP →";
   };
 
@@ -416,6 +496,7 @@ export function FormCard({
     !!quote &&
     meetsMinimum &&
     !hasInsufficientBalance &&
+    !evmGasShort &&
     /^\+?\d{6,20}$/.test(accountNumber.trim()) &&
     !!bank &&
     !!accountName;
@@ -435,6 +516,7 @@ export function FormCard({
       amount: quote.sourceAmount,
       rate: quote.rate,
       token: "USDC",
+      sourceChain,
       beneficiary: {
         institution: bank,
         accountIdentifier: accountNumber,
@@ -460,11 +542,36 @@ export function FormCard({
             ? "Connected wallet detected. Confirm amount and settument bank details."
             : isConnecting
               ? "Waiting for wallet signature before opening the off-ramp form."
-              : "Securely connect a Stellar-compatible wallet before entering payout details."}
+              : sourceChain === "stellar"
+                ? "Securely connect a Stellar-compatible wallet before entering payout details."
+                : `Connect an EVM wallet (WalletConnect) on ${
+                    SOURCE_CHAIN_OPTIONS.find((o) => o.code === sourceChain)?.name ??
+                    sourceChain
+                  } before entering payout details.`}
         </p>
       </div>
 
       <div className="flex flex-col gap-[0.6rem]">
+        {/* Source chain — only rendered once more than one source is enabled
+            (NEXT_PUBLIC_EVM_SOURCE_CHAINS_ENABLED). Switching it tears down the
+            active wallet connection (Stellar and EVM can't be connected at
+            once) and clears the amount/quote, since a fresh connect is
+            required either way. */}
+        {SOURCE_CHAIN_OPTIONS.length > 1 && (
+          <SelectField
+            label="SOURCE CHAIN"
+            value={sourceChain}
+            onChange={(value) => {
+              if (value === sourceChain) return;
+              setAmount("");
+              setQuote(null);
+              setMinFiat(null);
+              onSourceChainChange(value as OfframpSourceChainKey);
+            }}
+            options={SOURCE_CHAIN_OPTIONS}
+            placeholder="Select source chain"
+          />
+        )}
         {/* Enter either side of the pair. Switching carries the value across
             from the live quote so the user doesn't retype it. */}
         <div className="flex items-center gap-[0.35rem]">
@@ -554,14 +661,34 @@ export function FormCard({
                 Balance {usdcBalance.toFixed(6)} USDC
               </span>
             ) : null}
+            {/* EVM gas pre-flight — native token, separate from the USDC balance above. */}
+            {isEvmSource && evmGasCheck && (
+              <span
+                className={cn(
+                  "text-[0.68rem]",
+                  evmGasCheck.sufficient
+                    ? "text-[var(--muted)]"
+                    : "text-red-400",
+                )}
+              >
+                {evmGasCheck.sufficient
+                  ? `Gas: ~${Number(evmGasCheck.estimatedGasNative).toFixed(6)} ${evmGasCheck.nativeCurrencySymbol} (you have ${Number(evmGasCheck.nativeBalance).toFixed(6)})`
+                  : `Insufficient ${evmGasCheck.nativeCurrencySymbol} for gas — you have ${Number(evmGasCheck.nativeBalance).toFixed(6)}, need ~${Number(evmGasCheck.estimatedGasNative).toFixed(6)}`}
+              </span>
+            )}
           </div>
         )}
-        {/* Bridge fee — CCTP charges one real fee, deducted from the amount */}
+        {/* Bridge fee — CCTP charges one real fee, deducted from the amount.
+            Base as a source does a plain transfer with no bridge, so no fee. */}
         <div className="flex flex-col gap-[0.4rem]">
           <label className="text-[0.75rem] tracking-[0.08em] text-[var(--muted)]">
             BRIDGE FEE
           </label>
-          {isLoadingFees ? (
+          {sourceChain === "base" ? (
+            <p className="m-0 text-[0.8rem] text-[var(--muted)]">
+              None — direct transfer on Base
+            </p>
+          ) : isLoadingFees ? (
             <p className="m-0 text-[0.8rem] text-[var(--muted)]">Loading...</p>
           ) : (
             gasFeeOptions &&
