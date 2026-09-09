@@ -97,13 +97,13 @@ cctpDomain: 5, usdcDecimals: 6, rpcUrl }`), `SOLANA_CCTP_DOMAIN = 5`, `isSolanaE
   mintRecipient: PublicKey; maxFeeAtomic: bigint; eventAccount: PublicKey; fast?: boolean }):
   TransactionInstruction` — the unsigned instruction, IDL-encoded.
 
-- [ ] **Step 1:** Vendor the V2 IDL (`src/lib/solana/idl/token-messenger-minter-v2.json`) from the
+- [x] **Step 1:** Vendor the V2 IDL (`src/lib/solana/idl/token-messenger-minter-v2.json`) from the
   on-chain program / Circle repo. Note its source + version in a header.
-- [ ] **Step 2:** Failing tests for the pure helpers (float→atomic, mintRecipient encoding, PDA
+- [x] **Step 2:** Failing tests for the pure helpers (float→atomic, mintRecipient encoding, PDA
   derivation against known values from a devnet transaction).
-- [ ] **Step 3:** Implement. `destinationDomain` = 6, `destinationCaller` = `PublicKey.default`,
+- [x] **Step 3:** Implement. `destinationDomain` = 6, `destinationCaller` = `PublicKey.default`,
   `minFinalityThreshold` = 1000 (fast) / 2000 (standard).
-- [ ] **Step 4:** Pass. Commit.
+- [x] **Step 4:** Pass. Commit.
 
 ---
 
