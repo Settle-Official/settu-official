@@ -156,3 +156,14 @@ export function offrampSourceAllowlist(): string[] {
 export function isChainEnabled(key: EvmChainKey): boolean {
   return offrampSourceAllowlist().includes(key);
 }
+
+/**
+ * Display names of the non-Stellar offramp source chains currently enabled —
+ * for the header announcement marquee. Empty when only Stellar is live.
+ */
+export function enabledOfframpChainLabels(): string[] {
+  const all = EVM_SOURCE_CHAINS as Record<string, SourceChainConfig>;
+  return offrampSourceAllowlist()
+    .map((key) => (key === "solana" ? "Solana" : all[key]?.label))
+    .filter((label): label is string => Boolean(label));
+}
