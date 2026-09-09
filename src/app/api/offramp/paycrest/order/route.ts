@@ -4,6 +4,7 @@ import { setOrderMeta } from "@/lib/offramp/order-meta-store";
 import { alertOfframpEvent } from "@/lib/notify/telegram";
 import { selectTopProviders } from "@/lib/offramp/provider-routing";
 import { PLATFORM_FEE_RATE } from "@/lib/offramp/fiat-conversion";
+import { validateAddress } from "@/lib/offramp/utils/validation";
 
 // How far the live book rate may fall below the rate the client was quoted
 // before we refuse to place the order. The quote's own 5-minute validUntil is
@@ -27,6 +28,18 @@ export async function POST(request: NextRequest) {
     const providerId = body?.recipient?.providerId
       ? String(body.recipient.providerId).trim()
       : "";
+
+    // Untrusted and unverified in this phase — validated only so a malformed
+    // value can never reach a Redis key, and never blocks the payout.
+    const claimedAddress = String(body?.userStellarAddress || "").trim();
+    const userStellarAddress = validateAddress(claimedAddress, "stellar")
+      ? claimedAddress
+      : undefined;
+    const grossCandidate = Number(body?.grossAmountUsdc);
+    const grossAmountUsdc =
+      Number.isFinite(grossCandidate) && grossCandidate > 0
+        ? grossCandidate
+        : undefined;
 
     const recipient = {
       institution: String(body?.recipient?.institution || "").trim(),
@@ -157,6 +170,9 @@ export async function POST(request: NextRequest) {
         receiveAddress: (order as any)?.receiveAddress || undefined,
         providerIds,
         rateSource,
+        userStellarAddress,
+        attributionSource: userStellarAddress ? "client" : undefined,
+        grossAmountUsdc,
       }).catch(() => {});
     }
 

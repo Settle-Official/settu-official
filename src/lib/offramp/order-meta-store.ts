@@ -43,6 +43,14 @@ export interface OrderMeta {
    */
   providerIds?: string[];
   rateSource?: "book" | "client";
+  /** Who initiated this offramp. Absent on orders predating attribution. */
+  userStellarAddress?: string;
+  /** "client" is self-declared and unverified; "session" is proven ownership. */
+  attributionSource?: "client" | "session";
+  /** USDC sent from Stellar, before the bridge fee. amountUsdc is post-bridge. */
+  grossAmountUsdc?: number;
+  /** Marks platform-funded cashback payouts so they stay out of public stats. */
+  kind?: "cashback_withdrawal";
   createdAt: number;
 }
 

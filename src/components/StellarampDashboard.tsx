@@ -562,6 +562,9 @@ export function StellarampDashboard() {
               currency: tradeData.beneficiary.currency,
             },
             returnAddress: baseReturnAddress,
+            // Attribution only — lets the server tie this payout to a wallet.
+            userStellarAddress: wallet.publicKey,
+            grossAmountUsdc: Number(tradeData.amount),
           }),
         });
       } catch (fetchErr: any) {
