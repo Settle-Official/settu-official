@@ -174,13 +174,13 @@ detectedWallets: { name; icon }[]; connect(name): Promise<void>; disconnect(): P
 signAndSendBurn(transactionBase64: string, eventKeypair: Keypair): Promise<string> }` — same shape
 family as `useEvmWallet`, no chain-switch.
 
-- [ ] **Step 1:** `wallet-standard.ts` — subscribe to `wallet-standard:register-wallet` +
+- [x] **Step 1:** `wallet-standard.ts` — subscribe to `wallet-standard:register-wallet` +
   read the existing registry; expose wallets exposing `solana:signAndSendTransaction` (and
   `solana:signTransaction` as the Task-1 fallback path). Legacy `window.solana` fallback.
-- [ ] **Step 2:** Hook. `connect(name)` → wallet's `connect` feature → account address (base58).
+- [x] **Step 2:** Hook. `connect(name)` → wallet's `connect` feature → account address (base58).
   `signAndSendBurn` → deserialise, `tx.sign([eventKeypair])`, then wallet
   `signAndSendTransaction(tx)`; return signature.
-- [ ] **Step 3:** `tsc`. Commit.
+- [x] **Step 3:** `tsc`. Commit.
 
 ---
 
