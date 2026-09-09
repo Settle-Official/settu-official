@@ -33,16 +33,30 @@ signature (partial-sign). Also confirm devnet CCTP V2 `deposit_for_burn` lands e
 
 **Files:** `scripts/solana-cctp-smoke-test.mjs` (throwaway).
 
-- [ ] **Step 1:** Script that, against **devnet**: connects a wallet (or takes a keypair path for
-  headless run), builds a minimal `deposit_for_burn` (domain 6, a dummy 32-byte mintRecipient,
-  1 USDC), generates the event keypair, partial-signs, sends, prints the signature.
-- [ ] **Step 2:** Run it with a funded devnet wallet holding devnet USDC + SOL. Confirm the tx
-  lands and Circle's devnet Iris (`iris-api-sandbox.circle.com`) returns an attestation for it.
+- [x] **Step 1:** `scripts/solana-cctp-smoke-test.mjs` — headless keypair run against devnet;
+  builds a real `deposit_for_burn` (domain 6, dummy bytes32 mintRecipient, 0.1 USDC, standard/
+  maxFee 0), generates the event keypair, signs `[wallet, eventKeypair]`, sends, polls sandbox
+  Iris. Committed with the vendored V2 IDLs (`src/lib/solana/idl/`).
+
+  **Dry-run done (2026-09-09):** Anchor 0.32 `Program(token_messenger_minter_v2 IDL)` +
+  `.methods.depositForBurn(params).accounts({...}).instruction()` produces a valid **18-account**
+  instruction (96 data bytes). Caller passes 9: `owner`, `eventRentPayer`, `burnTokenAccount`
+  (USDC ATA), `messageTransmitter` = PDA(`message_transmitter`, MT), `tokenMessenger` =
+  PDA(`token_messenger`, TMM), `remoteTokenMessenger` = PDA(`remote_token_messenger`, `"6"`, TMM),
+  `tokenMinter` = PDA(`token_minter`, TMM), `burnTokenMint`, `messageSentEventData`. Anchor
+  auto-resolves the rest from IDL seeds (`sender_authority_pda`, `denylist_account` [seed: owner],
+  `local_token` [seed: mint], `event_authority`) + fixed program addresses. Two signers: wallet +
+  event keypair. **The #1 risk (exact account layout) is retired** — matches Circle's own
+  `examples/v2/solana.ts` + the on-chain IDL.
+
+- [ ] **Step 2:** Run it with a funded devnet wallet (SOL via `solana airdrop`, devnet USDC via
+  `faucet.circle.com`). Confirm the burn lands + sandbox Iris returns a `complete` attestation.
 - [ ] **Step 3:** Repeat the sign step through a real browser wallet (Phantom devnet) via a tiny
-  HTML harness — confirm partial-signed tx is accepted. **If a wallet rejects the pre-signed
-  event account, stop** and revisit the split (fallback: wallet signs first via `signTransaction`,
-  then client adds the event sig, then client submits raw — needs `signTransaction` feature).
-- [ ] **Step 4:** Record outcome in this file. Commit the script.
+  HTML harness — confirm a partial-signed (event-keypair-already-signed) tx is accepted. **If a
+  wallet rejects it, stop** and revisit the split: wallet `signTransaction` first, then client
+  adds the event-keypair sig and submits raw (needs the `solana:signTransaction` feature, which
+  Phantom/Solflare both expose — so this fallback is available).
+- [ ] **Step 4:** Record Step 2/3 outcomes here.
 
 ---
 
