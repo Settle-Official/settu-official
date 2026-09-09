@@ -1493,6 +1493,7 @@ export function StellarampDashboard() {
         transactionBase64,
         eventKeypair,
       );
+      console.log("[offramp] Solana burn signature:", burnSignature);
       setOfframpStep("submitting");
       setTradeState((prev) => ({
         ...prev,
