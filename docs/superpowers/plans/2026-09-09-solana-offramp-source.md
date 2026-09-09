@@ -208,16 +208,18 @@ connect/disconnect routing, header/preflight props).
 
 ---
 
-## Task 9: Header balances, progress label, fee display for Solana
+## Task 9: Header balances, progress label, fee display for Solana  
+
+> Folded into Task 8 — the EVM UI was generalised rather than EVM-specific: externalBalances feeds the header (SOL/USDC) + FormCard USDC check, activeSourceChainLabel drives the "Submitting on Solana" step, and gas-fee-options?sourceChain=solana drives BRIDGE FEE (dev-verified 0.005 USDC on 50).
 
 **Files (modify):** `src/components/StellarampDashboard.tsx`, `src/components/Header.tsx`,
 `src/components/FormCard.tsx`
 
-- [ ] **Step 1:** Dashboard polls `solana-balances` when the Solana source is connected; feeds
+- [x] **Step 1:** Dashboard polls `solana-balances` when the Solana source is connected; feeds
   the header (USDC + `nativeCurrencyLabel="SOL"`) and FormCard's USDC check + SOL-gas gate.
-- [ ] **Step 2:** `TransactionProgressModal` `sourceChainLabel="Solana"`.
-- [ ] **Step 3:** `FormCard` BRIDGE FEE line uses `gas-fee-options?sourceChain=solana`.
-- [ ] **Step 4:** `tsc && npm test && npm run build`. Commit.
+- [x] **Step 2:** `TransactionProgressModal` `sourceChainLabel="Solana"`.
+- [x] **Step 3:** `FormCard` BRIDGE FEE line uses `gas-fee-options?sourceChain=solana`.
+- [x] **Step 4:** `tsc && npm test && npm run build`. Commit.
 
 ---
 
