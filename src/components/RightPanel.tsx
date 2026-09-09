@@ -1,5 +1,6 @@
 import type { RecentTransactionRow } from "@/types/stellaramp";
 import { PlatformStatsCard } from "@/components/PlatformStatsCard";
+import { formatFiat, fiatSymbol } from "@/lib/format/currency";
 
 export interface PlatformStats {
   totalUsers: number;
@@ -39,28 +40,11 @@ export function RightPanel({
       ? Number.parseFloat(quote.destinationAmount)
       : null;
 
-  const formatAmount = (value: number, selectedCurrency: string) => {
-    const currencyCode = (selectedCurrency || "NGN").toUpperCase();
-
-    if (currencyCode === "NGN") {
-      return `₦${new Intl.NumberFormat("en-NG", {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      }).format(value)}`;
-    }
-
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: currencyCode,
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(value);
-  };
+  const formatAmount = (value: number, selectedCurrency: string) =>
+    formatFiat(value, selectedCurrency);
 
   const formatCurrencyPrefix = (selectedCurrency: string) =>
-    (selectedCurrency || "NGN").toUpperCase() === "NGN"
-      ? "₦"
-      : (selectedCurrency || "NGN").toUpperCase();
+    fiatSymbol(selectedCurrency);
 
   const getHeroLabel = () => {
     if (isConnecting) return "CONNECTING";
