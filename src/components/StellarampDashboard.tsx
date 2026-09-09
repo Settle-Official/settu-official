@@ -781,6 +781,7 @@ export function StellarampDashboard() {
             amount: normalizedOrderAmount,
             token: tradeData.token,
             network: "base",
+            sourceChain: tradeData.sourceChain,
             rate: normalizedRate,
             reference: txId,
             recipient: {
@@ -1123,6 +1124,7 @@ export function StellarampDashboard() {
             amount: normalizedOrderAmount,
             token: tradeData.token,
             network: "base",
+            sourceChain: tradeData.sourceChain,
             rate: normalizedRate,
             reference: txId,
             recipient: {
@@ -1443,6 +1445,7 @@ export function StellarampDashboard() {
             amount: normalizedOrderAmount,
             token: tradeData.token,
             network: "base",
+            sourceChain: tradeData.sourceChain,
             rate: normalizedRate,
             reference: txId,
             recipient: {
@@ -1656,6 +1659,7 @@ export function StellarampDashboard() {
         // onchain release is underway.
         if (
           status === "validated" ||
+          status === "fulfilled" ||
           status === "settling" ||
           status === "settled"
         ) {

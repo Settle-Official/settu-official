@@ -188,6 +188,7 @@ export async function alertRampEvent(details: {
   payoutValue?: number | string; // offramp: fiat; onramp: USDC
   payoutUnit?: string;
   stellarAddress?: string; // onramp: where USDC is delivered
+  sourceChain?: string; // offramp: where the USDC was burned (stellar/arbitrum/solana/…)
   reference?: string;
 }): Promise<boolean> {
   const s = (details.status || "unknown").toLowerCase();
@@ -239,9 +240,16 @@ export async function alertRampEvent(details: {
       ? ` ${escapeHtml(details.currency)}`
       : "";
 
+  const prettyChain = details.sourceChain
+    ? details.sourceChain.charAt(0).toUpperCase() + details.sourceChain.slice(1)
+    : undefined;
+
   const lines = [
     `<b>${label} · ${escapeHtml(s.toUpperCase())}</b>`,
     `Order: <code>${escapeHtml(details.orderId)}</code>`,
+    details.direction === "offramp" &&
+      prettyChain &&
+      `Source: ${escapeHtml(prettyChain)}`,
     details.accountName && `Name: ${escapeHtml(details.accountName)}`,
     details.accountNumber &&
       `Account: <code>${escapeHtml(details.accountNumber)}</code>` +
@@ -278,6 +286,7 @@ export async function alertOfframpEvent(details: {
   amountUsdc?: number | string;
   rate?: number | string;
   payoutValue?: number | string;
+  sourceChain?: string;
   reference?: string;
 }): Promise<boolean> {
   return alertRampEvent({
@@ -293,6 +302,7 @@ export async function alertOfframpEvent(details: {
     rate: details.rate,
     payoutValue: details.payoutValue,
     payoutUnit: details.currency,
+    sourceChain: details.sourceChain,
     reference: details.reference,
   });
 }

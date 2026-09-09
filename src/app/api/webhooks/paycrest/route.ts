@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createHmac, timingSafeEqual } from "crypto";
-import { mapPaycrestStatus } from "@/lib/offramp/adapters/paycrest-adapter";
+import {
+  mapPaycrestStatus,
+  normalizePayoutStatus,
+} from "@/lib/offramp/adapters/paycrest-adapter";
 import { setPayoutStatus, claimSettlementRecording } from "@/lib/offramp/payout-store";
 import type { PayoutStatus, OnrampStatus } from "@/lib/offramp/types";
 import { updateOnrampOrder, getOnrampOrder } from "@/lib/onramp/onramp-store";
@@ -17,17 +20,6 @@ export const runtime = "nodejs";
 // Give it room; the bridge lock prevents a retry from double-spending.
 export const maxDuration = 60;
 
-const KNOWN_STATUSES: ReadonlySet<string> = new Set<PayoutStatus>([
-  "pending",
-  "deposited",
-  "validated",
-  "settling",
-  "settled",
-  "refunding",
-  "refunded",
-  "expired",
-  "unknown",
-]);
 
 function verifyPaycrestSignature(
   body: string,
@@ -108,11 +100,9 @@ export async function POST(request: NextRequest) {
 
     // Prefer the bare status from the v2 payload; fall back to mapping the
     // event name when it's missing or unrecognised.
-    const rawStatus = data?.status;
+    const bare = normalizePayoutStatus(data?.status);
     const status: PayoutStatus =
-      rawStatus && KNOWN_STATUSES.has(rawStatus)
-        ? (rawStatus as PayoutStatus)
-        : mapPaycrestStatus(event ?? "");
+      bare !== "unknown" ? bare : mapPaycrestStatus(event ?? "");
 
     // Onramp needs the custodial Base→Stellar bridge; the existing offramp
     // path just persists status for the client SSE stream.
@@ -180,17 +170,21 @@ export async function POST(request: NextRequest) {
 
     // Record it in the live transactions feed here (not client-side) so it's
     // captured regardless of whether the user's tab was still open — mirrors
-    // the onramp fix in finalize.ts. Fires on "validated" rather than
-    // "settled" — same reasoning as the client-side success signal and the
-    // Telegram alert's success classification above: validated is Paycrest's
-    // own recommended off-ramp completion signal (fiat confirmed delivered),
-    // while settled just follows once the backend protocol releases escrowed
-    // stablecoins, which has nothing to do with whether the recipient got
-    // paid. Paycrest can deliver the same webhook more than once in close
+    // the onramp fix in finalize.ts. Fires on "validated" OR "fulfilled" —
+    // whichever this deployment sees first — rather than "settled": both mean
+    // the recipient's fiat has been confirmed delivered, while settled just
+    // follows once the backend protocol releases escrowed stablecoins, which
+    // has nothing to do with whether the recipient got paid. (Paycrest sends
+    // no `fulfilled` webhook today, but the order-status route writes it back
+    // to the payout store from the live API, and that write lands here too.)
+    // Paycrest can deliver the same webhook more than once in close
     // succession, so claim it atomically (Redis SET NX) rather than a
     // read-then-check, which can race when two deliveries overlap and both
     // read "not yet recorded" before either writes.
-    if (status === "validated" && (await claimSettlementRecording(orderId))) {
+    if (
+      (status === "validated" || status === "fulfilled") &&
+      (await claimSettlementRecording(orderId))
+    ) {
       const usdcAmount = meta?.amountUsdc ?? payloadAmount;
       if (usdcAmount !== undefined && Number.isFinite(usdcAmount)) {
         // Paycrest doesn't always carry the on-chain hash on the validated
@@ -220,6 +214,7 @@ export async function POST(request: NextRequest) {
       amountUsdc: meta?.amountUsdc ?? data?.amount,
       rate: meta?.rate ?? payloadRate,
       payoutValue,
+      sourceChain: meta?.sourceChain,
       reference: meta?.reference ?? data?.reference,
     });
 

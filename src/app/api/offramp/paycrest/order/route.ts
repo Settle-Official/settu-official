@@ -22,6 +22,10 @@ export async function POST(request: NextRequest) {
     const rate = Number(body?.rate);
     const token = String(body?.token || "").toUpperCase();
     const network = String(body?.network || "base").toLowerCase();
+    // Where the user's USDC is coming from — for webhook alert enrichment.
+    const sourceChain = body?.sourceChain
+      ? String(body.sourceChain).trim().toLowerCase()
+      : undefined;
     const reference = String(body?.reference || "");
     const returnAddress = String(body?.returnAddress || "");
     const providerId = body?.recipient?.providerId
@@ -154,6 +158,7 @@ export async function POST(request: NextRequest) {
         payoutValue,
         reference: reference || undefined,
         network,
+        sourceChain,
         receiveAddress: (order as any)?.receiveAddress || undefined,
         providerIds,
         rateSource,
@@ -171,6 +176,7 @@ export async function POST(request: NextRequest) {
       amountUsdc: amount,
       rate: finalRate,
       payoutValue,
+      sourceChain,
       reference: reference || undefined,
     });
 
