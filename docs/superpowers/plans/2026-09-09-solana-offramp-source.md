@@ -136,9 +136,9 @@ cctpDomain: 5, usdcDecimals: 6, rpcUrl }`), `SOLANA_CCTP_DOMAIN = 5`, `isSolanaE
 SOL floor ≈ `0.005` (base fee + priority + ~0.0015 rent for the event account). Read-only,
 `withRetry`, mirrors `evm-balances` / `evm-gas-preflight`.
 
-- [ ] **Step 1:** Route: `Connection.getBalance` (SOL) + USDC ATA balance (tolerate missing ATA → 0).
-- [ ] **Step 2:** `tsc`. Manual check vs a real address.
-- [ ] **Step 3:** Commit.
+- [x] **Step 1:** Route: `Connection.getBalance` (SOL) + USDC ATA balance (tolerate missing ATA → 0).
+- [x] **Step 2:** `tsc`. Manual check vs a real address.
+- [x] **Step 3:** Commit.
 
 ---
 
@@ -148,18 +148,18 @@ SOL floor ≈ `0.005` (base fee + priority + ~0.0015 rent for the event account)
 `src/app/api/offramp/bridge/gas-fee-options/route.ts`, `src/lib/cctp/evm-chains.ts` (the
 `isChainEnabled` env-var rename), `.env.example`.
 
-- [ ] **Step 1:** `OfframpSourceChain` → `"stellar" | EvmChainKey | "solana"`. `funds-ledger.ts`
+- [x] **Step 1:** `OfframpSourceChain` → `"stellar" | EvmChainKey | "solana"`. `funds-ledger.ts`
   widens for free.
-- [ ] **Step 2:** `register-transfer`: add a `resolvedSourceChain === "solana"` branch →
+- [x] **Step 2:** `register-transfer`: add a `resolvedSourceChain === "solana"` branch →
   `sourceDomain = 5`. Keep the existing idempotency + `recordTransaction` path. Manual check:
   a `sourceChain: "solana"` call resolves domain 5 (clean up the test record after, like the EVM
   task did).
-- [ ] **Step 3:** `gas-fee-options`: `sourceChain === "solana"` → domains `5 → 6`, 6-dp.
-- [ ] **Step 4:** Rename `NEXT_PUBLIC_EVM_SOURCE_CHAINS_ENABLED` →
+- [x] **Step 3:** `gas-fee-options`: `sourceChain === "solana"` → domains `5 → 6`, 6-dp.
+- [x] **Step 4:** Rename `NEXT_PUBLIC_EVM_SOURCE_CHAINS_ENABLED` →
   `NEXT_PUBLIC_OFFRAMP_SOURCE_CHAINS_ENABLED`; `isChainEnabled` reads the new name, falls back to
   the old for one release; accepts `"solana"`. Update `.env.example` + the shipped prod value
   (ops note in the plan, not code).
-- [ ] **Step 5:** `tsc && npm test`. Commit.
+- [x] **Step 5:** `tsc && npm test`. Commit.
 
 ---
 
