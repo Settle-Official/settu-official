@@ -135,7 +135,6 @@ curl -X POST https://<your-deployment>/api/admin/onramp/retry-bridge \
 - `POST /api/offramp/verify-account`
 - `POST /api/offramp/paycrest/order` — create the Paycrest payout order
 - `GET /api/offramp/paycrest/order/[orderId]`
-- `POST /api/offramp/execute-payout`
 - `GET /api/offramp/status/[orderId]`
 - `GET /api/offramp/stream/[orderId]` — SSE status stream
 
