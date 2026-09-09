@@ -115,8 +115,10 @@ function usdcAtomic(amount) {
 }
 
 async function pollAttestation(sig) {
-  const url = `${IRIS}/v2/messages/5/${sig}`;
-  for (let i = 0; i < 40; i++) {
+  // Query-param form, matching src/lib/cctp/iris-client.ts (the path form
+  // `/v2/messages/5/<sig>` 404s).
+  const url = `${IRIS}/v2/messages/5?transactionHash=${sig}`;
+  for (let i = 0; i < 60; i++) {
     const res = await fetch(url);
     if (res.ok) {
       const data = await res.json();

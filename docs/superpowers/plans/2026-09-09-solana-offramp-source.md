@@ -49,14 +49,19 @@ signature (partial-sign). Also confirm devnet CCTP V2 `deposit_for_burn` lands e
   event keypair. **The #1 risk (exact account layout) is retired** — matches Circle's own
   `examples/v2/solana.ts` + the on-chain IDL.
 
-- [ ] **Step 2:** Run it with a funded devnet wallet (SOL via `solana airdrop`, devnet USDC via
-  `faucet.circle.com`). Confirm the burn lands + sandbox Iris returns a `complete` attestation.
+- [x] **Step 2:** **PASSED 2026-09-09.** Funded devnet wallet
+  `FbgrhPZ6oACLnRLKtsdDgwWFfQW8CALJLiHsEuDCyzs4` (5 SOL, 20 devnet USDC). Burn confirmed:
+  `3fqraNdKSh3rW7bur4AkibYoDszCMSBkNJAyztBw1xf7cVNrQ7jVaRDUys8KSvz3s7FSGbinugzY1uRJhro5CAX7`.
+  Sandbox Iris (`/v2/messages/5?transactionHash=<sig>` — **query-param** form, the path form
+  404s) returned `status: "complete"`, `cctpVersion: 2`, `sourceDomain 5 → destinationDomain 6`,
+  `amount 100000`, `maxFee 0`, full attestation signature. Two-signer send (wallet + ephemeral
+  event keypair) worked with a plain legacy `Transaction` + `sendAndConfirmTransaction`.
 - [ ] **Step 3:** Repeat the sign step through a real browser wallet (Phantom devnet) via a tiny
   HTML harness — confirm a partial-signed (event-keypair-already-signed) tx is accepted. **If a
   wallet rejects it, stop** and revisit the split: wallet `signTransaction` first, then client
   adds the event-keypair sig and submits raw (needs the `solana:signTransaction` feature, which
   Phantom/Solflare both expose — so this fallback is available).
-- [ ] **Step 4:** Record Step 2/3 outcomes here.
+- [ ] **Step 4:** Record Step 3 outcome here.
 
 ---
 
