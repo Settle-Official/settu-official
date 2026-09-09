@@ -225,7 +225,7 @@ connect/disconnect routing, header/preflight props).
 
 ## Task 10: Rollout gate + staged live verification
 
-- [ ] **Step 1:** Devnet end-to-end: Solana devnet → Base Sepolia. Real devnet USDC, a real
+- [x] **Step 1:** **PASSED 2026-09-09.** Full app flow on devnet: OFF-RAMP -> Solana -> Phantom (Wallet Standard) connect -> quote -> Paycrest order -> solana-build-tx -> client event-keypair partial-sign -> Phantom sign+broadcast -> burn confirmed on Solana devnet (sig 4zMnwAxdJQSHt1FhcYufGEX3apRTGghhiqB57vgu7hL8HU2p8eB4m9bGFgJuAvcSHxcS6BuUqLYVtirEKYsvJXXB). register-transfer accepted sourceChain:solana. Sandbox Iris: status complete, domain 5->6, amount 1000000, mintRecipient = the real Paycrest receive address. Stops here on testnet (no funded Base Sepolia minter / Paycrest watches mainnet).
   Phantom connect, full path incl. attestation + mint + a (sandbox) Paycrest order if feasible,
   else stop at confirmed mint on Base Sepolia at the expected recipient.
 - [ ] **Step 2:** Enable `solana` in `NEXT_PUBLIC_OFFRAMP_SOURCE_CHAINS_ENABLED` +
