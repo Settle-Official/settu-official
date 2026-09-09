@@ -20,17 +20,8 @@ import {
   type OnrampRecord,
 } from "./onramp-store";
 import { getAllbridgeTransferStatus } from "@/lib/offramp/adapters/allbridge-adapter";
-import { notify, alertManualAction } from "@/lib/notify/telegram";
-import { pushRecentTransaction, addVolume } from "@/lib/stats-store";
-
-function formatFiat(amount: string | undefined, currency: string): string {
-  const num = parseFloat(amount ?? "");
-  if (!Number.isFinite(num)) return "--";
-  const code = (currency || "NGN").toUpperCase();
-  return code === "NGN"
-    ? `₦${num.toLocaleString("en-NG", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-    : `${code} ${num.toFixed(2)}`;
-}
+import { alertManualAction } from "@/lib/notify/telegram";
+import { markOnrampDelivered } from "./mark-delivered";
 
 // If a bridge hasn't confirmed within this window, escalate once for manual
 // review (funds may be stuck) but keep watching.
@@ -66,33 +57,10 @@ export async function finalizeOnrampOrder(
   );
 
   if (transfer.status === "completed") {
-    await updateOnrampOrder(orderId, {
-      status: "delivered",
+    await markOnrampDelivered(orderId, {
       stellarTxHash: transfer.txHash,
+      deliveredUsdc: transfer.receiveAmount ?? record.baseUsdcAmount,
     });
-    await removePendingBridge(orderId);
-    void notify(
-      `Onramp <code>${orderId}</code> delivered to Stellar ✓` +
-        (record.baseUsdcAmount ? ` (${record.baseUsdcAmount} USDC)` : ""),
-      "success",
-    );
-
-    // Record it in the live transactions feed here (not client-side) so it's
-    // captured regardless of what actually detected delivery — cron, the
-    // SSE fast path, or a manual admin/Telegram retry check.
-    const deliveredUsdc = transfer.receiveAmount ?? record.baseUsdcAmount;
-    const usdcNum = parseFloat(deliveredUsdc ?? "");
-    void pushRecentTransaction({
-      txHash: transfer.txHash
-        ? `${transfer.txHash.slice(0, 4)}...${transfer.txHash.slice(-4)}`
-        : "----...----",
-      usdc: Number.isFinite(usdcNum) ? usdcNum.toFixed(2) : "--",
-      naira: formatFiat(record.fiatAmount, record.currency),
-      status: "COMPLETE",
-      type: "onramp",
-    });
-    if (Number.isFinite(usdcNum)) void addVolume(usdcNum);
-
     return "delivered";
   }
 

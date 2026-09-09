@@ -10,6 +10,7 @@ import {
   type EvmChainKey,
 } from "@/lib/cctp/evm-chains";
 import { isSolanaEnabled } from "@/lib/solana/config";
+import { fiatSymbol } from "@/lib/format/currency";
 
 export type OfframpSourceChainKey = "stellar" | EvmChainKey | "solana";
 
@@ -174,7 +175,10 @@ export function FormCard({
   // there is no need to hardcode one per currency.
   const getCurrencyPrefix = (code?: string) => {
     const target = (code || currency || "NGN").toUpperCase();
-    return currencies.find((c) => c.code === target)?.symbol || target;
+    // Paycrest's symbol wins when we have it; fiatSymbol supplies a known
+    // symbol for the live corridors otherwise, and the bare code as a last
+    // resort — never a wrong symbol.
+    return fiatSymbol(target, currencies.find((c) => c.code === target)?.symbol);
   };
 
   const selectedBank = banks.find((b) => b.code === bank);

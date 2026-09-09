@@ -22,6 +22,7 @@
  */
 
 import { getOnrampOrder, updateOnrampOrder } from "./onramp-store";
+import { markOnrampDelivered } from "./mark-delivered";
 import { finalizeOnrampOrder } from "./finalize";
 import { retryOnrampBridge } from "./retry-bridge";
 import { initializeAllbridgeSdk } from "@/lib/offramp/adapters/allbridge-adapter";
@@ -53,11 +54,11 @@ export async function checkOnrampStatus(
     const cctpStatus = await advanceCctpTransfer(record.cctpTransferId);
     if (cctpStatus === "completed") {
       const transfer = await getCctpTransfer(record.cctpTransferId);
-      await updateOnrampOrder(orderId, {
-        status: "delivered",
+      await markOnrampDelivered(orderId, {
         stellarTxHash: transfer?.mintTxHash,
       });
-      return { message: "Delivered ✓", level: "success" };
+      // markOnrampDelivered already posted the delivery alert.
+      return { message: "Delivered ✓", level: "success", alreadyAlerted: true };
     }
     if (cctpStatus === "failed") {
       await updateOnrampOrder(orderId, {

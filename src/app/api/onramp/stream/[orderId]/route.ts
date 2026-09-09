@@ -7,6 +7,7 @@ import {
 } from "@/lib/onramp/onramp-store";
 import { getCctpTransfer } from "@/lib/cctp/cctp-store";
 import { advanceCctpTransfer } from "@/lib/cctp/advance";
+import { markOnrampDelivered } from "@/lib/onramp/mark-delivered";
 import { alertManualAction } from "@/lib/notify/telegram";
 
 export const runtime = "nodejs";
@@ -91,8 +92,7 @@ export async function GET(
               const cctpStatus = await advanceCctpTransfer(record.cctpTransferId);
               if (cctpStatus === "completed") {
                 const transfer = await getCctpTransfer(record.cctpTransferId);
-                await updateOnrampOrder(orderId, {
-                  status: "delivered",
+                await markOnrampDelivered(orderId, {
                   stellarTxHash: transfer?.mintTxHash,
                 });
               } else if (cctpStatus === "failed") {
