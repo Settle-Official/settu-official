@@ -24,7 +24,7 @@
 
 ---
 
-## Task 1: Solana connectivity + partial-sign smoke test
+## Task 1: Solana connectivity + partial-sign smoke test — ✅ COMPLETE (2026-09-09)
 
 **Purpose:** De-risk the two biggest unknowns before building anything: (a) Wallet Standard
 detection + connect works for Phantom/Solflare in this app's context; (b) the wallet will
@@ -56,12 +56,13 @@ signature (partial-sign). Also confirm devnet CCTP V2 `deposit_for_burn` lands e
   404s) returned `status: "complete"`, `cctpVersion: 2`, `sourceDomain 5 → destinationDomain 6`,
   `amount 100000`, `maxFee 0`, full attestation signature. Two-signer send (wallet + ephemeral
   event keypair) worked with a plain legacy `Transaction` + `sendAndConfirmTransaction`.
-- [ ] **Step 3:** Repeat the sign step through a real browser wallet (Phantom devnet) via a tiny
-  HTML harness — confirm a partial-signed (event-keypair-already-signed) tx is accepted. **If a
-  wallet rejects it, stop** and revisit the split: wallet `signTransaction` first, then client
-  adds the event-keypair sig and submits raw (needs the `solana:signTransaction` feature, which
-  Phantom/Solflare both expose — so this fallback is available).
-- [ ] **Step 4:** Record Step 3 outcome here.
+- [x] **Step 3:** **PASSED 2026-09-09.** `scripts/solana-partial-sign-harness.html` — Phantom
+  (devnet) accepted a legacy `Transaction` that was `partialSign`ed with an ephemeral keypair
+  first, then `signAndSendTransaction`'d by the wallet. Confirmed devnet tx
+  `4sEWBUxb4sG7A9uzAqPfUzWAYqgPcg9yHhm8B2jvQz766B3BLwXcVxfeBnzViFji1zFqDTKbVzWXogtguwTwyPmR`.
+  No fallback needed — the client-generates-keypair → server-builds → client-partial-signs →
+  wallet-signs-and-sends split works.
+- [x] **Step 4:** Recorded above. **Task 1 complete — all three de-risking goals met.**
 
 ---
 
