@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Solana partial-sign harness (Task 1 Step 3)</title>
+<style>
+  body { font: 14px/1.5 ui-monospace, monospace; max-width: 760px; margin: 40px auto; padding: 0 16px; }
+  button { font: inherit; padding: 8px 14px; margin-right: 8px; cursor: pointer; }
+  pre { background: #111; color: #0f0; padding: 12px; white-space: pre-wrap; word-break: break-all; }
+  h1 { font-size: 18px; }
+</style>
+</head>
+<body>
+<h1>Solana partial-sign harness</h1>
+<p>
+  De-risks the Solana offramp plan (Task 1 Step 3): will a browser wallet
+  <code>signAndSendTransaction</code> a devnet transaction that <b>already carries</b>
+  an ephemeral keypair's signature (the CCTP "MessageSent event account" pattern —
+  <code>SystemProgram.createAccount</code> needs both the payer and the new account to sign)?
+</p>
+<p>Serve over http (not file://) so the wallet injects, e.g.:
+  <code>python3 -m http.server 8899</code> then open
+  <code>http://localhost:8899/scripts/solana-partial-sign-harness.html</code>.
+  Set your wallet to <b>Devnet</b>.</p>
+
+<button id="connect">1. Connect wallet</button>
+<button id="run" disabled>2. Build (partial-sign) + send</button>
+<pre id="out">ready.</pre>
+
+<script src="https://cdn.jsdelivr.net/npm/@solana/web3.js@1.95.3/lib/index.iife.min.js"></script>
+<script>
+const { Connection, PublicKey, Keypair, Transaction, SystemProgram, clusterApiUrl } = solanaWeb3;
+const out = document.getElementById("out");
+const log = (...a) => { out.textContent += "\n" + a.map(x => typeof x === "string" ? x : JSON.stringify(x)).join(" "); };
+let provider = null, pubkey = null;
+
+function getProvider() {
+  // Legacy injection covers Phantom / Solflare / Backpack for a quick test.
+  if (window.phantom?.solana?.isPhantom) return window.phantom.solana;
+  if (window.solana) return window.solana;
+  return null;
+}
+
+document.getElementById("connect").onclick = async () => {
+  provider = getProvider();
+  if (!provider) return log("No injected Solana wallet found. Install Phantom / Solflare.");
+  try {
+    const res = await provider.connect();
+    pubkey = new PublicKey(res.publicKey.toString());
+    log("connected:", pubkey.toBase58());
+    document.getElementById("run").disabled = false;
+  } catch (e) { log("connect failed:", e.message || String(e)); }
+};
+
+document.getElementById("run").onclick = async () => {
+  try {
+    const connection = new Connection(clusterApiUrl("devnet"), "confirmed");
+    const ephemeral = Keypair.generate();
+    log("\nephemeral account:", ephemeral.publicKey.toBase58());
+
+    const rent = await connection.getMinimumBalanceForRentExemption(0);
+    const ix = SystemProgram.createAccount({
+      fromPubkey: pubkey,
+      newAccountPubkey: ephemeral.publicKey,
+      lamports: rent,
+      space: 0,
+      programId: SystemProgram.programId,
+    });
+
+    const { blockhash } = await connection.getLatestBlockhash("confirmed");
+    const tx = new Transaction({ feePayer: pubkey, recentBlockhash: blockhash }).add(ix);
+
+    // The crux: client partial-signs with the ephemeral keypair FIRST...
+    tx.partialSign(ephemeral);
+    log("partial-signed with ephemeral. signatures so far:",
+      tx.signatures.map(s => (s.signature ? "yes" : "MISSING") + " " + s.publicKey.toBase58().slice(0, 8)));
+
+    // ...then the wallet signs + sends. Does it accept the pre-existing sig?
+    const { signature } = await provider.signAndSendTransaction(tx);
+    log("\n✅ SENT:", signature);
+    log("https://explorer.solana.com/tx/" + signature + "?cluster=devnet");
+    await connection.confirmTransaction(signature, "confirmed");
+    log("✅ CONFIRMED — wallet accepted the partially-signed tx. Step 3 PASSES.");
+  } catch (e) {
+    log("\n❌ FAILED:", e.message || String(e));
+    log("If the wallet rejected the pre-signed account, the fallback is: wallet.signTransaction() first, then client adds the ephemeral sig and submits raw.");
+  }
+};
+</script>
+</body>
+</html>
