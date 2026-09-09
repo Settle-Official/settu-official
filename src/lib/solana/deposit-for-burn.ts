@@ -10,13 +10,20 @@
  * real confirmed devnet burn (plan Task 1). No forwarder hook — the
  * destination is Paycrest's Base receive address directly.
  */
-import anchor from "@coral-xyz/anchor";
+// Named imports — @coral-xyz/anchor is CJS and its default export is
+// undefined under Next's webpack bundling (`import anchor from …` only works
+// in a plain Node ESM script).
+import {
+  Program,
+  AnchorProvider,
+  BN,
+  type Idl,
+  type Wallet,
+} from "@coral-xyz/anchor";
 import { Connection, PublicKey, type TransactionInstruction } from "@solana/web3.js";
 import { SOLANA_CONFIG, SOLANA_USDC_DECIMALS } from "./config";
 import { CCTP_DOMAIN, FINALITY_THRESHOLD } from "../cctp/constants";
 import TMM_IDL from "./idl/token_messenger_minter_v2.json" with { type: "json" };
-
-const { Program, AnchorProvider, BN } = anchor;
 
 const MT_ID = new PublicKey(SOLANA_CONFIG.messageTransmitterV2);
 const TMM_ID = new PublicKey(SOLANA_CONFIG.tokenMessengerMinterV2);
@@ -78,8 +85,8 @@ export function deriveCctpPdas(destinationDomain: number) {
 // Anchor's `Program` needs a provider, but `.instruction()` never touches it
 // for `deposit_for_burn` (every account is passed or PDA-derivable from IDL
 // seeds). A stub connection + no-op wallet keeps this module RPC-free.
-let cachedProgram: anchor.Program | null = null;
-function getProgram(): anchor.Program {
+let cachedProgram: Program | null = null;
+function getProgram(): Program {
   if (!cachedProgram) {
     const stubWallet = {
       publicKey: PublicKey.default,
@@ -88,10 +95,10 @@ function getProgram(): anchor.Program {
     };
     const provider = new AnchorProvider(
       new Connection("http://127.0.0.1:1"),
-      stubWallet as anchor.Wallet,
+      stubWallet as Wallet,
       { commitment: "confirmed" },
     );
-    cachedProgram = new Program(TMM_IDL as anchor.Idl, provider);
+    cachedProgram = new Program(TMM_IDL as Idl, provider);
   }
   return cachedProgram;
 }
