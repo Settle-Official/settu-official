@@ -73,12 +73,12 @@ signature (partial-sign). Also confirm devnet CCTP V2 `deposit_for_burn` lands e
 **Produces:** `SOLANA_CONFIG` (`{ messageTransmitterV2, tokenMessengerMinterV2, usdcMint,
 cctpDomain: 5, usdcDecimals: 6, rpcUrl }`), `SOLANA_CCTP_DOMAIN = 5`, `isSolanaEnabled()`.
 
-- [ ] **Step 1:** Failing test — addresses are valid base58 `PublicKey`s, domain is 5, decimals 6.
-- [ ] **Step 2:** Config, mainnet/devnet keyed off `CCTP_NETWORK` (reuse existing var). Header
+- [x] **Step 1:** Failing test — addresses are valid base58 `PublicKey`s, domain is 5, decimals 6.
+- [x] **Step 2:** Config, mainnet/devnet keyed off `CCTP_NETWORK` (reuse existing var). Header
   comment records the two-source verification (Circle docs date + explorer URL per address).
   `rpcUrl` from `SOLANA_RPC_URL`, throws if unset.
-- [ ] **Step 3:** Pass. Add `SOLANA_RPC_URL` to `.env.example`.
-- [ ] **Step 4:** Commit.
+- [x] **Step 3:** Pass. Add `SOLANA_RPC_URL` to `.env.example`.
+- [x] **Step 4:** Commit.
 
 ---
 
