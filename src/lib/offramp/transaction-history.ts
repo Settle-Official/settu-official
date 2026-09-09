@@ -20,7 +20,7 @@ const CHRONOLOGICAL_INDEX_KEY = "offramp:tx:index";
 const ADDRESS_INDEX_KEY = (address: string) =>
   `offramp:tx:by-address:${address.toLowerCase()}`;
 
-export type OfframpSourceChain = "stellar" | EvmChainKey;
+export type OfframpSourceChain = "stellar" | EvmChainKey | "solana";
 
 export interface OfframpTransactionRecord {
   id: string; // burn/transfer tx hash -- stable, unique per transaction

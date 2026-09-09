@@ -21,24 +21,15 @@ import {
   type Wallet,
 } from "@coral-xyz/anchor";
 import { Connection, PublicKey, type TransactionInstruction } from "@solana/web3.js";
-import { SOLANA_CONFIG, SOLANA_USDC_DECIMALS } from "./config";
+import { SOLANA_CONFIG, usdcFloatToSolanaAtomic } from "./config";
 import { CCTP_DOMAIN, FINALITY_THRESHOLD } from "../cctp/constants";
 import TMM_IDL from "./idl/token_messenger_minter_v2.json" with { type: "json" };
 
+// Re-export so existing importers (and the tests) keep working.
+export { usdcFloatToSolanaAtomic };
+
 const MT_ID = new PublicKey(SOLANA_CONFIG.messageTransmitterV2);
 const TMM_ID = new PublicKey(SOLANA_CONFIG.tokenMessengerMinterV2);
-
-/** 6-dp, truncating — identical semantics to `usdcFloatToEvmInt`. */
-export function usdcFloatToSolanaAtomic(amount: string): bigint {
-  const [intPart, fracPart = ""] = amount.split(".");
-  const frac = fracPart
-    .padEnd(SOLANA_USDC_DECIMALS, "0")
-    .slice(0, SOLANA_USDC_DECIMALS);
-  return (
-    BigInt(intPart || "0") * BigInt(10) ** BigInt(SOLANA_USDC_DECIMALS) +
-    BigInt(frac || "0")
-  );
-}
 
 /**
  * CCTP's `mintRecipient` on the destination side is a 32-byte value. For a

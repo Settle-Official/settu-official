@@ -15,6 +15,8 @@
  * two-source standard as constants.ts / evm-chains.ts.
  */
 
+import { offrampSourceAllowlist } from "../cctp/evm-chains";
+
 // Same program IDs on mainnet and devnet (per Circle's docs).
 const MESSAGE_TRANSMITTER_V2 = "CCTPV2Sm4AdWt5296sk4P66VBZ7bEhcARwFaaS9YPbeC";
 const TOKEN_MESSENGER_MINTER_V2 = "CCTPV2vPZJS2u2BBsUoscuikbYjnpFmbFsvVuJdgUMQe";
@@ -53,6 +55,22 @@ export const SOLANA_CONFIG: SolanaConfig = {
   },
 };
 
+/**
+ * USDC float -> atomic (6-dp), truncating — identical semantics to
+ * `usdcFloatToEvmInt`. Lives here (dep-free) rather than in
+ * deposit-for-burn.ts so routes can price fees without pulling in Anchor.
+ */
+export function usdcFloatToSolanaAtomic(amount: string): bigint {
+  const [intPart, fracPart = ""] = amount.split(".");
+  const frac = fracPart
+    .padEnd(SOLANA_USDC_DECIMALS, "0")
+    .slice(0, SOLANA_USDC_DECIMALS);
+  return (
+    BigInt(intPart || "0") * BigInt(10) ** BigInt(SOLANA_USDC_DECIMALS) +
+    BigInt(frac || "0")
+  );
+}
+
 /** Throws if the server RPC isn't configured — call from route handlers. */
 export function requireSolanaRpcUrl(): string {
   const url = process.env.SOLANA_RPC_URL;
@@ -61,18 +79,11 @@ export function requireSolanaRpcUrl(): string {
 }
 
 /**
- * Rollout gate. `NEXT_PUBLIC_OFFRAMP_SOURCE_CHAINS_ENABLED` is the offramp-wide
- * allowlist (renamed from `…_EVM_SOURCE_CHAINS_ENABLED`; the old name is still
- * honoured for one release). Empty/unset ⇒ Solana is not selectable and the
- * server routes reject it.
+ * Rollout gate — shares the offramp-wide allowlist
+ * (`NEXT_PUBLIC_OFFRAMP_SOURCE_CHAINS_ENABLED`, old EVM name honoured one
+ * release) with the EVM chains. Empty/unset ⇒ Solana isn't selectable and
+ * the server routes reject it.
  */
 export function isSolanaEnabled(): boolean {
-  const raw =
-    process.env.NEXT_PUBLIC_OFFRAMP_SOURCE_CHAINS_ENABLED ??
-    process.env.NEXT_PUBLIC_EVM_SOURCE_CHAINS_ENABLED ??
-    "";
-  return raw
-    .split(",")
-    .map((s) => s.trim().toLowerCase())
-    .includes("solana");
+  return offrampSourceAllowlist().includes("solana");
 }

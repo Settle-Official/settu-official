@@ -9,6 +9,11 @@ import {
   isCctpBridgeChain,
   type EvmChainKey,
 } from "@/lib/cctp/evm-chains";
+import {
+  SOLANA_CCTP_DOMAIN,
+  SOLANA_USDC_DECIMALS,
+  usdcFloatToSolanaAtomic,
+} from "@/lib/solana/config";
 
 const EVM_USDC_DECIMALS = 6;
 
@@ -39,7 +44,11 @@ export async function GET(request: NextRequest) {
     let sourceDomain: number = CCTP_DOMAIN.stellar;
     let decimals: number = STELLAR_USDC_DECIMALS;
     let toAtomic: (amount: string) => bigint = usdcFloatToStellarInt;
-    if (sourceChain !== "stellar") {
+    if (sourceChain === "solana") {
+      sourceDomain = SOLANA_CCTP_DOMAIN;
+      decimals = SOLANA_USDC_DECIMALS;
+      toAtomic = usdcFloatToSolanaAtomic;
+    } else if (sourceChain !== "stellar") {
       const chainConfig = EVM_SOURCE_CHAINS[sourceChain as EvmChainKey];
       if (!chainConfig || !isCctpBridgeChain(chainConfig)) {
         return NextResponse.json(
