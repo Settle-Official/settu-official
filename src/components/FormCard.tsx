@@ -9,20 +9,24 @@ import {
   isChainEnabled,
   type EvmChainKey,
 } from "@/lib/cctp/evm-chains";
+import { isSolanaEnabled } from "@/lib/solana/config";
 
-export type OfframpSourceChainKey = "stellar" | EvmChainKey;
+export type OfframpSourceChainKey = "stellar" | EvmChainKey | "solana";
 
 /**
- * "Stellar" plus every EVM chain turned on via
- * NEXT_PUBLIC_EVM_SOURCE_CHAINS_ENABLED. Until that var is set this is just
- * `[{ stellar }]` and the dropdown looks exactly like today's single-source
- * flow. Computed once at module load — the allowlist is build-time config.
+ * "Stellar" plus every non-Stellar chain turned on via
+ * NEXT_PUBLIC_OFFRAMP_SOURCE_CHAINS_ENABLED. Until that var lists something
+ * this is just `[{ stellar }]` and the dropdown is hidden — today's
+ * single-source flow, unchanged. Computed once at module load.
  */
 const SOURCE_CHAIN_OPTIONS: { code: OfframpSourceChainKey; name: string }[] = [
   { code: "stellar", name: "Stellar" },
   ...Object.values(EVM_SOURCE_CHAINS)
     .filter((c) => isChainEnabled(c.key))
     .map((c) => ({ code: c.key as OfframpSourceChainKey, name: c.label })),
+  ...(isSolanaEnabled()
+    ? [{ code: "solana" as OfframpSourceChainKey, name: "Solana" }]
+    : []),
 ];
 
 export interface FormCardProps {
@@ -187,15 +191,18 @@ export function FormCard({
   );
   const [isLoadingFees, setIsLoadingFees] = useState(false);
 
-  // EVM-only: does the connected wallet hold enough of the source chain's
-  // native token to pay gas for the burn/transfer it's about to sign?
-  const [evmGasCheck, setEvmGasCheck] = useState<{
+  // For a non-Stellar source: does the connected wallet hold enough of the
+  // chain's native token (ETH / SOL / …) to pay for the burn it's about to
+  // sign? Mirrors the Stellar XLM-reserve check.
+  const [gasCheck, setGasCheck] = useState<{
     sufficient: boolean;
     nativeBalance: string;
     estimatedGasNative: string;
     nativeCurrencySymbol: string;
   } | null>(null);
-  const isEvmSource = sourceChain !== "stellar";
+  const isEvmSource = sourceChain !== "stellar" && sourceChain !== "solana";
+  const isSolanaSource = sourceChain === "solana";
+  const isExternalSource = isEvmSource || isSolanaSource;
 
   // Reset form fields when resetKey changes (after successful transaction)
   useEffect(() => {
@@ -234,32 +241,51 @@ export function FormCard({
     return () => clearTimeout(debounce);
   }, [burnUsdc, sourceChain]);
 
-  // EVM gas pre-flight — mirrors the Stellar XLM-reserve check's intent: don't
-  // let the user start an offramp that will fail when the wallet asks them to
-  // pay gas. Advisory (the wallet's own gas price at signing is authoritative)
-  // but a hard block on INITIATE when the balance is clearly short.
+  // Native-gas pre-flight — don't let the user start an offramp that will
+  // fail when the wallet asks them to pay for the burn. Advisory but a hard
+  // INITIATE block when the balance is clearly short. EVM uses a gas
+  // estimate (evm-gas-preflight); Solana's fees are near-fixed so a balance
+  // read against a small floor (solana-balances) is enough.
   useEffect(() => {
-    if (!isEvmSource || !isConnected || !walletAddress || !(burnUsdc && burnUsdc > 0)) {
-      setEvmGasCheck(null);
+    if (!isExternalSource || !isConnected || !walletAddress) {
+      setGasCheck(null);
+      return;
+    }
+    if (isEvmSource && !(burnUsdc && burnUsdc > 0)) {
+      setGasCheck(null);
       return;
     }
     let cancelled = false;
     const run = async () => {
       try {
-        const params = new URLSearchParams({
-          address: walletAddress,
-          chain: sourceChain,
-          amount: String(burnUsdc),
-        });
-        const res = await fetch(
-          `/api/offramp/bridge/evm-gas-preflight?${params.toString()}`,
-        );
-        if (!res.ok || cancelled) return;
-        const data = await res.json();
-        if (!cancelled) setEvmGasCheck(data);
+        let normalised: typeof gasCheck = null;
+        if (isEvmSource) {
+          const params = new URLSearchParams({
+            address: walletAddress,
+            chain: sourceChain,
+            amount: String(burnUsdc),
+          });
+          const res = await fetch(
+            `/api/offramp/bridge/evm-gas-preflight?${params.toString()}`,
+          );
+          if (!res.ok || cancelled) return;
+          normalised = await res.json();
+        } else {
+          const res = await fetch(
+            `/api/offramp/bridge/solana-balances?address=${walletAddress}`,
+          );
+          if (!res.ok || cancelled) return;
+          const d = await res.json();
+          normalised = {
+            sufficient: d.sufficientForGas,
+            nativeBalance: d.sol,
+            estimatedGasNative: "0.005",
+            nativeCurrencySymbol: "SOL",
+          };
+        }
+        if (!cancelled) setGasCheck(normalised);
       } catch {
-        // Network hiccup — leave the last known result (or null) rather than
-        // hard-blocking on a failed check.
+        // Network hiccup — keep the last result rather than hard-blocking.
       }
     };
     const debounce = setTimeout(run, 500);
@@ -267,7 +293,7 @@ export function FormCard({
       cancelled = true;
       clearTimeout(debounce);
     };
-  }, [isEvmSource, isConnected, walletAddress, sourceChain, burnUsdc]);
+  }, [isExternalSource, isEvmSource, isConnected, walletAddress, sourceChain, burnUsdc]);
 
   // Fetch supported currencies on mount
   useEffect(() => {
@@ -477,15 +503,15 @@ export function FormCard({
 
   // Only a definitive "insufficient" result blocks — a null check (not run
   // yet, or the check itself errored) never hard-blocks.
-  const evmGasShort = isEvmSource && evmGasCheck?.sufficient === false;
+  const gasShort = isExternalSource && gasCheck?.sufficient === false;
 
   const getButtonText = () => {
     if (isExecutingOfframp) return "INITIATING OFFRAMP...";
     if (isConnecting) return "WAITING FOR SIGNATURE...";
     if (!isConnected) return "CONNECT WALLET";
     if (hasInsufficientBalance) return "INSUFFICIENT USDC BALANCE";
-    if (evmGasShort)
-      return `INSUFFICIENT ${evmGasCheck?.nativeCurrencySymbol ?? "GAS"} FOR GAS`;
+    if (gasShort)
+      return `INSUFFICIENT ${gasCheck?.nativeCurrencySymbol ?? "GAS"} FOR GAS`;
     return "INITIATE OFFRAMP →";
   };
 
@@ -496,7 +522,7 @@ export function FormCard({
     !!quote &&
     meetsMinimum &&
     !hasInsufficientBalance &&
-    !evmGasShort &&
+    !gasShort &&
     /^\+?\d{6,20}$/.test(accountNumber.trim()) &&
     !!bank &&
     !!accountName;
@@ -544,10 +570,12 @@ export function FormCard({
               ? "Waiting for wallet signature before opening the off-ramp form."
               : sourceChain === "stellar"
                 ? "Securely connect a Stellar-compatible wallet before entering payout details."
-                : `Connect an EVM wallet (WalletConnect) on ${
-                    SOURCE_CHAIN_OPTIONS.find((o) => o.code === sourceChain)?.name ??
-                    sourceChain
-                  } before entering payout details.`}
+                : isSolanaSource
+                  ? "Connect a Solana wallet (Phantom, Solflare…) before entering payout details."
+                  : `Connect an EVM wallet on ${
+                      SOURCE_CHAIN_OPTIONS.find((o) => o.code === sourceChain)?.name ??
+                      sourceChain
+                    } before entering payout details.`}
         </p>
       </div>
 
@@ -661,19 +689,17 @@ export function FormCard({
                 Balance {usdcBalance.toFixed(6)} USDC
               </span>
             ) : null}
-            {/* EVM gas pre-flight — native token, separate from the USDC balance above. */}
-            {isEvmSource && evmGasCheck && (
+            {/* Native-gas pre-flight — ETH / SOL, separate from the USDC balance above. */}
+            {isExternalSource && gasCheck && (
               <span
                 className={cn(
                   "text-[0.68rem]",
-                  evmGasCheck.sufficient
-                    ? "text-[var(--muted)]"
-                    : "text-red-400",
+                  gasCheck.sufficient ? "text-[var(--muted)]" : "text-red-400",
                 )}
               >
-                {evmGasCheck.sufficient
-                  ? `Gas: ~${Number(evmGasCheck.estimatedGasNative).toFixed(6)} ${evmGasCheck.nativeCurrencySymbol} (you have ${Number(evmGasCheck.nativeBalance).toFixed(6)})`
-                  : `Insufficient ${evmGasCheck.nativeCurrencySymbol} for gas — you have ${Number(evmGasCheck.nativeBalance).toFixed(6)}, need ~${Number(evmGasCheck.estimatedGasNative).toFixed(6)}`}
+                {gasCheck.sufficient
+                  ? `Gas: ~${Number(gasCheck.estimatedGasNative).toFixed(6)} ${gasCheck.nativeCurrencySymbol} (you have ${Number(gasCheck.nativeBalance).toFixed(6)})`
+                  : `Insufficient ${gasCheck.nativeCurrencySymbol} for gas — you have ${Number(gasCheck.nativeBalance).toFixed(6)}, need ~${Number(gasCheck.estimatedGasNative).toFixed(6)}`}
               </span>
             )}
           </div>
