@@ -28,6 +28,12 @@ export interface OrderMeta {
   reference?: string;
   network?: string;
   /**
+   * Which chain the user burned/transferred USDC from — "stellar" | an EVM
+   * chain key | "solana". Recorded so webhook alerts (whose payload lacks it)
+   * can show the source.
+   */
+  sourceChain?: string;
+  /**
    * Paycrest's per-order deposit address — the CCTP burn's mintRecipient.
    * Stashed so a stuck/expired order can be diagnosed straight from our own
    * store instead of re-fetching it from Paycrest's API, and so a burn found

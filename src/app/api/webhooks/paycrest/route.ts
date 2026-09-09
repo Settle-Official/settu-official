@@ -214,6 +214,7 @@ export async function POST(request: NextRequest) {
       amountUsdc: meta?.amountUsdc ?? data?.amount,
       rate: meta?.rate ?? payloadRate,
       payoutValue,
+      sourceChain: meta?.sourceChain,
       reference: meta?.reference ?? data?.reference,
     });
 

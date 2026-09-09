@@ -781,6 +781,7 @@ export function StellarampDashboard() {
             amount: normalizedOrderAmount,
             token: tradeData.token,
             network: "base",
+            sourceChain: tradeData.sourceChain,
             rate: normalizedRate,
             reference: txId,
             recipient: {
@@ -1123,6 +1124,7 @@ export function StellarampDashboard() {
             amount: normalizedOrderAmount,
             token: tradeData.token,
             network: "base",
+            sourceChain: tradeData.sourceChain,
             rate: normalizedRate,
             reference: txId,
             recipient: {
@@ -1443,6 +1445,7 @@ export function StellarampDashboard() {
             amount: normalizedOrderAmount,
             token: tradeData.token,
             network: "base",
+            sourceChain: tradeData.sourceChain,
             rate: normalizedRate,
             reference: txId,
             recipient: {
