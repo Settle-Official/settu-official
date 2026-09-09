@@ -14,9 +14,10 @@
 
 ## Implementation status & deviations (updated 2026-09-09)
 
-Tasks 1–10 implemented; Task 11 in progress (Arbitrum verified end-to-end with
-real funds — see Task 11 Step 2). Not yet: Base direct-transfer path tested,
-other chains spot-checked, production enabled, `dev` pushed.
+Tasks 1–10 implemented; Task 11 in progress. Both distinct code paths verified
+end-to-end with real funds (2026-09-09): CCTP-bridge via **Arbitrum**, direct
+`transfer()` via **Base** — see Task 11 Step 2. Not yet: Optimism / Avalanche /
+Polygon / Ethereum spot-checked (config-only), production enabled, `dev` pushed.
 
 Where the build diverged from the plan text below:
 
@@ -1586,9 +1587,15 @@ bank account.** BRIDGE FEE line showed the real Arbitrum→Base CCTP fee (~1.4 b
 non-zero). Connection also confirmed working via WalletConnect QR (mobile) as an
 alternative transport.
 
-Not yet verified: the Base direct-transfer path (genuinely different code —
-`transfer()`, no CCTP, `base-direct-register`), and Optimism / Avalanche /
-Polygon / Ethereum (config-only difference from Arbitrum). Production env not yet
+**Base direct-transfer path also verified 2026-09-09** (local dev vs mainnet):
+a real small-amount offramp from Base completed end to end — single `transfer()`
+signature (no approve, no CCTP), `base-direct-register` recorded it, Paycrest
+settled real fiat. Progress stepper correctly showed "Submitting on Base". This
+was the one genuinely-different code path; both it and the CCTP-bridge path
+(Arbitrum) are now proven.
+
+Not yet verified: Optimism / Avalanche / Polygon / Ethereum (config-only
+difference from Arbitrum — same CCTP-bridge code). Production env not yet
 switched on — tested locally only; `dev` branch commits not yet pushed.
 
 - [ ] **Step 3: Only after Step 2 succeeds, enable the remaining chains**
