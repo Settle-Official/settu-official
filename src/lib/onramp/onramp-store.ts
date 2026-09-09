@@ -21,6 +21,8 @@ const redis = new Redis({
 const TTL_SECONDS = 7 * 24 * 60 * 60;
 
 const key = (orderId: string) => `onramp:order:${orderId}`;
+const deliveryRecordedKey = (orderId: string) =>
+  `onramp:delivery-recorded:${orderId}`;
 
 export interface OnrampRecord {
   orderId: string;
@@ -134,6 +136,17 @@ export async function updateOnrampOrder(
  * the Base→Stellar bridge twice for the same order. Returns true if the caller
  * acquired the lock. Auto-expires so a crashed handler can't wedge an order.
  */
+// Atomic SET NX so the three paths that detect a delivery can't double-count it.
+export async function claimOnrampDeliveryRecording(
+  orderId: string,
+): Promise<boolean> {
+  const result = await redis.set(deliveryRecordedKey(orderId), "1", {
+    nx: true,
+    ex: TTL_SECONDS,
+  });
+  return result === "OK";
+}
+
 export async function acquireBridgeLock(orderId: string): Promise<boolean> {
   const result = await redis.set(`onramp:bridge-lock:${orderId}`, "1", {
     nx: true,
