@@ -152,7 +152,9 @@ async function submitAndConfirmSoroban(signedXdr: string): Promise<string> {
     const statusData = await statusRes.json().catch(() => ({}));
     if (statusData?.status === "SUCCESS") return txHash;
     if (statusData?.status === "FAILED") {
-      throw new Error("Transaction failed on-chain. Your wallet was not debited.");
+      throw new Error(
+        "Transaction failed on-chain. Your wallet was not debited.",
+      );
     }
     // NOT_FOUND — keep polling
   }
@@ -386,7 +388,9 @@ export function StellarampDashboard() {
     gasFeeOptions: null,
   });
 
-  const [platformStats, setPlatformStats] = useState<PlatformStats | null>(null);
+  const [platformStats, setPlatformStats] = useState<PlatformStats | null>(
+    null,
+  );
 
   // Fetch stats on mount
   useEffect(() => {
@@ -429,8 +433,11 @@ export function StellarampDashboard() {
     let cancelled = false;
     const load = async () => {
       try {
-        let normalised: { usdc: string; native: string; nativeSymbol: string } | null =
-          null;
+        let normalised: {
+          usdc: string;
+          native: string;
+          nativeSymbol: string;
+        } | null = null;
         if (isSolanaSource) {
           const res = await fetch(
             `/api/offramp/bridge/solana-balances?address=${externalWalletAddress}`,
@@ -448,7 +455,11 @@ export function StellarampDashboard() {
           );
           if (!res.ok || cancelled) return;
           const d = await res.json();
-          normalised = { usdc: d.usdc, native: d.native, nativeSymbol: d.nativeSymbol };
+          normalised = {
+            usdc: d.usdc,
+            native: d.native,
+            nativeSymbol: d.nativeSymbol,
+          };
         }
         if (!cancelled) setExternalBalances(normalised);
       } catch {
@@ -461,7 +472,13 @@ export function StellarampDashboard() {
       cancelled = true;
       clearInterval(iv);
     };
-  }, [mode, sourceChain, isExternalSource, isSolanaSource, externalWalletAddress]);
+  }, [
+    mode,
+    sourceChain,
+    isExternalSource,
+    isSolanaSource,
+    externalWalletAddress,
+  ]);
 
   // Load connected wallet USDC balance from Stellar Horizon
   useEffect(() => {
@@ -532,7 +549,7 @@ export function StellarampDashboard() {
           Number.isFinite(subentryCount) ? subentryCount : null,
         );
       } catch (error) {
-                setStellarUsdcBalance("0.00");
+        setStellarUsdcBalance("0.00");
         setStellarXlmBalance("0.00");
         setStellarUsdcBalanceRaw(null);
         setStellarXlmBalanceRaw(null);
@@ -836,13 +853,16 @@ export function StellarampDashboard() {
           if (!res.ok) {
             const payload = await res.json().catch(() => ({}));
             throw new Error(
-              payload?.error || `Failed to build bridge transaction: ${res.status}`,
+              payload?.error ||
+                `Failed to build bridge transaction: ${res.status}`,
             );
           }
           return res.json();
         } catch (fetchErr: any) {
           if (fetchErr?.name === "AbortError") {
-            throw new Error("Build transaction timed out (30s). Please try again.");
+            throw new Error(
+              "Build transaction timed out (30s). Please try again.",
+            );
           }
           throw fetchErr;
         } finally {
@@ -888,8 +908,7 @@ export function StellarampDashboard() {
             (op: any) => op.type === "invokeHostFunction",
           );
         }
-      } catch (parseErr) {
-              }
+      } catch (parseErr) {}
 
       if (hasSorobanOps) {
         stellarTxHash = await submitAndConfirmSoroban(signedXdr);
@@ -943,7 +962,7 @@ export function StellarampDashboard() {
       // Payout polling is what actually matters (Paycrest settling to the bank).
       const bridgeResult = pollBridgeStatus(txId, stellarTxHash).catch(
         (err) => {
-                    // Don't fail the overall flow — bridge may still complete in background
+          // Don't fail the overall flow — bridge may still complete in background
         },
       );
       const payoutResult = pollPayoutStatus(txId, payoutOrderId);
@@ -974,10 +993,9 @@ export function StellarampDashboard() {
       // Reset the form so the user can start a fresh offramp
       setFormResetKey((k) => k + 1);
     } catch (error: any) {
-      
       // Log detailed Horizon error if available
       if (error?.response?.data) {
-              }
+      }
 
       setTradeState((prev) => ({ ...prev, error: error.message }));
       setOfframpStep("error");
@@ -1187,7 +1205,8 @@ export function StellarampDashboard() {
           if (!res.ok) {
             const payload = await res.json().catch(() => ({}));
             throw new Error(
-              payload?.error || `Failed to build burn transaction: ${res.status}`,
+              payload?.error ||
+                `Failed to build burn transaction: ${res.status}`,
             );
           }
           return res.json() as Promise<{
@@ -1438,7 +1457,9 @@ export function StellarampDashboard() {
         });
       } catch (fetchErr: any) {
         if (fetchErr?.name === "AbortError") {
-          throw new Error("Paycrest order request timed out (20s). Please try again.");
+          throw new Error(
+            "Paycrest order request timed out (20s). Please try again.",
+          );
         }
         throw new Error(`Paycrest order network error: ${fetchErr.message}`);
       } finally {
@@ -1459,12 +1480,20 @@ export function StellarampDashboard() {
       const orderPayload = await orderResponse.json();
       const paycrestOrder = orderPayload?.data || orderPayload;
       const payoutOrderId: string | undefined = paycrestOrder?.id;
-      const settlementAddress: string | undefined = paycrestOrder?.receiveAddress;
+      const settlementAddress: string | undefined =
+        paycrestOrder?.receiveAddress;
       if (!payoutOrderId || !settlementAddress) {
         throw new Error("Paycrest order response missing id/receiveAddress");
       }
-      setTradeState((prev) => ({ ...prev, payoutOrderId, payoutStatus: "pending" }));
-      TransactionStorage.update(txId, { payoutOrderId, payoutStatus: "pending" });
+      setTradeState((prev) => ({
+        ...prev,
+        payoutOrderId,
+        payoutStatus: "pending",
+      }));
+      TransactionStorage.update(txId, {
+        payoutOrderId,
+        payoutStatus: "pending",
+      });
       setUserTransactions(TransactionStorage.getByUser(connectedAddress));
 
       // 3) Build the unsigned burn tx (client generates the event keypair).
@@ -1483,7 +1512,8 @@ export function StellarampDashboard() {
       if (!buildRes.ok) {
         const payload = await buildRes.json().catch(() => ({}));
         throw new Error(
-          payload?.error || `Failed to build burn transaction: ${buildRes.status}`,
+          payload?.error ||
+            `Failed to build burn transaction: ${buildRes.status}`,
         );
       }
       const { transactionBase64 } = await buildRes.json();
@@ -1540,7 +1570,10 @@ export function StellarampDashboard() {
       setTradeState((prev) => ({ ...prev, error: error.message }));
       setOfframpStep("error");
       setOfframpError(error.message);
-      TransactionStorage.update(txId, { status: "failed", error: error.message });
+      TransactionStorage.update(txId, {
+        status: "failed",
+        error: error.message,
+      });
       setUserTransactions(TransactionStorage.getByUser(connectedAddress));
     } finally {
       setIsExecutingOfframp(false);
@@ -1559,8 +1592,8 @@ export function StellarampDashboard() {
         const response = await fetch(`/api/offramp/bridge/status/${txHash}`);
         if (!response.ok) {
           consecutiveErrors++;
-                    if (consecutiveErrors >= MAX_ERRORS) {
-                        return; // soft exit — don't throw
+          if (consecutiveErrors >= MAX_ERRORS) {
+            return; // soft exit — don't throw
           }
           await new Promise((resolve) => setTimeout(resolve, 10000));
           attempts++;
@@ -1574,9 +1607,7 @@ export function StellarampDashboard() {
         setTradeState((prev) => ({ ...prev, bridgeStatus: status.status }));
         TransactionStorage.update(txId, { bridgeStatus: status.status });
         if (activeUserAddress)
-          setUserTransactions(
-            TransactionStorage.getByUser(activeUserAddress),
-          );
+          setUserTransactions(TransactionStorage.getByUser(activeUserAddress));
 
         if (status.status === "completed") return;
         if (status.status === "failed")
@@ -1584,8 +1615,8 @@ export function StellarampDashboard() {
       } catch (error: any) {
         if (error?.message === "Bridge transfer failed") throw error;
         consecutiveErrors++;
-                if (consecutiveErrors >= MAX_ERRORS) {
-                    return; // soft exit
+        if (consecutiveErrors >= MAX_ERRORS) {
+          return; // soft exit
         }
       }
 
@@ -1594,7 +1625,7 @@ export function StellarampDashboard() {
     }
 
     // Timeout is NOT fatal — bridge may still complete
-      };
+  };
 
   const pollPayoutStatus = (txId: string, orderId: string) => {
     // Webhook-driven: the server persists Paycrest events to Redis and streams
@@ -1619,9 +1650,7 @@ export function StellarampDashboard() {
         setTradeState((prev) => ({ ...prev, payoutStatus: status }));
         TransactionStorage.update(txId, { payoutStatus: status });
         if (activeUserAddress)
-          setUserTransactions(
-            TransactionStorage.getByUser(activeUserAddress),
-          );
+          setUserTransactions(TransactionStorage.getByUser(activeUserAddress));
 
         // Advance the modal to "settling" once the deposit is validated or the
         // onchain release is underway.
@@ -1720,7 +1749,7 @@ export function StellarampDashboard() {
 
   const getSubtitle = () => {
     if (isConnecting) return "Connecting to wallet...";
-    return "Convert Stellar USDC to your bank account in minutes.";
+    return "Convert USDC to your bank account in minutes.";
   };
 
   const handlePricingUpdate = useCallback(
@@ -1747,7 +1776,9 @@ export function StellarampDashboard() {
         <div className="flex flex-col gap-6 px-[2.6rem] py-8 max-[720px]:p-4">
           <Header
             subtitle={getSubtitle()}
-            isConnected={headerUsesExternal ? externalWallet.isConnected : isConnected}
+            isConnected={
+              headerUsesExternal ? externalWallet.isConnected : isConnected
+            }
             isConnecting={
               headerUsesExternal ? externalWallet.isConnecting : isConnecting
             }
@@ -1768,7 +1799,8 @@ export function StellarampDashboard() {
             }
             nativeCurrencyLabel={
               headerUsesExternal
-                ? (externalBalances?.nativeSymbol ?? (isSolanaSource ? "SOL" : "ETH"))
+                ? (externalBalances?.nativeSymbol ??
+                  (isSolanaSource ? "SOL" : "ETH"))
                 : "XLM"
             }
             isBalanceLoading={
