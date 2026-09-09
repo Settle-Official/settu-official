@@ -116,15 +116,15 @@ cctpDomain: 5, usdcDecimals: 6, rpcUrl }`), `SOLANA_CCTP_DOMAIN = 5`, `isSolanaE
 **Produces:** `POST { amount, ownerAddress (base58), toAddress (Base 0x), eventAccountPubkey (base58) }`
 → `{ transactionBase64, lastValidBlockHeight }` — an unsigned `VersionedTransaction`.
 
-- [ ] **Step 1:** Validate inputs. Reject if `!isSolanaEnabled()`.
-- [ ] **Step 2:** In a `withRetry` block: `Connection(SOLANA_RPC_URL)`; resolve owner USDC ATA;
+- [x] **Step 1:** Validate inputs. Reject if `!isSolanaEnabled()`.
+- [x] **Step 2:** In a `withRetry` block: `Connection(SOLANA_RPC_URL)`; resolve owner USDC ATA;
   fee quote → `maxFee`; `buildDepositForBurnIx`; prepend a `SystemProgram.createAccount` (or the
   program's own event-account init, per the IDL) for `eventAccountPubkey` funded by `owner` with
   rent-exempt lamports for the MessageSent size; prepend `ComputeBudgetProgram` unit-limit +
   price ixs; recent blockhash; assemble `VersionedTransaction` (v0), serialize base64.
-- [ ] **Step 3:** `npx tsc --noEmit`. Manual devnet check: valid base64 back, deserialises,
+- [x] **Step 3:** `npx tsc --noEmit`. Manual devnet check: valid base64 back, deserialises,
   required signers = [owner, eventAccount].
-- [ ] **Step 4:** Commit.
+- [x] **Step 4:** Commit.
 
 ---
 
