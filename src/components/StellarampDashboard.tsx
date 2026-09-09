@@ -1656,6 +1656,7 @@ export function StellarampDashboard() {
         // onchain release is underway.
         if (
           status === "validated" ||
+          status === "fulfilled" ||
           status === "settling" ||
           status === "settled"
         ) {

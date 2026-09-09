@@ -23,6 +23,10 @@ export type PayoutStatus =
   | "pending"
   | "deposited"
   | "validated"
+  // Paycrest's "provider paid the recipient" state. It is only ever visible
+  // via the live API — Paycrest sends NO webhook for it — so a webhook-only
+  // view can stall a completed offramp forever (see the order-status route).
+  | "fulfilled"
   | "settling"
   | "settled"
   | "refunding"

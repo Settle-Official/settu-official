@@ -1,39 +1,49 @@
 import { NextRequest, NextResponse } from "next/server";
-import { PaycrestAdapter } from "@/lib/offramp/adapters/paycrest-adapter";
-import { getPayoutStatus } from "@/lib/offramp/payout-store";
+import { getPayoutStatus, isTerminal } from "@/lib/offramp/payout-store";
+import { reconcilePayoutOrder } from "@/lib/offramp/settlement";
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ orderId: string }> }
+  { params }: { params: Promise<{ orderId: string }> },
 ) {
   try {
     const { orderId } = await params;
-
-    // Redis is the source of truth (webhook-driven). Serve it when present so
-    // clients that fall back to polling still see webhook updates.
     const cached = await getPayoutStatus(orderId);
-    if (cached) {
+
+    // A terminal cached status is authoritative — no Paycrest call needed.
+    if (cached && isTerminal(cached.status)) {
       return NextResponse.json({
         data: { id: orderId, status: cached.status },
-        source: "webhook",
+        source: "cache",
       });
     }
 
-    const apiKey = process.env.PAYCREST_API_KEY;
-    if (!apiKey) {
-      throw new Error("PAYCREST_API_KEY not configured");
+    // Non-terminal or missing: reconcile against Paycrest's LIVE status.
+    // Paycrest surfaces `fulfilled` (bank credited) only through the API — it
+    // sends no webhook for it — so a webhook-only view stalls a completed
+    // offramp forever. This self-heals: the live status is written back to the
+    // payout store (so the SSE stream + next poll see it) and the settlement
+    // is recorded once it's confirmed.
+    try {
+      const status = await reconcilePayoutOrder(orderId);
+      return NextResponse.json({
+        data: { id: orderId, status },
+        source: "api",
+      });
+    } catch (apiErr: any) {
+      // Paycrest unreachable — serve the cache rather than erroring the poller.
+      if (cached) {
+        return NextResponse.json({
+          data: { id: orderId, status: cached.status },
+          source: "cache-fallback",
+        });
+      }
+      throw apiErr;
     }
-
-    // Orders are created on v2, which is not guaranteed to be readable through
-    // the v1 endpoint. This is the polling backstop behind the SSE stream.
-    const paycrest = new PaycrestAdapter(apiKey);
-    const status = await paycrest.getOrderStatusV2(orderId);
-
-    return NextResponse.json({ data: status, source: "api" });
   } catch (error: any) {
     return NextResponse.json(
       { error: error.message || "Failed to fetch Paycrest order status" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

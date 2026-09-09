@@ -35,6 +35,7 @@ const STATUS_RANK: Record<PayoutStatus, number> = {
   pending: 1,
   deposited: 2,
   validated: 3,
+  fulfilled: 3, // peer of validated — both mean "fiat delivered"
   settling: 4,
   refunding: 4,
   settled: 5,
@@ -121,4 +122,29 @@ export async function claimSettlementRecording(
     ex: TTL_SECONDS,
   });
   return result === "OK";
+}
+
+/**
+ * Order ids of every payout record that isn't in a terminal state — for the
+ * stuck-order sweep (`/api/admin/offramp/sweep-payouts`). Only live keys
+ * exist (48h TTL), so this stays small.
+ */
+export async function listNonTerminalPayoutOrderIds(): Promise<string[]> {
+  const prefix = "paycrest:order:";
+  const ids: string[] = [];
+  let cursor = "0";
+  do {
+    const [next, batch] = await redis.scan(cursor, {
+      match: `${prefix}*`,
+      count: 200,
+    });
+    cursor = next;
+    for (const k of batch) {
+      // Skip the settlement-recorded marker keys.
+      if (k.includes("order-settlement-recorded")) continue;
+      const rec = await redis.get<PayoutRecord>(k);
+      if (rec && !isTerminal(rec.status)) ids.push(k.slice(prefix.length));
+    }
+  } while (cursor !== "0");
+  return ids;
 }

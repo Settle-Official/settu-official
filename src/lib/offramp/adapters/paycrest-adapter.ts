@@ -374,6 +374,10 @@ export function mapPaycrestStatus(webhookStatus: string): PayoutStatus {
       return "deposited";
     case "payment_order.validated":
       return "validated";
+    // Defensive — Paycrest doesn't send this webhook today, but if they add
+    // it we want to recognise it rather than fall through to "unknown".
+    case "payment_order.fulfilled":
+      return "fulfilled";
     case "payment_order.settling":
       return "settling";
     case "payment_order.settled":
@@ -387,4 +391,30 @@ export function mapPaycrestStatus(webhookStatus: string): PayoutStatus {
     default:
       return "unknown";
   }
+}
+
+const BARE_PAYOUT_STATUSES: ReadonlySet<string> = new Set<PayoutStatus>([
+  "pending",
+  "deposited",
+  "validated",
+  "fulfilled",
+  "settling",
+  "settled",
+  "refunding",
+  "refunded",
+  "expired",
+]);
+
+/**
+ * Normalises a bare Paycrest status string (from the v2 API's `data.status`,
+ * or a webhook payload's `status` field) to our `PayoutStatus`. Unrecognised
+ * values become "unknown" — callers rank-guard, so that never regresses a
+ * known state.
+ */
+export function normalizePayoutStatus(
+  bare: string | null | undefined,
+): PayoutStatus {
+  return bare && BARE_PAYOUT_STATUSES.has(bare)
+    ? (bare as PayoutStatus)
+    : "unknown";
 }
