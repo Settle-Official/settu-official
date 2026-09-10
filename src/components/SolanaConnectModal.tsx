@@ -1,6 +1,8 @@
 "use client";
 
 import type { SolanaWalletEntry } from "@/lib/solana/wallet-standard";
+import { SOLANA_MOBILE_WALLETS } from "@/lib/solana/mobile-deeplinks";
+import { isMobileBrowser } from "@/lib/platform";
 
 interface SolanaConnectModalProps {
   readonly open: boolean;
@@ -52,11 +54,35 @@ export function SolanaConnectModal({
         )}
 
         <div className="flex flex-col gap-2">
-          {wallets.length === 0 && (
-            <p className="mt-0 mb-1 text-[0.72rem] text-[var(--muted)]">
-              No Solana wallet detected. Install Phantom, Solflare or Backpack.
-            </p>
-          )}
+          {wallets.length === 0 &&
+            (isMobileBrowser() ? (
+              // Wallet Standard only ever sees browser extensions, which phones
+              // don't have, so there is nothing to detect here. Reopening the
+              // page inside the wallet's own browser is what makes it work.
+              <>
+                <p className="mt-0 mb-1 text-[0.72rem] text-[var(--muted)]">
+                  Solana wallets connect through their own in-app browser. Open
+                  Settu in one to continue.
+                </p>
+                {SOLANA_MOBILE_WALLETS.map((wallet) => (
+                  <a
+                    key={wallet.name}
+                    href={wallet.href(window.location.href)}
+                    className="flex h-11 items-center gap-3 border border-[var(--line)] px-3 text-left text-[0.85rem] no-underline hover:border-[#666]"
+                  >
+                    <span className="h-5 w-5 shrink-0 rounded-sm bg-[#2a2a2a]" />
+                    <span className="font-bold">Open in {wallet.name}</span>
+                    <span className="ml-auto text-[0.68rem] text-[var(--muted)]">
+                      →
+                    </span>
+                  </a>
+                ))}
+              </>
+            ) : (
+              <p className="mt-0 mb-1 text-[0.72rem] text-[var(--muted)]">
+                No Solana wallet detected. Install Phantom, Solflare or Backpack.
+              </p>
+            ))}
           {wallets.map((w) => (
             <button
               key={w.name}

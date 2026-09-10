@@ -14,6 +14,7 @@
 // dropped the connection on return.
 
 import type { ModuleInterface } from "@creit.tech/stellar-wallets-kit";
+import { isMobileBrowser } from "@/lib/platform";
 
 export interface StellarWallet {
   /** Kit module id of the connected wallet, e.g. "freighter" or "wallet_connect". */
@@ -92,16 +93,6 @@ function watchForSheetDismissal(module: WalletConnectModuleLike): {
 async function getKit(): Promise<Kit> {
   if (!kitPromise) kitPromise = initKit();
   return kitPromise;
-}
-
-/**
- * iPadOS 13+ reports a Macintosh UA, so touch points are the tiebreaker.
- */
-function isMobileBrowser(): boolean {
-  if (typeof navigator === "undefined") return false;
-  const ua = navigator.userAgent;
-  if (/Android|iPhone|iPad|iPod|Opera Mini|IEMobile/i.test(ua)) return true;
-  return /Macintosh/.test(ua) && navigator.maxTouchPoints > 1;
 }
 
 /**
