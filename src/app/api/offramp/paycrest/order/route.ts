@@ -26,6 +26,11 @@ export async function POST(request: NextRequest) {
     const sourceChain = body?.sourceChain
       ? String(body.sourceChain).trim().toLowerCase()
       : undefined;
+    // The wallet the user will burn from — persisted so the burn-backstop
+    // sweep can find a burn whose client-side registration was lost.
+    const senderAddress = body?.senderAddress
+      ? String(body.senderAddress).trim()
+      : undefined;
     const reference = String(body?.reference || "");
     const returnAddress = String(body?.returnAddress || "");
     const providerId = body?.recipient?.providerId
@@ -159,6 +164,7 @@ export async function POST(request: NextRequest) {
         reference: reference || undefined,
         network,
         sourceChain,
+        senderAddress,
         receiveAddress: (order as any)?.receiveAddress || undefined,
         providerIds,
         rateSource,
