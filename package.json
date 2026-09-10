@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "node --import ./scripts/register-ts-resolver.mjs --test 'src/**/*.test.ts'"
+    "test": "node --import ./scripts/register-ts-resolver.mjs --test 'src/**/*.test.ts'",
+    "dev:https": "next dev --experimental-https"
   },
   "dependencies": {
     "@allbridge/bridge-core-sdk": "^3.20.0",
