@@ -109,3 +109,20 @@ export async function sendTransaction(
     },
   }) as Promise<string>;
 }
+
+// personal_sign over the relay. The message is hex-encoded because the RPC
+// takes bytes, not text; wallets decode it back to readable text for the user.
+export async function signPersonalMessage(
+  topic: string,
+  chainId: number,
+  from: `0x${string}`,
+  message: string,
+): Promise<string> {
+  const client = await getClient();
+  const hex = `0x${Buffer.from(message, "utf8").toString("hex")}`;
+  return client.request({
+    topic,
+    chainId: `eip155:${chainId}`,
+    request: { method: "personal_sign", params: [hex, from] },
+  }) as Promise<string>;
+}

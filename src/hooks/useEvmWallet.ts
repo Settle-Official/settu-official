@@ -6,6 +6,7 @@ import {
   disconnectEvmSession,
   requestChainSwitch,
   sendTransaction,
+  signPersonalMessage,
 } from "@/lib/evm/walletconnect-adapter";
 import {
   subscribeInjectedWallets,
@@ -206,6 +207,28 @@ export function useEvmWallet() {
     [transport],
   );
 
+  // Proves control of the address for wallet linking. personal_sign, not
+  // eth_sign: the wallet shows readable text rather than an opaque hash, and
+  // the prefix it applies means a signed message can never be a transaction.
+  const signMessage = useCallback(
+    async (message: string): Promise<string> => {
+      if (!address) throw new Error("No wallet connected");
+
+      if (transport === "injected" && injectedRef.current) {
+        const hex = `0x${Buffer.from(message, "utf8").toString("hex")}`;
+        return (await injectedRef.current.request({
+          method: "personal_sign",
+          params: [hex, address],
+        })) as string;
+      }
+      if (transport === "walletconnect" && topicRef.current) {
+        return signPersonalMessage(topicRef.current, 1, address, message);
+      }
+      throw new Error("No wallet connected");
+    },
+    [address, transport],
+  );
+
   const signAndSendCalls = useCallback(
     async (
       calls: { to: `0x${string}`; data: `0x${string}` }[],
@@ -254,6 +277,7 @@ export function useEvmWallet() {
     connectWalletConnect,
     disconnect,
     switchChain,
+    signMessage,
     signAndSendCalls,
   };
 }
