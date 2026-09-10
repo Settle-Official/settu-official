@@ -11,6 +11,7 @@ import {
   recordTransaction,
   type OfframpSourceChain,
 } from "../offramp/transaction-history";
+import { resolveStellarTxSource } from "./stellar-tx-source";
 
 /**
  * Maps an offramp source chain to its CCTP source domain, or undefined for a
@@ -85,13 +86,23 @@ export async function registerOfframpBurn(
     orderId: input.paycrestOrderId,
   });
 
-  if (input.connectedAddress) {
+  // Stellar is the chain that earns cashback, so its attribution has to be
+  // proof rather than a client claim: the burn was signed by this account's
+  // key. Falls back to the client's value only when Horizon can't answer, and
+  // to nothing at all if neither is available.
+  const attributed =
+    resolvedSourceChain === "stellar"
+      ? ((await resolveStellarTxSource(input.burnTxHash)) ??
+        input.connectedAddress)
+      : input.connectedAddress;
+
+  if (attributed) {
     // Fire-and-forget — the transfer is registered above; a history-write
     // failure must not fail the caller and re-strand the burn.
     void recordTransaction({
       id: input.burnTxHash,
       sourceChain: resolvedSourceChain,
-      connectedAddress: input.connectedAddress,
+      connectedAddress: attributed,
       amountUsdc: input.amount,
       burnTxHash: input.burnTxHash,
       destinationCurrency: "NGN", // widen if/when other corridors reach here
