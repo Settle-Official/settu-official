@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   FormCard,
   type GasFeeOptions,
@@ -53,6 +53,34 @@ function withTimeout<T>(
       },
     );
   });
+}
+
+/**
+ * Wait for a wallet signature, but not forever.
+ *
+ * Mobile WalletConnect (Freighter iOS in particular) can silently drop the
+ * wallet's response over the relay: the user approves, the wallet stays
+ * foregrounded, and back in the browser `signTransaction` never settles —
+ * the underlying WalletConnect request only rejects at its ~5-minute expiry,
+ * and until then the progress modal has no way out. Cap it ourselves with an
+ * actionable message. (The `redirect` metadata added to the kit's WC config
+ * is the real fix for the drop; this is the backstop for when it still
+ * happens.)
+ */
+async function signWithTimeout(
+  sign: () => Promise<string>,
+  ms = 150_000,
+): Promise<string> {
+  try {
+    return await withTimeout(sign(), ms, "Wallet signature");
+  } catch (err: any) {
+    if (/timed out/i.test(err?.message || "")) {
+      throw new Error(
+        "We didn't hear back from your wallet. If you approved it, the transaction may still go through — check your recent transactions in a minute. Otherwise close this and try again (a desktop browser is more reliable for this step).",
+      );
+    }
+    throw err;
+  }
 }
 
 function safeJson(value: unknown): string {
@@ -366,6 +394,11 @@ export function StellarampDashboard() {
   const [formResetKey, setFormResetKey] = useState(0);
   const [offrampStep, setOfframpStep] = useState<OfframpStep>("idle");
   const [offrampError, setOfframpError] = useState<string | null>(null);
+  // Bumped whenever an offramp starts or is cancelled. A flow whose id no
+  // longer matches must not write step/error state — otherwise a signature
+  // that resolves late (or a cancelled flow's WalletConnect request finally
+  // expiring) clobbers the modal for whatever the user is doing now.
+  const offrampFlowRef = useRef(0);
   const [toastError, setToastError] = useState<string | null>(null);
   const [showProgressModal, setShowProgressModal] = useState(false);
   const [tradeState, setTradeState] = useState<{
@@ -751,6 +784,7 @@ export function StellarampDashboard() {
     }
 
     const txId = TransactionStorage.generateId();
+    const myFlow = ++offrampFlowRef.current;
     setCurrentTxId(txId);
     setIsExecutingOfframp(true);
     setOfframpStep("initiating");
@@ -911,7 +945,10 @@ export function StellarampDashboard() {
 
       if (buildTxPayload.needsApproval) {
         setOfframpStep("awaiting-signature");
-        const signedApprove = await signTransaction(buildTxPayload.approveXdr);
+        const signedApprove = await signWithTimeout(() =>
+          signTransaction(buildTxPayload.approveXdr),
+        );
+        if (offrampFlowRef.current !== myFlow) return;
         setOfframpStep("submitting");
         await submitAndConfirmSoroban(signedApprove);
 
@@ -933,7 +970,8 @@ export function StellarampDashboard() {
 
       // 4) Sign and submit the burn
       setOfframpStep("awaiting-signature");
-      const signedXdr = await signTransaction(xdr);
+      const signedXdr = await signWithTimeout(() => signTransaction(xdr));
+      if (offrampFlowRef.current !== myFlow) return;
       setOfframpStep("submitting");
 
       let stellarTxHash: string;
@@ -1059,9 +1097,9 @@ export function StellarampDashboard() {
       // Reset the form so the user can start a fresh offramp
       setFormResetKey((k) => k + 1);
     } catch (error: any) {
-      // Log detailed Horizon error if available
-      if (error?.response?.data) {
-      }
+      // A cancelled flow (or one the user has since restarted) must not
+      // repaint the modal — its late signature rejection lands here too.
+      if (offrampFlowRef.current !== myFlow) return;
 
       setTradeState((prev) => ({ ...prev, error: error.message }));
       setOfframpStep("error");
@@ -1077,8 +1115,10 @@ export function StellarampDashboard() {
       // Don't re-throw — the modal already shows the error to the user.
       // Re-throwing would cause an unhandled promise rejection.
     } finally {
-      setIsExecutingOfframp(false);
-      setCurrentTxId(null);
+      if (offrampFlowRef.current === myFlow) {
+        setIsExecutingOfframp(false);
+        setCurrentTxId(null);
+      }
       // Don't close modal or reset step here — user dismisses modal manually
     }
   };
@@ -1127,6 +1167,7 @@ export function StellarampDashboard() {
 
     const isBridge = isCctpBridgeChain(chainConfig);
     const txId = TransactionStorage.generateId();
+    const myFlow = ++offrampFlowRef.current;
     setCurrentTxId(txId);
     setIsExecutingOfframp(true);
     setOfframpStep("initiating");
@@ -1401,6 +1442,7 @@ export function StellarampDashboard() {
         .catch(() => {});
       setFormResetKey((k) => k + 1);
     } catch (error: any) {
+      if (offrampFlowRef.current !== myFlow) return;
       setTradeState((prev) => ({ ...prev, error: error.message }));
       setOfframpStep("error");
       setOfframpError(error.message);
@@ -1410,8 +1452,10 @@ export function StellarampDashboard() {
       });
       setUserTransactions(TransactionStorage.getByUser(connectedAddress));
     } finally {
-      setIsExecutingOfframp(false);
-      setCurrentTxId(null);
+      if (offrampFlowRef.current === myFlow) {
+        setIsExecutingOfframp(false);
+        setCurrentTxId(null);
+      }
     }
   };
 
@@ -1450,6 +1494,7 @@ export function StellarampDashboard() {
     }
 
     const txId = TransactionStorage.generateId();
+    const myFlow = ++offrampFlowRef.current;
     setCurrentTxId(txId);
     setIsExecutingOfframp(true);
     setOfframpStep("initiating");
@@ -1637,6 +1682,7 @@ export function StellarampDashboard() {
         .catch(() => {});
       setFormResetKey((k) => k + 1);
     } catch (error: any) {
+      if (offrampFlowRef.current !== myFlow) return;
       setTradeState((prev) => ({ ...prev, error: error.message }));
       setOfframpStep("error");
       setOfframpError(error.message);
@@ -1646,8 +1692,10 @@ export function StellarampDashboard() {
       });
       setUserTransactions(TransactionStorage.getByUser(connectedAddress));
     } finally {
-      setIsExecutingOfframp(false);
-      setCurrentTxId(null);
+      if (offrampFlowRef.current === myFlow) {
+        setIsExecutingOfframp(false);
+        setCurrentTxId(null);
+      }
     }
   };
 
@@ -2035,6 +2083,18 @@ export function StellarampDashboard() {
         currentStep={offrampStep}
         error={offrampError}
         sourceChainLabel={activeSourceChainLabel}
+        onCancel={() => {
+          // Invalidate the in-flight flow so its (possibly much later)
+          // signature rejection can't reopen or repaint this modal, then
+          // reset as if it had never started.
+          offrampFlowRef.current++;
+          setShowProgressModal(false);
+          setOfframpStep("idle");
+          setOfframpError(null);
+          setTradeState({});
+          setIsExecutingOfframp(false);
+          setCurrentTxId(null);
+        }}
         onClose={() => {
           setShowProgressModal(false);
           setOfframpStep("idle");

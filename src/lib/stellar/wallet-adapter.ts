@@ -146,15 +146,28 @@ async function initKit(): Promise<Kit> {
   // projectId. It's also the only transport that reaches a mobile wallet app,
   // so it's the module that makes or breaks mobile.
   const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID;
+  // `redirect` tells the wallet app how to bounce the user back here after
+  // they approve. Without it, Freighter iOS (and other WC wallets) leave the
+  // user sitting in the wallet after signing, and the browser stays
+  // backgrounded long enough that the relay can drop the undelivered
+  // response — so `signTransaction` hangs forever on "Confirm transaction in
+  // wallet". `universal` is the https origin; `native` is blank (no custom
+  // scheme). The kit types `metadata` as Reown AppKit's shape, which omits
+  // `redirect`, but it's passed straight through to SignClient.init where
+  // @walletconnect/types *does* accept it — hence the cast.
+  const wcMetadata = {
+    name: "Settu",
+    description: "Convert USDC to your bank account in minutes.",
+    url: window.location.origin,
+    icons: [`${window.location.origin}/icons/icon-192.png`],
+    redirect: { native: "", universal: window.location.origin },
+  } as ConstructorParameters<
+    typeof walletConnect.WalletConnectModule
+  >[0]["metadata"];
   const walletConnectModule = projectId
     ? new walletConnect.WalletConnectModule({
         projectId,
-        metadata: {
-          name: "Settu",
-          description: "Convert USDC to your bank account in minutes.",
-          url: window.location.origin,
-          icons: [`${window.location.origin}/icons/icon-192.png`],
-        },
+        metadata: wcMetadata,
         allowedChains: [walletConnect.WalletConnectTargetChain.PUBLIC],
       })
     : null;

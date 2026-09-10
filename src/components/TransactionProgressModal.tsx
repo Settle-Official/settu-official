@@ -74,6 +74,12 @@ interface TransactionProgressModalProps {
   /** Where the burn/transfer is signed — "Stellar" (default), "Arbitrum", … */
   readonly sourceChainLabel?: string;
   readonly onClose?: () => void;
+  /**
+   * Bail out of a flow that's waiting on the wallet. Shown only while the
+   * signature/submit is pending — a mobile WalletConnect signature can hang
+   * (dropped relay response) with no other way out.
+   */
+  readonly onCancel?: () => void;
 }
 
 export function TransactionProgressModal({
@@ -82,6 +88,7 @@ export function TransactionProgressModal({
   error,
   sourceChainLabel = "Stellar",
   onClose,
+  onCancel,
 }: TransactionProgressModalProps) {
   const STEPS = buildSteps(sourceChainLabel);
   const [visible, setVisible] = useState(false);
@@ -101,6 +108,10 @@ export function TransactionProgressModal({
   const isError = currentStep === "error";
   const isDone = isSuccess || isError;
   const activeIndex = getStepIndex(currentStep);
+  const canCancel =
+    !isDone &&
+    !!onCancel &&
+    (currentStep === "awaiting-signature" || currentStep === "submitting");
 
   return (
     <div
@@ -245,6 +256,17 @@ export function TransactionProgressModal({
               className="mt-4 w-full py-3 text-[0.8rem] font-bold uppercase tracking-[0.08em] transition-colors bg-[var(--accent)] text-[#0a0a0a] hover:brightness-110"
             >
               {isSuccess ? "DONE" : "CLOSE"}
+            </button>
+          )}
+
+          {/* Escape hatch while waiting on the wallet */}
+          {canCancel && (
+            <button
+              type="button"
+              onClick={onCancel}
+              className="mt-4 w-full py-2.5 text-[0.72rem] font-bold uppercase tracking-[0.08em] text-[var(--muted)] transition-colors hover:text-white"
+            >
+              Cancel
             </button>
           )}
         </div>
