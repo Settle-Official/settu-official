@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import QRCode from "qrcode";
 import type { InjectedWallet } from "@/lib/evm/injected";
 
 interface EvmConnectModalProps {
@@ -16,10 +15,9 @@ interface EvmConnectModalProps {
 }
 
 /**
- * EVM wallet picker — installed browser extensions (EIP-6963) plus a
- * WalletConnect option that swaps the body for a scannable QR. The Stellar
- * side has @creit.tech/stellar-wallets-kit's own modal for this; the EVM
- * side only pulls in sign-client, so this is hand-rolled.
+ * EVM wallet picker — installed browser extensions (EIP-6963), plus a
+ * WalletConnect option that hands off to Reown AppKit's sheet, which lists
+ * wallets and deep-links into them on mobile and falls back to a QR on desktop.
  */
 export function EvmConnectModal({
   open,
@@ -32,28 +30,12 @@ export function EvmConnectModal({
   onClose,
 }: Readonly<EvmConnectModalProps>) {
   const [showQr, setShowQr] = useState(false);
-  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
   // Reset the sub-view whenever the modal is reopened.
   useEffect(() => {
     if (!open) setShowQr(false);
   }, [open]);
-
-  useEffect(() => {
-    if (!pairingUri) {
-      setQrDataUrl(null);
-      return;
-    }
-    let cancelled = false;
-    QRCode.toDataURL(pairingUri, { width: 320, margin: 2 }).then(
-      (data) => !cancelled && setQrDataUrl(data),
-      () => !cancelled && setQrDataUrl(null),
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, [pairingUri]);
 
   useEffect(() => {
     if (!copied) return;
@@ -74,7 +56,7 @@ export function EvmConnectModal({
       <div className="relative z-10 w-[92vw] max-w-[400px] border border-[var(--line)] bg-[#0c0c0c] p-6">
         <div className="mb-4 flex items-center justify-between">
           <h3 className="m-0 font-space-grotesk text-[1.05rem] font-bold tracking-[-0.02em]">
-            {showQr ? "SCAN WITH YOUR WALLET" : "CONNECT EVM WALLET"}
+            {showQr ? "CONTINUE IN YOUR WALLET" : "CONNECT EVM WALLET"}
           </h3>
           <button
             type="button"
@@ -96,19 +78,14 @@ export function EvmConnectModal({
         )}
 
         {showQr ? (
+          // AppKit's own sheet takes over from here: it lists wallets and
+          // deep-links into them on mobile, where a QR is useless because you
+          // cannot scan your own screen. It still shows a QR on desktop.
           <>
-            {qrDataUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={qrDataUrl}
-                alt="WalletConnect pairing QR code"
-                className="mx-auto block h-[280px] w-[280px] bg-white p-2"
-              />
-            ) : (
-              <div className="mx-auto flex h-[280px] w-[280px] items-center justify-center text-[0.8rem] text-[var(--muted)]">
-                {isConnecting ? "Generating QR…" : "Preparing…"}
-              </div>
-            )}
+            <p className="m-0 text-[0.78rem] leading-relaxed text-[var(--muted)]">
+              Choose your wallet in the WalletConnect window, then approve the
+              connection there.
+            </p>
             <div className="mt-4 flex flex-col gap-2">
               <button
                 type="button"
@@ -132,9 +109,6 @@ export function EvmConnectModal({
                 ← Back to wallet list
               </button>
             </div>
-            <p className="mt-3 mb-0 text-[0.65rem] text-[var(--muted)]">
-              Open your mobile wallet&apos;s scanner and approve the connection.
-            </p>
           </>
         ) : (
           <div className="flex flex-col gap-2">

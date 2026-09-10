@@ -42,3 +42,6 @@ Thumbs.db
 
 # Claude Code worktrees / tool metadata
 .claude/
+
+# Local dev certs from `next dev --experimental-https`.
+certificates/
