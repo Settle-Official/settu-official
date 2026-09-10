@@ -1,3 +1,4 @@
+import { AccountLink } from "@/components/auth/AccountLink";
 import { enabledOfframpChainLabels } from "@/lib/cctp/evm-chains";
 
 function formatList(items: string[]): string {
@@ -60,7 +61,10 @@ export function Header({
             {subtitle}
           </p>
         </div>
-        <div>
+        <div className="flex flex-col items-end">
+          <div className="mb-[0.4rem]">
+            <AccountLink />
+          </div>
           <button
             type="button"
             onClick={isConnected ? onDisconnect : onConnect}
