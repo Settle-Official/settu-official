@@ -333,9 +333,21 @@ export async function restoreWallet(): Promise<StellarWallet | null> {
   try {
     const kit = await getKit();
     const { address } = await kit.getAddress();
+
+    // The kit seeds activeAddress and selectedModuleId from localStorage
+    // independently, and resolves the module by matching that id against the
+    // modules registered *now*. So a restored address can outlive its module —
+    // if the id no longer matches anything registered, this getter throws and
+    // signing would later fail with "Please set the wallet first".
+    //
+    // Reporting connected in that state is worse than reporting disconnected:
+    // the user sees a wallet, and only finds out it can't sign at the moment
+    // they try. Treat it as no session.
+    void kit.selectedModule;
+
     return toWallet(kit, address);
   } catch {
-    // Nothing stored, or the stored session is no longer valid.
+    // Nothing stored, or the stored session can no longer sign.
     return null;
   }
 }

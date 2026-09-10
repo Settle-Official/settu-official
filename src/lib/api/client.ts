@@ -73,7 +73,16 @@ export async function api<T>(
       body: options.body ? JSON.stringify(options.body) : undefined,
     });
   } catch {
-    throw new ApiError(0, "network", "Couldn't reach Settu. Check your connection.");
+    // A blocked CORS response and a dead network are indistinguishable here:
+    // the browser hides the reason from script on purpose. Naming both beats
+    // sending someone to check a connection that is fine.
+    throw new ApiError(
+      0,
+      "network",
+      `Couldn't reach Settu at ${BASE_URL}. The service may be unreachable, or this origin (${
+        typeof window === "undefined" ? "unknown" : window.location.origin
+      }) may not be allowed by the API.`,
+    );
   }
 
   if (response.status === 204) return undefined as T;

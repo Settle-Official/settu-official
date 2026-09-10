@@ -46,15 +46,23 @@ export function LinkedWallets({ emailVerified }: { readonly emailVerified: boole
     setError(null);
     setBusy(chain);
     try {
-      const address =
+      let address =
         chain === "stellar"
           ? stellar.wallet?.publicKey
           : chain === "evm"
             ? evm.address
             : solana.address;
 
+      // Stellar can connect from here: the kit's picker mounts itself. The EVM
+      // and Solana pickers are rendered by the dashboard, so there is nothing
+      // to open on this page — say where to go instead of failing vaguely.
+      if (!address && chain === "stellar") {
+        address = (await stellar.connect())?.publicKey;
+      }
       if (!address) {
-        throw new Error(`Connect a ${CHAIN_LABEL[chain]} wallet first.`);
+        throw new Error(
+          `Connect a ${CHAIN_LABEL[chain]} wallet on the main page first, then come back.`,
+        );
       }
 
       const { nonce, challenge } = await requestChallenge(chain, address);
