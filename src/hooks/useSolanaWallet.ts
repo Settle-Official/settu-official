@@ -11,6 +11,7 @@ import {
   StandardDisconnect,
   SolanaSignAndSendTransaction,
   type SolanaWalletEntry,
+  SolanaSignMessage,
 } from "@/lib/solana/wallet-standard";
 
 /**
@@ -77,6 +78,25 @@ export function useSolanaWallet() {
     }
   }, [clear]);
 
+  // Proves control of the address for wallet linking. Solana signs raw message
+  // bytes, so the backend verifies it as a plain ed25519 signature.
+  const signMessage = useCallback(async (message: string): Promise<string> => {
+    const wallet = walletRef.current;
+    const account = accountRef.current;
+    if (!wallet || !account) throw new Error("No Solana wallet connected");
+
+    const feature = (wallet.features as any)[SolanaSignMessage];
+    if (!feature) {
+      throw new Error(`${wallet.name} can't sign messages — try another wallet.`);
+    }
+
+    const [{ signature }] = await feature.signMessage({
+      account,
+      message: new TextEncoder().encode(message),
+    });
+    return bs58.encode(signature);
+  }, []);
+
   const signAndSendBurn = useCallback(
     async (transactionBase64: string, eventKeypair: Keypair): Promise<string> => {
       const wallet = walletRef.current;
@@ -116,5 +136,6 @@ export function useSolanaWallet() {
     connect,
     disconnect,
     signAndSendBurn,
+    signMessage,
   };
 }

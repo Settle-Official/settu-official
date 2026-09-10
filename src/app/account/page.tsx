@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { AuthPanel } from "@/components/auth/AuthPanel";
+import { LinkedWallets } from "@/components/auth/LinkedWallets";
 import { useAuth } from "@/hooks/useAuth";
 
 export default function Account() {
@@ -33,10 +34,9 @@ export default function Account() {
 
             <div className="h-px bg-[var(--line)]" />
 
-            <p className="m-0 text-[0.75rem] text-[var(--muted)]">
-              Wallet linking arrives next. Your linked wallets will appear here,
-              across Stellar and the EVM chains.
-            </p>
+            <LinkedWallets emailVerified={user.email_verified} />
+
+            <div className="h-px bg-[var(--line)]" />
 
             <div className="flex items-center justify-between text-[0.72rem]">
               <Link href="/" className="uppercase tracking-[0.08em] text-[var(--accent)]">

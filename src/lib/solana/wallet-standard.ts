@@ -12,6 +12,7 @@ export const StandardConnect = "standard:connect";
 export const StandardDisconnect = "standard:disconnect";
 export const SolanaSignAndSendTransaction = "solana:signAndSendTransaction";
 export const SolanaSignTransaction = "solana:signTransaction";
+export const SolanaSignMessage = "solana:signMessage";
 
 export interface SolanaWalletEntry {
   name: string;
