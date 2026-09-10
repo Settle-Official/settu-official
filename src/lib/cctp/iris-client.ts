@@ -65,6 +65,55 @@ export async function fetchAttestation(params: {
   return first;
 }
 
+export interface DecodedBurnMessage {
+  status: string;
+  /** 0x-prefixed bytes32; the low 20 bytes are the EVM mint recipient. */
+  mintRecipient?: string;
+  /** Atomic USDC (6 dp) as a decimal string. */
+  amount?: string;
+  destinationDomain?: string;
+}
+
+/**
+ * Fetch the first CCTP message for a burn tx and expose its decoded fields —
+ * used by the burn-backstop sweep to confirm an on-chain `deposit_for_burn`
+ * really targets a given Paycrest receive address before registering it.
+ * Returns null if Iris has no message for the hash yet (404).
+ */
+export async function fetchBurnMessage(params: {
+  sourceDomain: number;
+  transactionHash: string;
+}): Promise<DecodedBurnMessage | null> {
+  const url = buildMessagesUrl(
+    CCTP_CONFIG.irisApiUrl,
+    params.sourceDomain,
+    params.transactionHash,
+  );
+  const res = await fetch(url);
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    throw new Error(`Iris /v2/messages failed: ${res.status} ${await res.text()}`);
+  }
+  const data = (await res.json()) as {
+    messages?: Array<{
+      status?: string;
+      decodedMessage?: {
+        mintRecipient?: string;
+        amount?: string;
+        destinationDomain?: string;
+      };
+    }>;
+  };
+  const first = data.messages?.[0];
+  if (!first) return null;
+  return {
+    status: first.status ?? "unknown",
+    mintRecipient: first.decodedMessage?.mintRecipient,
+    amount: first.decodedMessage?.amount,
+    destinationDomain: first.decodedMessage?.destinationDomain,
+  };
+}
+
 /** Real, live fee quote — replaces the old flat/guessed Allbridge relayer fee. */
 export async function getBurnFeeQuote(params: {
   sourceDomain: number;

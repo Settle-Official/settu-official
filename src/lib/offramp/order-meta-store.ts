@@ -42,6 +42,15 @@ export interface OrderMeta {
    */
   receiveAddress?: string;
   /**
+   * The wallet the user burned/transferred USDC FROM (Stellar G-address, EVM
+   * 0x-address, or Solana base58). Recorded so the burn-backstop sweep can
+   * scan that account's on-chain history for a `deposit_for_burn` whose
+   * client-side registration never landed (a burn that confirmed on-chain but
+   * whose `register-transfer` call was lost strands the funds — the mint
+   * recipient is fixed at burn time and nothing else will ever mint it).
+   */
+  senderAddress?: string;
+  /**
    * The provider queue this order was routed to, best-rate first, and where the
    * rate came from. Kept for support triage: a settlement that went wrong is
    * much easier to chase when you know which providers were in play and whether
@@ -65,4 +74,25 @@ export async function getOrderMeta(
 ): Promise<OrderMeta | null> {
   const meta = await redis.get<OrderMeta>(key(orderId));
   return meta ?? null;
+}
+
+/**
+ * All order ids that still have metadata (i.e. created within the last 48h).
+ * Used by the burn-backstop sweep — it can't rely on `paycrest:payout:*` keys
+ * because those only exist once a webhook or poll has set a payout status,
+ * and a fully-stranded burn's order may never have reached that point.
+ */
+export async function listOrderMetaIds(): Promise<string[]> {
+  const prefix = key("");
+  const ids: string[] = [];
+  let cursor = "0";
+  do {
+    const [next, batch] = await redis.scan(cursor, {
+      match: `${prefix}*`,
+      count: 200,
+    });
+    cursor = next;
+    for (const k of batch) ids.push(k.slice(prefix.length));
+  } while (cursor !== "0");
+  return ids;
 }

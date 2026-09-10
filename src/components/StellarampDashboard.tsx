@@ -101,11 +101,21 @@ function formatSorobanError(payload: any): string {
 }
 
 /**
- * Submit a signed Soroban XDR via the server route and wait for confirmation,
- * polling the lightweight tx-status endpoint on PENDING. Extracted so CCTP's
- * approve-then-burn flow can run this exact sequence twice instead of once.
+ * Submit a signed Soroban XDR via the server route and return the broadcast
+ * tx hash as soon as the RPC accepts it (status PENDING or already SUCCESS).
+ * Throws only on a genuine submit failure — an ERROR/TRY_AGAIN_LATER status,
+ * a missing hash, or a network error.
+ *
+ * Confirmation is deliberately a SEPARATE step (`confirmSoroban`): a caller
+ * that must not strand an on-chain effect — the CCTP burn, whose mint
+ * recipient is fixed at burn time and can never be redirected — can persist
+ * the hash and register the transfer BEFORE waiting for confirmation, so a
+ * slow Soroban RPC that times out the poll can't orphan a burn that actually
+ * landed. (A real incident: a burn confirmed on-chain, the 90s poll timed
+ * out, the flow threw before registering, and ~10 USDC was stuck — burned
+ * but with nothing to ever mint it.)
  */
-async function submitAndConfirmSoroban(signedXdr: string): Promise<string> {
+async function submitSoroban(signedXdr: string): Promise<string> {
   const submitAbort = new AbortController();
   const submitTimer = setTimeout(() => submitAbort.abort(), 15_000);
   let submitResponse: Response;
@@ -135,32 +145,57 @@ async function submitAndConfirmSoroban(signedXdr: string): Promise<string> {
   if (!submitPayload?.hash) {
     throw new Error(`Soroban submit missing hash: ${safeJson(submitPayload)}`);
   }
-
-  const txHash: string = submitPayload.hash;
-  if (submitPayload.status === "SUCCESS") return txHash;
-  if (submitPayload.status !== "PENDING") {
+  if (
+    submitPayload.status !== "SUCCESS" &&
+    submitPayload.status !== "PENDING"
+  ) {
     throw new Error(
       `Transaction not confirmed (status: ${submitPayload?.status}). ` +
         (submitPayload?.error || "Please try again."),
     );
   }
+  return submitPayload.hash as string;
+}
 
+type SorobanConfirmation = "confirmed" | "failed" | "timeout";
+
+/**
+ * Poll the lightweight tx-status endpoint until a submitted Soroban tx is
+ * confirmed. RETURNS the outcome rather than throwing on timeout, so the
+ * caller decides what a timeout means: for an already-registered burn it's
+ * just "still bridging" (the SSE stream + daily cron will finish the mint,
+ * and the payout poll is the real completion signal), not a failed offramp.
+ */
+async function confirmSoroban(txHash: string): Promise<SorobanConfirmation> {
   const maxPollAttempts = 30; // 30 × 3s = 90s
   for (let i = 0; i < maxPollAttempts; i++) {
     await new Promise((r) => setTimeout(r, 3000));
     const statusRes = await fetch(`/api/offramp/bridge/tx-status/${txHash}`);
     const statusData = await statusRes.json().catch(() => ({}));
-    if (statusData?.status === "SUCCESS") return txHash;
-    if (statusData?.status === "FAILED") {
-      throw new Error(
-        "Transaction failed on-chain. Your wallet was not debited.",
-      );
-    }
+    if (statusData?.status === "SUCCESS") return "confirmed";
+    if (statusData?.status === "FAILED") return "failed";
     // NOT_FOUND — keep polling
   }
-  throw new Error(
-    "Transaction was not confirmed within 90s. It may have expired. Your wallet was likely not debited.",
-  );
+  return "timeout";
+}
+
+/**
+ * Submit + wait for confirmation, throwing on anything but success. Used for
+ * the pre-burn approve tx, where there's no permanent-strand risk (nothing
+ * is burned yet) and the caller re-checks the allowance afterwards anyway.
+ */
+async function submitAndConfirmSoroban(signedXdr: string): Promise<string> {
+  const hash = await submitSoroban(signedXdr);
+  const outcome = await confirmSoroban(hash);
+  if (outcome === "failed") {
+    throw new Error("Transaction failed on-chain. Your wallet was not debited.");
+  }
+  if (outcome === "timeout") {
+    throw new Error(
+      "Transaction was not confirmed within 90s. It may have expired. Your wallet was likely not debited.",
+    );
+  }
+  return hash;
 }
 
 /**
@@ -782,6 +817,7 @@ export function StellarampDashboard() {
             token: tradeData.token,
             network: "base",
             sourceChain: tradeData.sourceChain,
+            senderAddress: wallet.publicKey,
             rate: normalizedRate,
             reference: txId,
             recipient: {
@@ -879,8 +915,15 @@ export function StellarampDashboard() {
         setOfframpStep("submitting");
         await submitAndConfirmSoroban(signedApprove);
 
-        // Re-request now that allowance is sufficient.
+        // Re-request now that the allowance should be sufficient, and bail if
+        // it somehow still isn't — better a clean "try again" than a burn
+        // that reverts on a zero allowance.
         buildTxPayload = await buildBurnTxPayload();
+        if (buildTxPayload.needsApproval) {
+          throw new Error(
+            "The USDC approval didn't go through. Please try again in a moment.",
+          );
+        }
       }
 
       const xdr: string | undefined = buildTxPayload?.xdr;
@@ -911,8 +954,14 @@ export function StellarampDashboard() {
         }
       } catch (parseErr) {}
 
+      // Whether the burn still needs its on-chain confirmation polled below.
+      // The classic-tx path already waits for confirmation inside
+      // submitTransaction; the Soroban path does not (by design — see below).
+      let burnNeedsConfirm = false;
       if (hasSorobanOps) {
-        stellarTxHash = await submitAndConfirmSoroban(signedXdr);
+        // Get the broadcast hash — do NOT wait for confirmation here.
+        stellarTxHash = await submitSoroban(signedXdr);
+        burnNeedsConfirm = true;
       } else if (signedTx) {
         // Classic tx path
         const server = new StellarSdk.Horizon.Server(
@@ -930,18 +979,20 @@ export function StellarampDashboard() {
         bridgeStatus: "pending",
       }));
 
-      // 5) Register the transfer (creates the CctpTransferRecord + ledger
-      // entry) and open the SSE stream so attest-to-mint is driven forward
-      // while this tab is open. This is NOT mere operational bookkeeping —
-      // it's the only thing that will ever get this burn minted to
-      // Paycrest's receive address at all, since the mint recipient was
-      // fixed at burn time and can't be redirected or re-burned onto a new
-      // order. Paycrest's payout webhook can only fire once that mint has
-      // actually landed there, so a failed registration here doesn't just
-      // lose tracking — it strands the burn permanently. registerBridgeTransfer
-      // retries and falls back to sendBeacon accordingly; still awaited
-      // (not truly fire-and-forget) so the UI doesn't move on before at
-      // least the first attempt has had a chance to land.
+      // 5) Register the transfer BEFORE confirming the burn on-chain.
+      //
+      // This creates the CctpTransferRecord + ledger entry and opens the SSE
+      // stream that drives attest→mint. It is NOT mere bookkeeping — the mint
+      // recipient is fixed at burn time and can't be redirected or re-burned
+      // onto a new order, so this record is the ONLY thing that will ever get
+      // the burn minted to Paycrest's receive address (via the stream here,
+      // the daily cron, or the server-side backstop). Registering before the
+      // confirmation poll is deliberate: a slow Soroban RPC that times out
+      // the poll must not orphan a burn that actually landed — which is
+      // exactly how a real user's ~10 USDC once got stuck, burned on Stellar
+      // with nothing to mint it. registerBridgeTransfer retries + falls back
+      // to sendBeacon; still awaited so the UI doesn't move on before the
+      // first attempt has landed.
       await registerBridgeTransfer({
         burnTxHash: stellarTxHash,
         mintRecipient: settlementAddress,
@@ -956,6 +1007,20 @@ export function StellarampDashboard() {
         bridgeStatus: "pending",
       });
       setUserTransactions(TransactionStorage.getByUser(wallet.publicKey));
+
+      // 5b) Now confirm the burn on-chain for the stepper. Non-fatal on
+      // timeout: the transfer is registered, so the stream just opened (and
+      // the cron) will carry it to mint, and the payout poll below is the
+      // real completion signal. Only a definitive on-chain FAILED aborts.
+      if (burnNeedsConfirm) {
+        const outcome = await confirmSoroban(stellarTxHash);
+        if (outcome === "failed") {
+          throw new Error(
+            "The burn transaction failed on-chain. No USDC left your wallet — please try again.",
+          );
+        }
+        // "timeout" → keep going; the mint will complete in the background.
+      }
 
       // 6) Poll bridge + payout status independently.
       setOfframpStep("processing");
@@ -1125,6 +1190,7 @@ export function StellarampDashboard() {
             token: tradeData.token,
             network: "base",
             sourceChain: tradeData.sourceChain,
+            senderAddress: connectedAddress,
             rate: normalizedRate,
             reference: txId,
             recipient: {
@@ -1446,6 +1512,7 @@ export function StellarampDashboard() {
             token: tradeData.token,
             network: "base",
             sourceChain: tradeData.sourceChain,
+            senderAddress: connectedAddress,
             rate: normalizedRate,
             reference: txId,
             recipient: {

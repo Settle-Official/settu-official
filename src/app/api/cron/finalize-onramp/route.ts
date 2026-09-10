@@ -4,6 +4,7 @@ import { initializeAllbridgeSdk } from "@/lib/offramp/adapters/allbridge-adapter
 import { finalizeOnrampOrder } from "@/lib/onramp/finalize";
 import { listPendingTransfers } from "@/lib/cctp/cctp-store";
 import { advanceCctpTransfer } from "@/lib/cctp/advance";
+import { reconcileUnregisteredBurns } from "@/lib/offramp/burn-backstop";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -59,11 +60,22 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  // Backstop: find offramp burns that confirmed on-chain but whose
+  // client-side registration was lost, and get them into the pipeline above.
+  let burnBackstop: Awaited<ReturnType<typeof reconcileUnregisteredBurns>> | null =
+    null;
+  try {
+    burnBackstop = await reconcileUnregisteredBurns();
+  } catch (err) {
+    console.error("[cron] burn-backstop sweep failed:", err);
+  }
+
   return NextResponse.json({
     checked: orderIds.length,
     delivered,
     stillPending,
     cctpChecked: cctpIds.length,
     cctpAdvanced,
+    burnBackstop,
   });
 }

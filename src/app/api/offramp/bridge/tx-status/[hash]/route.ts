@@ -1,36 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-
-const SOROBAN_RPC_URL =
-  process.env.STELLAR_SOROBAN_RPC_URL ||
-  "https://soroban-rpc.mainnet.stellar.gateway.fm";
+import { sorobanRpc } from "@/lib/stellar/soroban-rpc";
 
 const HORIZON_URL =
   process.env.STELLAR_HORIZON_URL || "https://horizon.stellar.org";
-
-let jsonRpcId = 1;
-
-async function sorobanRpc(method: string, params: Record<string, unknown>) {
-  const res = await fetch(SOROBAN_RPC_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: jsonRpcId++,
-      method,
-      params,
-    }),
-  });
-  if (!res.ok) {
-    throw new Error(`Soroban RPC HTTP ${res.status}`);
-  }
-  const json = await res.json();
-  if (json.error) {
-    throw new Error(
-      `Soroban RPC error ${json.error.code}: ${json.error.message ?? JSON.stringify(json.error)}`,
-    );
-  }
-  return json.result;
-}
 
 /**
  * Check Horizon for a transaction by hash.
@@ -73,7 +45,11 @@ export async function GET(
 
   try {
     // Try Soroban RPC first (faster for Soroban txs)
-    const txResult = await sorobanRpc("getTransaction", { hash });
+    const txResult = await sorobanRpc(
+      "getTransaction",
+      { hash },
+      { timeoutMs: 8_000 },
+    );
     const rpcStatus = txResult?.status || "NOT_FOUND";
 
     if (rpcStatus === "SUCCESS" || rpcStatus === "FAILED") {

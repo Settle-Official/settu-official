@@ -1,51 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as StellarSdk from "@stellar/stellar-sdk";
+import { sorobanRpc } from "@/lib/stellar/soroban-rpc";
 
-// Allow up to 15s for sendTransaction RPC call
+// Allow up to 15s total; sorobanRpc fails over across endpoints within that.
 export const maxDuration = 15;
 
 /**
- * Submit a signed Soroban transaction directly to the Stellar Soroban RPC.
+ * Submit a signed Soroban transaction directly to the Stellar Soroban RPC
+ * (with endpoint failover — see @/lib/stellar/soroban-rpc).
  *
  * We parse the signed XDR with the project's @stellar/stellar-sdk v14 for
  * diagnostic logging, but we still submit the raw base64 string to the RPC
  * so there is zero risk of re-serialisation drift.
  */
 
-const SOROBAN_RPC_URL =
-  process.env.STELLAR_SOROBAN_RPC_URL ||
-  "https://soroban-rpc.mainnet.stellar.gateway.fm";
-
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
-
-let jsonRpcId = 1;
-
-async function sorobanRpc(method: string, params: Record<string, unknown>) {
-  const res = await fetch(SOROBAN_RPC_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: jsonRpcId++,
-      method,
-      params,
-    }),
-  });
-
-  if (!res.ok) {
-    throw new Error(`Soroban RPC HTTP ${res.status}: ${await res.text()}`);
-  }
-
-  const json = await res.json();
-  if (json.error) {
-    throw new Error(
-      `Soroban RPC error ${json.error.code}: ${json.error.message ?? JSON.stringify(json.error)}`,
-    );
-  }
-  return json.result;
-}
 
 function safeJson(value: unknown): string {
   try {
@@ -105,9 +76,12 @@ export async function POST(request: NextRequest) {
           }
 
     // ---- 1. Send the raw signed XDR directly (no SDK re-serialisation) ----
-    const sendResult = await sorobanRpc("sendTransaction", {
-      transaction: signedXdr,
-    });
+    // Short per-endpoint timeout so a failover still fits inside maxDuration.
+    const sendResult = await sorobanRpc(
+      "sendTransaction",
+      { transaction: signedXdr },
+      { timeoutMs: 6_000 },
+    );
 
     
     const hash: string | undefined = sendResult?.hash;
