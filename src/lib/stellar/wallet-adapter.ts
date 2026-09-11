@@ -105,6 +105,31 @@ function isMobileBrowser(): boolean {
 }
 
 /**
+ * `isAvailable()` only proves the SignClient object and modal instance exist
+ * — not that the relay WebSocket underneath them is actually usable. A phone
+ * on a network that can reach the relay's TLS handshake but not sustain a
+ * publish (iCloud Private Relay, some carrier/firewall setups, a flaky relay
+ * node) sails past `waitForWalletConnectReady` and then hangs on
+ * `approval()`, which WalletConnect does not time out client-side. Race
+ * against our own clock instead of trusting the SDK to ever settle.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms);
+    promise.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      },
+    );
+  });
+}
+
+/**
  * Block until the WalletConnect module has finished booting, or give up.
  *
  * Why this is needed: WalletConnectModule's constructor assigns `modal`
@@ -270,7 +295,12 @@ export async function connectWallet(): Promise<StellarWallet> {
       // expiry). Attach a sink now so that lands as a handled rejection.
       pending.catch(() => {});
       try {
-        ({ address } = await Promise.race([pending, watcher.dismissed]));
+        ({ address } = await withTimeout(
+          Promise.race([pending, watcher.dismissed]),
+          90_000,
+          "Couldn't complete the connection in time. Some mobile carriers " +
+            "block the connection over cellular data — try switching to Wi-Fi.",
+        ));
       } finally {
         watcher.dispose();
       }
@@ -296,6 +326,24 @@ export async function connectWallet(): Promise<StellarWallet> {
 function explainConnectError(error: any): string {
   const message: string =
     typeof error === "string" ? error : error?.message || String(error ?? "");
+
+  // The relay accepted the WebSocket handshake but couldn't carry a message
+  // over it — the SDK's own wording for "the socket looked open but isn't
+  // usable". Confirmed against a real report: failed every time on one
+  // phone's cellular data (no iCloud+, so not Private Relay) and worked
+  // immediately on Wi-Fi — some mobile carriers interfere with the relay's
+  // persistent WebSocket over cellular. It's a network condition on that
+  // device/connection, not a broken session — reconnecting Freighter or
+  // clearing the kit's storage won't help. iCloud Private Relay or a VPN can
+  // cause the same symptom for someone who has one of those enabled.
+  if (/failed to publish/i.test(message)) {
+    return (
+      "Your connection to the WalletConnect network dropped mid-handshake. " +
+      "Some mobile carriers block this over cellular data — try switching to " +
+      "Wi-Fi. If you have iCloud Private Relay or a VPN on, try turning that " +
+      "off too, then try again."
+    );
+  }
 
   if (/origin not allowed/i.test(message) || /\b3000\b/.test(message)) {
     const origin =
