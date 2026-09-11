@@ -4,31 +4,17 @@ import { useState, useEffect } from "react";
 import { cn } from "@/lib/cn";
 import { SelectField } from "@/components/SelectField";
 import { MIN_USDC_AMOUNT } from "@/lib/offramp/fiat-conversion";
-import {
-  EVM_SOURCE_CHAINS,
-  isChainEnabled,
-  type EvmChainKey,
-} from "@/lib/cctp/evm-chains";
-import { isSolanaEnabled } from "@/lib/solana/config";
 import { fiatSymbol } from "@/lib/format/currency";
+import {
+  sourceChainOptions,
+  type OfframpSourceChainKey,
+} from "@/lib/offramp/source-chain-options";
+export type { OfframpSourceChainKey };
 
-export type OfframpSourceChainKey = "stellar" | EvmChainKey | "solana";
-
-/**
- * "Stellar" plus every non-Stellar chain turned on via
- * NEXT_PUBLIC_OFFRAMP_SOURCE_CHAINS_ENABLED. Until that var lists something
- * this is just `[{ stellar }]` and the dropdown is hidden — today's
- * single-source flow, unchanged. Computed once at module load.
- */
-const SOURCE_CHAIN_OPTIONS: { code: OfframpSourceChainKey; name: string }[] = [
-  { code: "stellar", name: "Stellar" },
-  ...Object.values(EVM_SOURCE_CHAINS)
-    .filter((c) => isChainEnabled(c.key))
-    .map((c) => ({ code: c.key as OfframpSourceChainKey, name: c.label })),
-  ...(isSolanaEnabled()
-    ? [{ code: "solana" as OfframpSourceChainKey, name: "Solana" }]
-    : []),
-];
+// Recomputed on every render (cheap — a handful of filter/map calls), unlike
+// the old module-level constant, so a runtime env change during dev doesn't
+// need a full reload to show up.
+const SOURCE_CHAIN_OPTIONS = sourceChainOptions();
 
 export interface FormCardProps {
   readonly isConnected: boolean;
