@@ -641,7 +641,13 @@ export function StellarampDashboard() {
       return;
     }
     if (mode === "offramp" && isEvmSource) {
-      void evmWallet.openConnect();
+      void evmWallet.openConnect().catch((e: any) => {
+        // Declining in the wallet is a normal action, not an error.
+        const message = e?.message || "Failed to connect wallet";
+        if (!/reject|denied|cancel|closed|dismiss/i.test(message)) {
+          setToastError(message);
+        }
+      });
       return;
     }
 
