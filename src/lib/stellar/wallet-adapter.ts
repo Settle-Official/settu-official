@@ -298,8 +298,8 @@ export async function connectWallet(): Promise<StellarWallet> {
         ({ address } = await withTimeout(
           Promise.race([pending, watcher.dismissed]),
           90_000,
-          "Couldn't complete the connection in time. Check your network — " +
-            "iCloud Private Relay or a VPN can block WalletConnect — and try again.",
+          "Couldn't complete the connection in time. Some mobile carriers " +
+            "block the connection over cellular data — try switching to Wi-Fi.",
         ));
       } finally {
         watcher.dispose();
@@ -329,16 +329,19 @@ function explainConnectError(error: any): string {
 
   // The relay accepted the WebSocket handshake but couldn't carry a message
   // over it — the SDK's own wording for "the socket looked open but isn't
-  // usable". Seen on specific phones/networks (iCloud Private Relay, some
-  // carrier or VPN setups) while other devices on the same account connect
-  // fine, so it's a network condition on that device, not a broken session —
-  // reconnecting Freighter or clearing the kit's storage won't help.
+  // usable". Confirmed against a real report: failed every time on one
+  // phone's cellular data (no iCloud+, so not Private Relay) and worked
+  // immediately on Wi-Fi — some mobile carriers interfere with the relay's
+  // persistent WebSocket over cellular. It's a network condition on that
+  // device/connection, not a broken session — reconnecting Freighter or
+  // clearing the kit's storage won't help. iCloud Private Relay or a VPN can
+  // cause the same symptom for someone who has one of those enabled.
   if (/failed to publish/i.test(message)) {
     return (
       "Your connection to the WalletConnect network dropped mid-handshake. " +
-      "This is usually iCloud Private Relay or a VPN interfering — try turning " +
-      "Private Relay off (Settings → [your name] → iCloud → Private Relay) " +
-      "or switching between Wi-Fi and cellular, then try again."
+      "Some mobile carriers block this over cellular data — try switching to " +
+      "Wi-Fi. If you have iCloud Private Relay or a VPN on, try turning that " +
+      "off too, then try again."
     );
   }
 
