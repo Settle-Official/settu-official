@@ -1,39 +1,11 @@
 import { SignClient } from "@walletconnect/sign-client";
 import { EVM_SOURCE_CHAINS } from "@/lib/cctp/evm-chains";
+import {
+  openWalletConnectSheet,
+  closeWalletConnectSheet,
+} from "@/lib/stellar/wallet-adapter";
 
 let clientPromise: ReturnType<typeof SignClient.init> | null = null;
-let modalPromise: Promise<{ open: (o: { uri: string }) => void; close: () => void }> | null = null;
-
-/**
- * Reown AppKit's modal, opened with our own pairing URI (manualWCControl), so
- * the session still comes from SignClient above.
- *
- * A raw QR is unusable on a phone — you cannot scan your own screen — which
- * left mobile with no way to connect an EVM wallet at all. AppKit resolves each
- * wallet's deep link from the WalletConnect Explorer registry, so mobile gets a
- * wallet list that opens the app, and desktop still gets a QR.
- *
- * Imported dynamically: AppKit touches `window` at module scope and would
- * break Next's server prerender.
- */
-function getModal() {
-  if (!modalPromise) {
-    modalPromise = (async () => {
-      const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID;
-      if (!projectId) throw new Error("NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID is missing");
-      const [{ createAppKit }, { mainnet }] = await Promise.all([
-        import("@reown/appkit/core"),
-        import("@reown/appkit/networks"),
-      ]);
-      return createAppKit({
-        projectId,
-        manualWCControl: true,
-        networks: [mainnet],
-      } as never) as never;
-    })();
-  }
-  return modalPromise;
-}
 
 function getClient() {
   if (!clientPromise) {
@@ -74,7 +46,6 @@ export async function proposeEvmSession(
   onUri: (uri: string) => void,
 ): Promise<EvmSession> {
   const client = await getClient();
-  const modal = await getModal();
 
   // Only Ethereum is required; the rest are optional. Listing all six as
   // required means a wallet that lacks any one of them rejects the whole
@@ -98,7 +69,8 @@ export async function proposeEvmSession(
 
   if (uri) {
     onUri(uri);
-    modal.open({ uri });
+    // Shares the one AppKit instance on the page — see openWalletConnectSheet.
+    await openWalletConnectSheet(uri);
   }
 
   const timeout = new Promise<never>((_, reject) =>
@@ -118,7 +90,7 @@ export async function proposeEvmSession(
   } finally {
     // Close whether approved, rejected or timed out, so the sheet never
     // outlives the attempt it belongs to.
-    modal.close();
+    await closeWalletConnectSheet();
   }
 
   const account = session.namespaces.eip155?.accounts?.[0];

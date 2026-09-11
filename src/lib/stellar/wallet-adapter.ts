@@ -38,6 +38,8 @@ let kitPromise: Promise<Kit> | null = null;
  */
 interface WalletConnectModuleLike extends ModuleInterface {
   modal?: {
+    open?: (options: { uri: string }) => void;
+    close?: () => void;
     subscribeState?: (
       callback: (state: { open: boolean }) => void,
     ) => () => void;
@@ -386,4 +388,30 @@ export async function signTransaction(
 export async function disconnectWallet(): Promise<void> {
   const kit = await getKit();
   await kit.disconnect();
+}
+
+/**
+ * The single Reown AppKit sheet on the page, shared with the EVM connect flow.
+ *
+ * AppKit's ModalController state is a module-level singleton, so a second
+ * createAppKit call does not get its own modal — both instances drive the same
+ * controller, and `open()` from the newer one mutates state bound to the older
+ * one's element. The sheet then never appears and the caller waits on an
+ * approval that can never arrive.
+ *
+ * stellar-wallets-kit creates an instance internally, so that one is the
+ * instance. Chains that pair through their own SignClient present their URI
+ * here rather than constructing a second AppKit.
+ */
+export async function openWalletConnectSheet(uri: string): Promise<boolean> {
+  await getKit();
+  const open = walletConnectModuleRef?.modal?.open;
+  if (!open) return false;
+  open.call(walletConnectModuleRef!.modal, { uri });
+  return true;
+}
+
+export async function closeWalletConnectSheet(): Promise<void> {
+  const close = walletConnectModuleRef?.modal?.close;
+  close?.call(walletConnectModuleRef!.modal);
 }
