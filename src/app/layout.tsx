@@ -46,7 +46,15 @@ export default function RootLayout({
         {children}
         <script
           dangerouslySetInnerHTML={{
-            __html: `if ('serviceWorker' in navigator) { window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js')); }`,
+            // Production only. Dev rebuilds change chunk filenames constantly,
+            // so a cached shell ends up pointing at chunks that no longer
+            // exist — "Loading chunk … failed". In dev, actively tear down any
+            // worker a previous run left behind and drop its caches, otherwise
+            // it keeps serving that stale shell long after this change.
+            __html:
+              process.env.NODE_ENV === "production"
+                ? `if ('serviceWorker' in navigator) { window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js')); }`
+                : `if ('serviceWorker' in navigator) { navigator.serviceWorker.getRegistrations().then((rs) => rs.forEach((r) => r.unregister())); if (window.caches) { caches.keys().then((ks) => ks.forEach((k) => caches.delete(k))); } }`,
           }}
         />
       </body>
