@@ -128,8 +128,26 @@ export async function proposeEvmSession(
   return { topic: session.topic, address };
 }
 
+/**
+ * A session topic outlives the session it names: the wallet can disconnect, the
+ * session can expire, or storage can be cleared while the app still holds the
+ * string. Using it then throws WalletConnect's "No matching key. session topic
+ * doesn't exist", which tells a user nothing they can act on.
+ */
+async function assertSession(topic: string): Promise<void> {
+  const client = await getClient();
+  if (!client.session.keys.includes(topic)) {
+    throw new Error(
+      "Your wallet session has expired. Reconnect your wallet and try again.",
+    );
+  }
+}
+
+// Disconnecting an already-gone session is the outcome the caller wanted, so
+// treat a missing topic as success rather than an error.
 export async function disconnectEvmSession(topic: string): Promise<void> {
   const client = await getClient();
+  if (!client.session.keys.includes(topic)) return;
   await client.disconnect({
     topic,
     reason: { code: 6000, message: "User disconnected" },
@@ -137,6 +155,7 @@ export async function disconnectEvmSession(topic: string): Promise<void> {
 }
 
 export async function requestChainSwitch(topic: string, chainId: number): Promise<void> {
+  await assertSession(topic);
   const client = await getClient();
   await client.request({
     topic,
@@ -154,6 +173,7 @@ export async function sendTransaction(
   from: `0x${string}`,
   call: { to: `0x${string}`; data: `0x${string}` },
 ): Promise<string> {
+  await assertSession(topic);
   const client = await getClient();
   return client.request({
     topic,
@@ -173,6 +193,7 @@ export async function signPersonalMessage(
   from: `0x${string}`,
   message: string,
 ): Promise<string> {
+  await assertSession(topic);
   const client = await getClient();
   const hex = `0x${Buffer.from(message, "utf8").toString("hex")}`;
   return client.request({
