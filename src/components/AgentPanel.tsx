@@ -39,7 +39,7 @@ export interface AgentPanelProps {
     amount: string;
     rate: number;
     token: string;
-    sourceChain: string;
+    sourceChain: ResolvedAgentOrder["sourceChain"];
     beneficiary: ResolvedAgentOrder["beneficiary"];
   }) => Promise<void> | void;
   readonly onPricingUpdate: (data: {
