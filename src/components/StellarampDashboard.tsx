@@ -24,7 +24,6 @@ import {
 import { TransactionStorage, Transaction } from "@/lib/transaction-storage";
 import { ErrorToast } from "@/components/ErrorToast";
 import { EvmConnectModal } from "@/components/EvmConnectModal";
-import { SolanaConnectModal } from "@/components/SolanaConnectModal";
 import {
   TransactionProgressModal,
   type OfframpStep,
@@ -345,7 +344,6 @@ export function StellarampDashboard() {
   // the others down (see handleSourceChainChange).
   const evmWallet = useEvmWallet();
   const solanaWallet = useSolanaWallet();
-  const [solanaConnectOpen, setSolanaConnectOpen] = useState(false);
 
   const [sourceChain, setSourceChain] =
     useState<OfframpSourceChainKey>("stellar");
@@ -637,7 +635,9 @@ export function StellarampDashboard() {
     // original Stellar Wallets Kit path below entirely unchanged. A
     // non-Stellar offramp source opens its own picker.
     if (mode === "offramp" && isSolanaSource) {
-      setSolanaConnectOpen(true);
+      void solanaWallet.connect().catch((e: any) => {
+        setToastError(e?.message || "Failed to connect wallet");
+      });
       return;
     }
     if (mode === "offramp" && isEvmSource) {
@@ -709,7 +709,6 @@ export function StellarampDashboard() {
       // A teardown failure shouldn't block the switch — worst case a stale
       // session lingers in the other adapter until its own next connect.
     }
-    setSolanaConnectOpen(false);
     setUserTransactions([]);
     setSourceChain(next);
   };
@@ -2068,21 +2067,7 @@ export function StellarampDashboard() {
         onClose={evmWallet.closeConnect}
       />
 
-      <SolanaConnectModal
-        open={solanaConnectOpen}
-        wallets={solanaWallet.detectedWallets}
-        isConnecting={solanaWallet.isConnecting}
-        error={solanaWallet.error}
-        onPick={(name) => {
-          void solanaWallet
-            .connect(name)
-            .then(() => setSolanaConnectOpen(false))
-            .catch((e: any) =>
-              setToastError(e?.message || "Failed to connect wallet"),
-            );
-        }}
-        onClose={() => setSolanaConnectOpen(false)}
-      />
+
 
       <TransactionProgressModal
         isOpen={showProgressModal}
