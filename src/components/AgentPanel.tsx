@@ -9,6 +9,7 @@ import { stepToAgentEvent, type AgentStepEvent } from "@/lib/offramp/agent-step-
 import type { AgentOrderWithQuote } from "@/lib/offramp/agent-resolver";
 import type { OfframpStep } from "@/components/TransactionProgressModal";
 import { fiatSymbol } from "@/lib/format/currency";
+import { sourceChainOptions } from "@/lib/offramp/source-chain-options";
 
 type ParseResponse =
   | { kind: "clarify"; message: string }
@@ -35,6 +36,12 @@ export interface AgentPanelProps {
   readonly isConnected: boolean;
   readonly isConnecting: boolean;
   readonly onConnect: () => void;
+  // Which chain the currently connected (or last-selected) wallet is on —
+  // set by the Off-ramp tab's source-chain dropdown, not by Agent Mode
+  // itself. A resolved order can name any supported chain regardless of
+  // this, so confirmOrder checks the two match before ever touching
+  // onInitiateOfframp.
+  readonly activeSourceChain: AgentOrderWithQuote["sourceChain"];
   readonly sourceChainLabel: string;
   readonly offrampStep: OfframpStep;
   readonly offrampError: string | null;
@@ -61,6 +68,7 @@ export function AgentPanel({
   isConnected,
   isConnecting,
   onConnect,
+  activeSourceChain,
   sourceChainLabel,
   offrampStep,
   offrampError,
@@ -175,6 +183,30 @@ export function AgentPanel({
   };
 
   const confirmOrder = async (order: AgentOrderWithQuote) => {
+    // Agent Mode never switches the dashboard's active source chain itself —
+    // that only happens via the Off-ramp tab's dropdown. A resolved order
+    // can still name any supported chain, so a connected (or even
+    // not-yet-connected) wallet on the wrong chain would otherwise sail
+    // straight into onInitiateOfframp and fail deep inside the execute
+    // path with a bare toast, leaving this card stuck with no explanation.
+    // Catching the mismatch here, before ever calling onInitiateOfframp,
+    // means the card's Confirm/Cancel buttons stay live so the user can
+    // just switch wallets and try again.
+    if (order.sourceChain !== activeSourceChain) {
+      const targetLabel =
+        sourceChainOptions().find((c) => c.code === order.sourceChain)?.name ??
+        order.sourceChain;
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: nextId(),
+          role: "agent",
+          text: `Your connected wallet is on ${sourceChainLabel}, but this offramp needs ${targetLabel}. Switch to a ${targetLabel} wallet — pick ${targetLabel} from the Source Chain dropdown on the Off-ramp tab and connect it there — then come back and hit Confirm again.`,
+          stepKind: "error",
+        },
+      ]);
+      return;
+    }
     if (!isConnected) {
       onConnect();
       return;

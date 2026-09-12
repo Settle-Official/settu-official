@@ -2052,6 +2052,7 @@ export function StellarampDashboard() {
                       isConnected={uiIsConnected}
                       isConnecting={uiIsConnecting}
                       onConnect={handleConnect}
+                      activeSourceChain={sourceChain}
                       sourceChainLabel={activeSourceChainLabel}
                       offrampStep={offrampStep}
                       offrampError={offrampError}
