@@ -216,7 +216,9 @@ async function submitAndConfirmSoroban(signedXdr: string): Promise<string> {
   const hash = await submitSoroban(signedXdr);
   const outcome = await confirmSoroban(hash);
   if (outcome === "failed") {
-    throw new Error("Transaction failed on-chain. Your wallet was not debited.");
+    throw new Error(
+      "Transaction failed on-chain. Your wallet was not debited.",
+    );
   }
   if (outcome === "timeout") {
     throw new Error(
@@ -227,106 +229,112 @@ async function submitAndConfirmSoroban(signedXdr: string): Promise<string> {
 }
 
 /**
- * Register a confirmed CCTP burn so the backend can attest+mint it — the
- * only link between "burn succeeded on Stellar" and "USDC actually reaches
- * Paycrest's receive address". A burn with no successful registration is
- * cryptographically stuck: Circle will attest it, but nothing ever submits
+ * Registers a confirmed on-chain burn/transfer so the backend can attest+mint
+ * it — the only link between "funds left the wallet" and "USDC actually
+ * reaches Paycrest's receive address". A burn with no successful registration
+ * is cryptographically stuck: Circle will attest it, but nothing ever submits
  * the mint, and the mint recipient is fixed at burn time — it can't be
- * redirected or re-burned onto a fresh order. This happened for real: a
- * single unretried fetch(...).catch(()=>{}) here silently ate a transient
- * failure and orphaned a user's 9 USDC, burned but never minted, discovered
- * only when Paycrest's order expired unpaid.
+ * redirected or re-burned onto a fresh order. This happened for real (twice):
+ * a user's 9 USDC burned on Stellar but never registered, discovered only
+ * when Paycrest's order sat at "initiated" with the user's bank never paid.
  *
- * Retries a few times (the server route is idempotent — see
- * register-transfer/route.ts — so a retry after an ambiguous failure, e.g.
- * the first attempt actually succeeded but the response never arrived,
- * can't corrupt an already-advancing transfer). If every attempt still
- * fails, falls back to navigator.sendBeacon, which the browser can deliver
- * even as the page is unloading (a closed/backgrounded tab is a real way
- * for the plain retries above to never get a chance to run at all).
+ * Two layers of defense, in order:
+ * 1. Retry `fetch` a few times (the server route is idempotent — see
+ *    register-transfer/route.ts — so retrying after an ambiguous failure,
+ *    e.g. the first attempt actually succeeded but the response never
+ *    arrived, can't corrupt an already-advancing transfer).
+ * 2. `navigator.sendBeacon`, fired the INSTANT the tab is backgrounded —
+ *    not only as a last resort after every retry fails. The confirmed
+ *    real-world failure mode here is mobile: the user switches to their
+ *    wallet app to approve, and the OS suspends the tab's JS mid-`await`
+ *    before a failing fetch's own catch block ever gets to run — so the
+ *    old "beacon only after retries exhaust" fallback never fired at all.
+ *    `visibilitychange`/`pagehide` are the standard way to flush something
+ *    reliably at the exact moment a tab may be about to die, which is
+ *    exactly the moment the user just left it to go sign in their wallet.
  *
  * Never throws — this must not block the rest of the offramp flow (the SSE
  * stream open + status polling that follow), same as the fire-and-forget
  * intent of the code this replaces.
+ *
+ * Server-side backstop: `reconcileUnregisteredBurns` (Stellar only, see
+ * burn-backstop.ts) independently re-derives an unregistered burn from
+ * on-chain history and registers it — wired into a frequent external sweep
+ * (see the GitHub Actions workflow), not just the once-daily onramp cron.
  */
+async function registerWithBeaconFallback(
+  endpoint: string,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  let beaconSent = false;
+  const flushBeacon = () => {
+    if (beaconSent) return;
+    beaconSent = true;
+    try {
+      navigator.sendBeacon?.(
+        endpoint,
+        new Blob([JSON.stringify(payload)], { type: "application/json" }),
+      );
+    } catch {
+      // Nothing more we can do client-side — the frequent server-side sweep
+      // (see above) is the remaining backstop for a Stellar source.
+    }
+  };
+  const onVisibilityChange = () => {
+    if (document.visibilityState === "hidden") flushBeacon();
+  };
+  document.addEventListener("visibilitychange", onVisibilityChange);
+  window.addEventListener("pagehide", flushBeacon);
+
+  try {
+    const attempts = 3;
+    const delaysMs = [1000, 3000];
+    for (let i = 0; i < attempts; i++) {
+      try {
+        const res = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (res.ok) return;
+      } catch {
+        // network error — fall through to retry/backoff below
+      }
+      if (i < delaysMs.length) {
+        await new Promise((resolve) => setTimeout(resolve, delaysMs[i]));
+      }
+    }
+    // Every plain attempt failed and the tab never hid — last resort.
+    flushBeacon();
+  } finally {
+    document.removeEventListener("visibilitychange", onVisibilityChange);
+    window.removeEventListener("pagehide", flushBeacon);
+  }
+}
+
 async function registerBridgeTransfer(payload: {
   burnTxHash: string;
   mintRecipient: string;
   amount: string;
   paycrestOrderId: string;
 }): Promise<void> {
-  const attempts = 3;
-  const delaysMs = [1000, 3000];
-  for (let i = 0; i < attempts; i++) {
-    try {
-      const res = await fetch("/api/offramp/bridge/register-transfer", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (res.ok) return;
-    } catch {
-      // network error — fall through to retry/backoff below
-    }
-    if (i < delaysMs.length) {
-      await new Promise((resolve) => setTimeout(resolve, delaysMs[i]));
-    }
-  }
-  // Every plain attempt failed. Last resort: sendBeacon survives page
-  // unload/backgrounding better than fetch, though it's fire-and-forget
-  // with no way to confirm delivery.
-  try {
-    navigator.sendBeacon?.(
-      "/api/offramp/bridge/register-transfer",
-      new Blob([JSON.stringify(payload)], { type: "application/json" }),
-    );
-  } catch {
-    // Nothing more we can do client-side. There is currently no server-side
-    // backstop that independently detects an unregistered burn (that would
-    // mean scanning Stellar for deposit_for_burn events against every open
-    // order's known receive address, e.g. via OrderMeta.receiveAddress) — a
-    // real gap this doesn't close, just makes much less likely to matter.
-  }
+  return registerWithBeaconFallback(
+    "/api/offramp/bridge/register-transfer",
+    payload,
+  );
 }
 
 /**
- * The EVM-source equivalent of registerBridgeTransfer above — same reasoning
- * and shape (a confirmed on-chain burn/transfer whose registration call
- * silently fails is orphaned exactly the way a real Stellar offramp burn once
- * was). Generic over the endpoint: CCTP-bridge chains register at
- * /register-transfer (which drives the same attest/mint state machine),
- * Base's direct transfer at /base-direct-register (record-only). Never
- * throws — a registration failure must not abort the rest of the flow.
+ * The EVM-source equivalent of registerBridgeTransfer above. Generic over the
+ * endpoint: CCTP-bridge chains register at /register-transfer (which drives
+ * the same attest/mint state machine), Base's direct transfer at
+ * /base-direct-register (record-only).
  */
 async function registerEvmTransfer(
   endpoint: string,
   payload: Record<string, unknown>,
 ): Promise<void> {
-  const attempts = 3;
-  const delaysMs = [1000, 3000];
-  for (let i = 0; i < attempts; i++) {
-    try {
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (res.ok) return;
-    } catch {
-      // network error — fall through to retry/backoff below
-    }
-    if (i < delaysMs.length) {
-      await new Promise((resolve) => setTimeout(resolve, delaysMs[i]));
-    }
-  }
-  try {
-    navigator.sendBeacon?.(
-      endpoint,
-      new Blob([JSON.stringify(payload)], { type: "application/json" }),
-    );
-  } catch {
-    // nothing more to do client-side
-  }
+  return registerWithBeaconFallback(endpoint, payload);
 }
 
 export function StellarampDashboard() {
