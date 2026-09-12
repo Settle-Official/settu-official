@@ -81,6 +81,9 @@ export async function POST(request: NextRequest) {
     }
     return NextResponse.json({ kind: "resolved", order: resolved.order });
   } catch (error: any) {
+    // The generic message below is what the user sees; log the real cause
+    // server-side so a 500 here is diagnosable instead of a dead end.
+    console.error("[agent/parse] failed:", error?.message || error, error?.cause || "");
     return NextResponse.json(
       { kind: "error", message: "I had trouble understanding that — please try rephrasing." },
       { status: 500 },
