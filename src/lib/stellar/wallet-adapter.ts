@@ -15,6 +15,7 @@
 
 import type { ModuleInterface } from "@creit.tech/stellar-wallets-kit";
 import { isMobileBrowser } from "@/lib/platform";
+import { warmSharedAppKit } from "@/lib/wallet/appkit";
 
 export interface StellarWallet {
   /** Kit module id of the connected wallet, e.g. "freighter" or "wallet_connect". */
@@ -126,6 +127,13 @@ async function waitForWalletConnectReady(timeoutMs = 10_000): Promise<boolean> {
 }
 
 async function initKit(): Promise<Kit> {
+  // Must run first. stellar-wallets-kit constructs its own AppKit internally,
+  // and AppKit only mounts a <w3m-modal> for whichever instance is created
+  // first — every later one shares the controllers but has no element. Warming
+  // the shared instance here means the kit's open() renders our sheet instead
+  // of silently driving a modal that was never mounted.
+  await warmSharedAppKit();
+
   const [{ StellarWalletsKit, Networks }, { defaultModules }, walletConnect] =
     await Promise.all([
       import("@creit.tech/stellar-wallets-kit"),

@@ -29,6 +29,7 @@ import {
   type OfframpStep,
 } from "@/components/TransactionProgressModal";
 import * as StellarSdk from "@stellar/stellar-sdk";
+import { closeSheet } from "@/lib/wallet/appkit";
 
 /** Run a promise with a timeout. Rejects with a clear message on expiry. */
 function withTimeout<T>(
@@ -697,12 +698,25 @@ export function StellarampDashboard() {
    */
   const handleSourceChainChange = async (next: OfframpSourceChainKey) => {
     if (next === sourceChain) return;
+
+    // Close the shared sheet and tear down regardless of connection state. The
+    // old code only cleaned up an already-connected wallet, so switching chains
+    // mid-connect left that attempt running and both chains showed
+    // "connecting" at once, neither ever settling.
+    try {
+      await closeSheet();
+    } catch {
+      // Nothing open.
+    }
+
     try {
       if (sourceChain === "stellar") {
-        if (isConnected) await disconnect();
+        await disconnect();
       } else if (sourceChain === "solana") {
-        if (solanaWallet.isConnected) await solanaWallet.disconnect();
-      } else if (evmWallet.isConnected) {
+        await solanaWallet.disconnect();
+      } else {
+        // Bumps the attempt counter, which abandons any pairing in flight.
+        evmWallet.closeConnect();
         await evmWallet.disconnect();
       }
     } catch {

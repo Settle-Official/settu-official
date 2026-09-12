@@ -1,13 +1,22 @@
-// Solana wallet connection via Reown AppKit.
+// The one Reown AppKit instance for the whole app.
 //
-// Wallet Standard alone only ever registers browser extensions, which do not
-// exist on a phone — mobile users saw an empty picker and had no way to
-// connect. AppKit lists wallets from the WalletConnect registry, deep-links
-// into them on mobile and falls back to a QR on desktop, which is the same
-// mechanism Stellar and EVM already use here.
+// It must be exactly one. AppKit guards modal mounting with a MODULE-LEVEL
+// flag:
 //
-// Its Solana adapter connects over WalletConnect on mobile, so signing goes
-// through the AppKit provider rather than Wallet Standard's features.
+//     let isInitialized = false;
+//     if (!isInitialized) { ...insert <w3m-modal>...; isInitialized = true; }
+//
+// so only the first createAppKit call ever mounts an element, while every
+// instance shares the same controllers. A second instance therefore has no
+// modal of its own: its open() mutates state that renders the first
+// instance's element, configured for the first instance's chains. The sheet
+// shows the wrong wallets or nothing at all, and the caller waits on an
+// approval that can never arrive — which is why Stellar and Solana hung while
+// EVM, whose instance happened to be created first, worked.
+//
+// Every chain therefore connects through here. Solana uses the adapter
+// directly; chains that pair with their own SignClient (Stellar via
+// stellar-wallets-kit, EVM via ours) hand their `wc:` URI to openSheet.
 
 const SOLANA_NAMESPACE = "solana" as const;
 
@@ -56,22 +65,51 @@ async function getKit(): Promise<Kit> {
           url: origin,
           icons: [`${origin}/icons/icon-192.png`],
         },
-        // Without this the sheet leads with whatever the registry ranks
-        // highest — Trust, Binance, SafePal — which are multi-chain but not
-        // what a Solana user reaches for, leaving Phantom and Jupiter buried
-        // behind a search. IDs come from the WalletConnect Explorer API, not
-        // guessed.
+        // One sheet serves all three chains, so this row is cross-chain. Left
+        // to the registry's own ranking it leads with Trust, Binance and
+        // SafePal and buries Phantom and Freighter behind a search. Solana
+        // connects additionally pass namespace: "solana", which filters the
+        // full list properly; a raw pairing URI carries no namespace, so
+        // Stellar and EVM rely on this row plus search.
+        //
+        // IDs come from the WalletConnect Explorer API, not guessed.
         featuredWalletIds: [
-          "a797aa35c0fadbfc1a53e7f675162ed5226968b44a19ee3d24385c64d1d3c393", // Phantom
-          "1ca0bdd4747578705b1939af023d120677c64fe6ca76add81fda36e350605e79", // Solflare
-          "0ef262ca2a56b88d179c93a21383fee4e135bd7bc6680e5c2356ff8e38301037", // Jupiter
-          "2bd8c14e035c2d48f184aaa168559e86b0e3433228d3c4075900a221785019b0", // Backpack
+          "a797aa35c0fadbfc1a53e7f675162ed5226968b44a19ee3d24385c64d1d3c393", // Phantom   (Solana)
+          "997a355c8f682468706a76cff1b004a7115f505fb962dac54b6e9b442dd1c380", // Freighter (Stellar)
+          "c57ca95b47569778a828d19178114f4db188b89b763c899ba0be274e97267d96", // MetaMask  (EVM)
+          "1ca0bdd4747578705b1939af023d120677c64fe6ca76add81fda36e350605e79", // Solflare  (Solana)
+          "76a3d548a08cf402f5c7d021f24fd2881d767084b387a5325df88bc3d4b6f21b", // LOBSTR    (Stellar)
+          "4622a2b2d6af1c9844944291e5e7351a6aa24cd7b23099efac1b2fd875da31a0", // Trust     (EVM)
         ],
         features: { analytics: false, email: false, socials: false },
       } as never) as never;
     })();
   }
   return kitPromise;
+}
+
+/**
+ * Presents an existing WalletConnect pairing URI in the shared sheet, for
+ * chains that do their own pairing. Returns false if AppKit is unavailable, so
+ * the caller can fall back rather than hang.
+ */
+export async function openSheet(uri: string): Promise<boolean> {
+  try {
+    const kit = await getKit();
+    await (kit as unknown as { open: (o: { uri: string }) => Promise<void> }).open({ uri });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function closeSheet(): Promise<void> {
+  try {
+    const kit = await getKit();
+    await kit.close();
+  } catch {
+    // Nothing open, or AppKit never initialised.
+  }
 }
 
 /** Opens the wallet picker. Resolves once a wallet connects, or rejects. */
@@ -130,4 +168,13 @@ export async function subscribeSolanaAccount(
     (state) => callback(state.isConnected && state.address ? state.address : null),
     SOLANA_NAMESPACE,
   );
+}
+
+/** Ensures the shared instance exists before anything else can create one. */
+export async function warmSharedAppKit(): Promise<void> {
+  try {
+    await getKit();
+  } catch {
+    // No project id, or AppKit failed to load — connect() reports the real error.
+  }
 }

@@ -9,7 +9,7 @@ import {
   getSolanaAddress,
   getSolanaProvider,
   subscribeSolanaAccount,
-} from "@/lib/solana/appkit";
+} from "@/lib/wallet/appkit";
 
 /**
  * One Solana wallet, via Reown AppKit.
