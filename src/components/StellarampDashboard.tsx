@@ -378,6 +378,11 @@ export function StellarampDashboard() {
 
   const [mode, setMode] = useState<"offramp" | "onramp">("offramp");
 
+  // Which surface started the currently-running (or last-run) offramp —
+  // decides whether TransactionProgressModal or AgentPanel narrates it.
+  // handleExecuteTrade/EVM/Solana are unmodified; this only wraps the call.
+  const [offrampInitiator, setOfframpInitiator] = useState<"form" | "agent">("form");
+
   // The shared top header reflects the external wallet only for an offramp
   // from a non-Stellar source; onramp is always the Stellar path.
   const headerUsesExternal = mode === "offramp" && isExternalSource;
@@ -1122,6 +1127,37 @@ export function StellarampDashboard() {
       // Don't close modal or reset step here — user dismisses modal manually
     }
   };
+
+  const handleFormInitiateOfframp = useCallback(
+    (tradeData: Parameters<typeof handleExecuteTrade>[0]) => {
+      setOfframpInitiator("form");
+      return handleExecuteTrade(tradeData);
+    },
+    [handleExecuteTrade],
+  );
+
+  const handleAgentInitiateOfframp = useCallback(
+    (tradeData: Parameters<typeof handleExecuteTrade>[0]) => {
+      setOfframpInitiator("agent");
+      return handleExecuteTrade(tradeData);
+    },
+    [handleExecuteTrade],
+  );
+
+  // Same invalidation the progress modal's own Cancel does (search for
+  // `offrampFlowRef.current++` in this file to find it) — AgentPanel needs
+  // an equivalent so its own "waiting on your wallet" message can offer a
+  // way out, without needing the modal itself. Factored out here so both
+  // callers share exactly one reset sequence.
+  const handleCancelOfframpFlow = useCallback(() => {
+    offrampFlowRef.current++;
+    setShowProgressModal(false);
+    setOfframpStep("idle");
+    setOfframpError(null);
+    setTradeState({});
+    setIsExecutingOfframp(false);
+    setCurrentTxId(null);
+  }, []);
 
   /**
    * Offramp from an EVM source chain. Shares the Paycrest order + payout
@@ -1996,7 +2032,7 @@ export function StellarampDashboard() {
                     sourceChain={sourceChain}
                     onSourceChainChange={handleSourceChainChange}
                     walletAddress={activeUserAddress ?? null}
-                    onInitiateOfframp={handleExecuteTrade}
+                    onInitiateOfframp={handleFormInitiateOfframp}
                     onPricingUpdate={handlePricingUpdate}
                     usdcBalance={
                       sourceChain === "stellar"
@@ -2079,22 +2115,11 @@ export function StellarampDashboard() {
       />
 
       <TransactionProgressModal
-        isOpen={showProgressModal}
+        isOpen={showProgressModal && offrampInitiator === "form"}
         currentStep={offrampStep}
         error={offrampError}
         sourceChainLabel={activeSourceChainLabel}
-        onCancel={() => {
-          // Invalidate the in-flight flow so its (possibly much later)
-          // signature rejection can't reopen or repaint this modal, then
-          // reset as if it had never started.
-          offrampFlowRef.current++;
-          setShowProgressModal(false);
-          setOfframpStep("idle");
-          setOfframpError(null);
-          setTradeState({});
-          setIsExecutingOfframp(false);
-          setCurrentTxId(null);
-        }}
+        onCancel={handleCancelOfframpFlow}
         onClose={() => {
           setShowProgressModal(false);
           setOfframpStep("idle");
