@@ -6,6 +6,7 @@ import {
   type GasFeeOptions,
   type OfframpSourceChainKey,
 } from "@/components/FormCard";
+import { AgentPanel } from "@/components/AgentPanel";
 import { Header } from "@/components/Header";
 import { ProgressSteps } from "@/components/ProgressSteps";
 import { RecentTransactionsTable } from "@/components/RecentTransactionsTable";
@@ -376,7 +377,7 @@ export function StellarampDashboard() {
   const activeUserAddress =
     sourceChain === "stellar" ? wallet?.publicKey : externalWallet.address;
 
-  const [mode, setMode] = useState<"offramp" | "onramp">("offramp");
+  const [mode, setMode] = useState<"offramp" | "onramp" | "agent">("offramp");
 
   // Which surface started the currently-running (or last-run) offramp —
   // decides whether TransactionProgressModal or AgentPanel narrates it.
@@ -1968,7 +1969,7 @@ export function StellarampDashboard() {
           />
 
           <div className="flex gap-2">
-            {(["onramp", "offramp"] as const).map((m) => {
+            {(["onramp", "offramp", "agent"] as const).map((m) => {
               const isActive = mode === m;
               return (
                 <button
@@ -1992,7 +1993,7 @@ export function StellarampDashboard() {
                   }}
                   className="min-w-[150px] px-4 py-[0.6rem] text-[0.75rem] font-semibold uppercase tracking-[0.08em] rounded-none transition-colors focus:outline-none focus:ring-2 focus:ring-[#C9A962]/70"
                 >
-                  {m === "onramp" ? "On-ramp" : "Off-ramp"}
+                  {m === "onramp" ? "On-ramp" : m === "offramp" ? "Off-ramp" : "Agent"}
                 </button>
               );
             })}
@@ -2023,30 +2024,45 @@ export function StellarampDashboard() {
             <>
               <div className="grid grid-cols-[1fr_370px] gap-3 max-[1100px]:grid-cols-1">
                 <div className="max-[1100px]:order-1">
-                  <FormCard
-                    isConnected={uiIsConnected}
-                    isConnecting={uiIsConnecting}
-                    isExecutingOfframp={isExecutingOfframp}
-                    resetKey={formResetKey}
-                    onConnect={handleConnect}
-                    sourceChain={sourceChain}
-                    onSourceChainChange={handleSourceChainChange}
-                    walletAddress={activeUserAddress ?? null}
-                    onInitiateOfframp={handleFormInitiateOfframp}
-                    onPricingUpdate={handlePricingUpdate}
-                    usdcBalance={
-                      sourceChain === "stellar"
-                        ? stellarUsdcBalanceRaw
-                        : externalBalances
-                          ? Number(externalBalances.usdc)
-                          : null
-                    }
-                    isLoadingBalance={
-                      sourceChain === "stellar"
-                        ? isLoadingBalance
-                        : externalWallet.isConnected && !externalBalances
-                    }
-                  />
+                  {mode === "agent" ? (
+                    <AgentPanel
+                      isConnected={uiIsConnected}
+                      isConnecting={uiIsConnecting}
+                      onConnect={handleConnect}
+                      sourceChainLabel={activeSourceChainLabel}
+                      offrampStep={offrampStep}
+                      offrampError={offrampError}
+                      active={offrampInitiator === "agent"}
+                      onCancelFlow={handleCancelOfframpFlow}
+                      onInitiateOfframp={handleAgentInitiateOfframp}
+                      onPricingUpdate={handlePricingUpdate}
+                    />
+                  ) : (
+                    <FormCard
+                      isConnected={uiIsConnected}
+                      isConnecting={uiIsConnecting}
+                      isExecutingOfframp={isExecutingOfframp}
+                      resetKey={formResetKey}
+                      onConnect={handleConnect}
+                      sourceChain={sourceChain}
+                      onSourceChainChange={handleSourceChainChange}
+                      walletAddress={activeUserAddress ?? null}
+                      onInitiateOfframp={handleFormInitiateOfframp}
+                      onPricingUpdate={handlePricingUpdate}
+                      usdcBalance={
+                        sourceChain === "stellar"
+                          ? stellarUsdcBalanceRaw
+                          : externalBalances
+                            ? Number(externalBalances.usdc)
+                            : null
+                      }
+                      isLoadingBalance={
+                        sourceChain === "stellar"
+                          ? isLoadingBalance
+                          : externalWallet.isConnected && !externalBalances
+                      }
+                    />
+                  )}
                 </div>
                 <div className="row-span-2 col-start-2 max-[1100px]:order-2 max-[1100px]:row-auto max-[1100px]:col-auto">
                   <RightPanel
