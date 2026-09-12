@@ -1,0 +1,20 @@
+name: Sweep stranded offramp burns
+
+# Vercel Hobby caps cron jobs at once/day, but a stranded CCTP burn (see
+# src/lib/offramp/burn-backstop.ts) needs recovering within minutes, not
+# hours, while the user is still watching their money. This workflow drives
+# the same recovery endpoint the daily onramp cron already calls, on a much
+# tighter cadence, independent of Vercel's plan limits.
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger sweep-burns
+        run: |
+          curl -sf -X POST "https://www.settu.xyz/api/admin/offramp/sweep-burns" \
+            -H "Authorization: Bearer ${{ secrets.ADMIN_API_SECRET }}"
