@@ -48,6 +48,14 @@ function getClient() {
         description: "Stellar USDC <-> fiat, multi-chain",
         url: origin,
         icons: [`${origin}/icons/icon-192.png`],
+        // Tells the wallet app how to bounce the user back here after they
+        // approve. Without it, a mobile wallet can leave the user sitting in
+        // the wallet app after signing, and the backgrounded browser tab
+        // stays that way long enough that the relay drops the undelivered
+        // response — the same "stuck on confirm transaction" failure
+        // confirmed on the Stellar side (see wallet-adapter.ts) and fixed
+        // there with this same field.
+        redirect: { native: "", universal: origin },
       },
     });
   }
