@@ -213,7 +213,8 @@ export function AgentPanel({
   };
 
   return (
-    <section className="flex flex-col gap-[1.1rem] border border-[var(--line)] bg-[#0a0a0a] p-[1.2rem]">
+    <div className="racing-border-wrapper">
+      <section className="racing-border-content flex flex-col gap-[1.1rem] p-[1.2rem]">
         <div className="flex items-center justify-between border-b border-[var(--line)] pb-[0.6rem]">
           <h2 className="m-0 font-space-grotesk text-[1.1rem] font-bold">AGENT MODE</h2>
           <span className="text-[0.62rem] uppercase tracking-[0.1em] text-[var(--muted)]">Offramp</span>
@@ -322,6 +323,7 @@ export function AgentPanel({
             Send
           </button>
         </div>
-    </section>
+      </section>
+    </div>
   );
 }
