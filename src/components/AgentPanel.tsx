@@ -6,20 +6,21 @@ import { stepToAgentEvent, type AgentStepEvent } from "@/lib/offramp/agent-step-
 // pulls in the resolver's server-side fetch logic at runtime. Reusing the
 // server's own type here (instead of hand-duplicating an equivalent shape)
 // is what keeps the two from silently drifting apart.
-import type { ResolvedAgentOrder } from "@/lib/offramp/agent-resolver";
+import type { AgentOrderWithQuote } from "@/lib/offramp/agent-resolver";
 import type { OfframpStep } from "@/components/TransactionProgressModal";
+import { fiatSymbol } from "@/lib/format/currency";
 
 type ParseResponse =
   | { kind: "clarify"; message: string }
   | { kind: "recap"; missing: string[] }
-  | { kind: "resolved"; order: ResolvedAgentOrder }
+  | { kind: "resolved"; order: AgentOrderWithQuote }
   | { kind: "error"; message: string };
 
 interface ChatMessage {
   id: string;
   role: "user" | "agent";
   text?: string;
-  order?: ResolvedAgentOrder; // present only on the confirmation-card message
+  order?: AgentOrderWithQuote; // present only on the confirmation-card message
   stepKind?: AgentStepEvent["kind"]; // present only on step-narration messages
 }
 
@@ -39,8 +40,8 @@ export interface AgentPanelProps {
     amount: string;
     rate: number;
     token: string;
-    sourceChain: ResolvedAgentOrder["sourceChain"];
-    beneficiary: ResolvedAgentOrder["beneficiary"];
+    sourceChain: AgentOrderWithQuote["sourceChain"];
+    beneficiary: AgentOrderWithQuote["beneficiary"];
   }) => Promise<void> | void;
   readonly onPricingUpdate: (data: {
     amount: string;
@@ -157,44 +158,27 @@ export function AgentPanel({
     }
   };
 
-  const confirmOrder = async (order: ResolvedAgentOrder) => {
+  const confirmOrder = async (order: AgentOrderWithQuote) => {
     if (!isConnected) {
       onConnect();
       return;
     }
     setConfirming(true);
     try {
-      // A live rate is required before handleExecuteTrade will run (same gate
-      // FormCard's own quote effect satisfies) — Task 7's resolver already
-      // confirmed the currency/institution/account; the rate for display and
-      // for the Base-direct-transfer register payload still needs to be in
-      // dashboard-level pricing state.
-      const quoteRes = await fetch("/api/offramp/quote", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          amount: order.amount,
-          amountIn: "crypto",
-          token: order.token,
-          currency: order.beneficiary.currency,
-          network: "base",
-        }),
-      });
-      const quotePayload = await quoteRes.json();
-      if (!quoteRes.ok) {
-        setMessages((prev) => [
-          ...prev,
-          { id: nextId(), role: "agent", text: `❌ ${quotePayload?.error || "Couldn't get a live rate — please try again."}` },
-        ]);
-        return;
-      }
+      // The quote shown on the card (order.rate/destinationAmount) is reused
+      // as-is here — it's the same fetch, done once by the parse route
+      // before the card was ever shown, so this is exactly the number the
+      // user agreed to, not a second unseen quote. handleExecuteTrade still
+      // requires dashboard-level pricing state to be populated first (the
+      // same gate FormCard's own quote effect satisfies), and the EVM
+      // register payload reads the rate back out of it.
       onPricingUpdate({
         amount: order.amount,
         quote: {
-          destinationAmount: quotePayload.destinationAmount,
-          rate: quotePayload.rate,
+          destinationAmount: order.destinationAmount,
+          rate: order.rate,
           currency: order.beneficiary.currency,
-          estimatedTimeMs: quotePayload.estimatedTime,
+          estimatedTimeMs: order.estimatedTimeMs,
         },
         isLoadingQuote: false,
         currency: order.beneficiary.currency,
@@ -202,7 +186,7 @@ export function AgentPanel({
       });
       await onInitiateOfframp({
         amount: order.amount,
-        rate: quotePayload.rate,
+        rate: order.rate,
         token: order.token,
         sourceChain: order.sourceChain,
         beneficiary: order.beneficiary,
@@ -241,9 +225,23 @@ export function AgentPanel({
                         <span>{value}</span>
                       </div>
                     ))}
-                    <div className="flex justify-between py-[0.22rem] text-[0.78rem]">
+                    <div className="flex justify-between border-b border-dashed border-[#222] py-[0.22rem] text-[0.78rem]">
                       <span className="text-[var(--muted)]">Account name</span>
                       <span className="text-[var(--accent)]">{o.beneficiary.accountName} ✓ verified</span>
+                    </div>
+                    <div className="flex justify-between border-b border-dashed border-[#222] py-[0.22rem] text-[0.78rem]">
+                      <span className="text-[var(--muted)]">Rate</span>
+                      <span>
+                        {fiatSymbol(o.beneficiary.currency)}
+                        {o.rate.toLocaleString()} / {o.token}
+                      </span>
+                    </div>
+                    <div className="flex justify-between py-[0.22rem] text-[0.78rem]">
+                      <span className="text-[var(--muted)]">You receive</span>
+                      <span className="font-bold text-[var(--accent)]">
+                        {fiatSymbol(o.beneficiary.currency)}
+                        {o.destinationAmount}
+                      </span>
                     </div>
                     <div className="mt-[0.7rem] flex gap-[0.5rem]">
                       <button

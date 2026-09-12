@@ -90,7 +90,39 @@ export async function POST(request: NextRequest) {
     if (resolved.status === "recap") {
       return NextResponse.json({ kind: "recap", missing: resolved.missing });
     }
-    return NextResponse.json({ kind: "resolved", order: resolved.order });
+
+    // Pull the live quote now, before the user ever sees a confirmation
+    // card — the card must show real numbers (rate, payout), and reusing
+    // this exact fetch at confirm time means there's no second, unseen
+    // quote the user never agreed to.
+    const quoteRes = await fetch(new URL("/api/offramp/quote", request.nextUrl.origin), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        amount: resolved.order.amount,
+        amountIn: "crypto",
+        token: resolved.order.token,
+        currency: resolved.order.beneficiary.currency,
+        network: "base",
+      }),
+    });
+    const quotePayload = await quoteRes.json().catch(() => ({}));
+    if (!quoteRes.ok) {
+      return NextResponse.json({
+        kind: "clarify",
+        message: quotePayload?.error || "Couldn't get a live rate — please try again in a moment.",
+      });
+    }
+
+    return NextResponse.json({
+      kind: "resolved",
+      order: {
+        ...resolved.order,
+        rate: quotePayload.rate,
+        destinationAmount: quotePayload.destinationAmount,
+        estimatedTimeMs: quotePayload.estimatedTime,
+      },
+    });
   } catch (error: any) {
     // The generic message below is what the user sees; log the real cause
     // server-side so a 500 here is diagnosable instead of a dead end.

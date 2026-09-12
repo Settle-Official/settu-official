@@ -24,6 +24,20 @@ export interface ResolvedAgentOrder {
   };
 }
 
+/**
+ * A resolved order plus the live quote pulled just before showing it to the
+ * user. Added by the parse route (not this module) once resolution
+ * succeeds, so this module's own contract and tests stay quote-free — the
+ * quote is a route-level concern layered on top. The rate/destinationAmount
+ * shown on the confirmation card and the ones actually used to execute are
+ * the exact same fetch; there's no second, unseen quote at confirm time.
+ */
+export interface AgentOrderWithQuote extends ResolvedAgentOrder {
+  rate: number;
+  destinationAmount: string;
+  estimatedTimeMs: number;
+}
+
 export type ResolveResult =
   | { status: "resolved"; order: ResolvedAgentOrder }
   | { status: "clarify"; message: string }
