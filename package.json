@@ -22,11 +22,13 @@
     "@wallet-standard/base": "^1.1.1",
     "@walletconnect/sign-client": "^2.23.9",
     "@walletconnect/types": "^2.23.9",
+    "ai": "^5.0.256",
     "next": "^15.5.12",
     "react": "19.0.0",
     "react-dom": "19.0.0",
     "stellar-sdk": "^13.3.0",
-    "viem": "^2.47.0"
+    "viem": "^2.47.0",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.2.1",
