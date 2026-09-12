@@ -8,6 +8,7 @@ import {
   resolveAgentOrder,
   type AgentOrderExtraction,
 } from "@/lib/offramp/agent-resolver";
+import { checkAgentRateLimit } from "@/lib/offramp/agent-rate-limit";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -23,6 +24,15 @@ const extractionSchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
+    const clientKey =
+      request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+    if (!checkAgentRateLimit(clientKey)) {
+      return NextResponse.json(
+        { kind: "error", message: "Too many messages — please wait a moment and try again." },
+        { status: 429 },
+      );
+    }
+
     const body = await request.json();
     const messages = Array.isArray(body?.messages) ? body.messages : [];
     if (messages.length === 0) {
