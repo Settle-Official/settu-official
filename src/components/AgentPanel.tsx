@@ -21,6 +21,10 @@ interface ChatMessage {
   role: "user" | "agent";
   text?: string;
   order?: AgentOrderWithQuote; // present only on the confirmation-card message
+  // Lifecycle of a confirmation card: undefined until Confirm/Cancel is
+  // clicked, "confirmed" while the run is in flight, then "success"/"failed"
+  // once offrampStep resolves (or "cancelled" if declined or aborted mid-run).
+  orderStatus?: "confirmed" | "success" | "failed" | "cancelled";
   stepKind?: AgentStepEvent["kind"]; // present only on step-narration messages
 }
 
@@ -39,17 +43,11 @@ export interface AgentPanelProps {
   readonly onInitiateOfframp: (tradeData: {
     amount: string;
     rate: number;
+    destinationAmount: string;
     token: string;
     sourceChain: AgentOrderWithQuote["sourceChain"];
     beneficiary: AgentOrderWithQuote["beneficiary"];
   }) => Promise<void> | void;
-  readonly onPricingUpdate: (data: {
-    amount: string;
-    quote: { destinationAmount: string; rate: number; currency: string; estimatedTimeMs: number } | null;
-    isLoadingQuote: boolean;
-    currency: string;
-    gasFeeOptions: null;
-  }) => void;
 }
 
 /**
@@ -69,7 +67,6 @@ export function AgentPanel({
   active,
   onCancelFlow,
   onInitiateOfframp,
-  onPricingUpdate,
 }: Readonly<AgentPanelProps>) {
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
@@ -90,18 +87,37 @@ export function AgentPanel({
   const canCancel =
     active && (offrampStep === "awaiting-signature" || offrampStep === "submitting");
 
+  // Drives the typing dots during the gaps between step-narration messages
+  // (e.g. while polling payout status) so the run doesn't look stalled.
+  const isExecuting =
+    active && offrampStep !== "idle" && offrampStep !== "success" && offrampStep !== "error";
+
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
-  }, [messages, isSending]);
+  }, [messages, isSending, isExecuting]);
 
   // Narrate execution: every offrampStep change, while this panel owns the
   // current run, becomes one more chat message. Resets when a fresh run
-  // starts (offrampStep returns to "idle").
+  // starts (offrampStep returns to "idle"). Success/error also resolve the
+  // in-flight confirmation card's status, driven off the same prop change
+  // rather than re-reading it after an await — reading offrampStep from a
+  // closure captured before an async gap is exactly the staleness bug that
+  // caused the "Quote unavailable" double-click issue.
   useEffect(() => {
     if (!active) return;
     if (offrampStep === "idle") {
       lastRenderedStepId.current = null;
       return;
+    }
+    if (offrampStep === "success" || offrampStep === "error") {
+      setMessages((prev) => {
+        const idx = [...prev].reverse().findIndex((m) => m.orderStatus === "confirmed");
+        if (idx === -1) return prev;
+        const realIdx = prev.length - 1 - idx;
+        const next = [...prev];
+        next[realIdx] = { ...next[realIdx], orderStatus: offrampStep === "success" ? "success" : "failed" };
+        return next;
+      });
     }
     const event = stepToAgentEvent(offrampStep, { sourceChainLabel, error: offrampError });
     if (!event || event.id === lastRenderedStepId.current) return;
@@ -164,29 +180,21 @@ export function AgentPanel({
       return;
     }
     setConfirming(true);
+    // Hide Confirm/Cancel the moment the run starts — step narration + the
+    // typing indicator take over from here, and success/error resolve this
+    // below via the offrampStep effect above.
+    setMessages((prev) =>
+      prev.map((m) => (m.order === order ? { ...m, orderStatus: "confirmed" } : m)),
+    );
     try {
       // The quote shown on the card (order.rate/destinationAmount) is reused
       // as-is here — it's the same fetch, done once by the parse route
       // before the card was ever shown, so this is exactly the number the
-      // user agreed to, not a second unseen quote. handleExecuteTrade still
-      // requires dashboard-level pricing state to be populated first (the
-      // same gate FormCard's own quote effect satisfies), and the EVM
-      // register payload reads the rate back out of it.
-      onPricingUpdate({
-        amount: order.amount,
-        quote: {
-          destinationAmount: order.destinationAmount,
-          rate: order.rate,
-          currency: order.beneficiary.currency,
-          estimatedTimeMs: order.estimatedTimeMs,
-        },
-        isLoadingQuote: false,
-        currency: order.beneficiary.currency,
-        gasFeeOptions: null,
-      });
+      // user agreed to, not a second unseen quote.
       await onInitiateOfframp({
         amount: order.amount,
         rate: order.rate,
+        destinationAmount: order.destinationAmount,
         token: order.token,
         sourceChain: order.sourceChain,
         beneficiary: order.beneficiary,
@@ -194,6 +202,25 @@ export function AgentPanel({
     } finally {
       setConfirming(false);
     }
+  };
+
+  const cancelOrder = (order: AgentOrderWithQuote) => {
+    setMessages((prev) => [
+      ...prev.map((m) => (m.order === order ? { ...m, orderStatus: "cancelled" as const } : m)),
+      { id: nextId(), role: "agent", text: "Cancelled — send a new message whenever you're ready." },
+    ]);
+  };
+
+  const cancelFlowAndOrder = () => {
+    setMessages((prev) => {
+      const idx = [...prev].reverse().findIndex((m) => m.orderStatus === "confirmed");
+      if (idx === -1) return prev;
+      const realIdx = prev.length - 1 - idx;
+      const next = [...prev];
+      next[realIdx] = { ...next[realIdx], orderStatus: "cancelled" };
+      return next;
+    });
+    onCancelFlow();
   };
 
   return (
@@ -243,29 +270,36 @@ export function AgentPanel({
                         {o.destinationAmount}
                       </span>
                     </div>
-                    <div className="mt-[0.7rem] flex gap-[0.5rem]">
-                      <button
-                        type="button"
-                        disabled={confirming}
-                        onClick={() => confirmOrder(o)}
-                        className="flex-1 bg-[var(--accent)] py-[0.55rem] text-[0.72rem] font-bold uppercase tracking-[0.08em] text-[#0a0a0a] disabled:opacity-50"
-                      >
-                        {confirming ? "Working…" : isConnected ? "Confirm" : "Connect Wallet"}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={confirming}
-                        onClick={() =>
-                          setMessages((prev) => [
-                            ...prev,
-                            { id: nextId(), role: "agent", text: "Cancelled — send a new message whenever you're ready." },
-                          ])
-                        }
-                        className="flex-1 border border-[var(--line)] py-[0.55rem] text-[0.72rem] font-bold uppercase tracking-[0.08em] text-[var(--muted)] disabled:opacity-50"
-                      >
-                        Cancel
-                      </button>
-                    </div>
+                    {!m.orderStatus && (
+                      <div className="mt-[0.7rem] flex gap-[0.5rem]">
+                        <button
+                          type="button"
+                          disabled={confirming}
+                          onClick={() => confirmOrder(o)}
+                          className="flex-1 bg-[var(--accent)] py-[0.55rem] text-[0.72rem] font-bold uppercase tracking-[0.08em] text-[#0a0a0a] disabled:opacity-50"
+                        >
+                          {confirming ? "Working…" : isConnected ? "Confirm" : "Connect Wallet"}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={confirming}
+                          onClick={() => cancelOrder(o)}
+                          className="flex-1 border border-[var(--line)] py-[0.55rem] text-[0.72rem] font-bold uppercase tracking-[0.08em] text-[var(--muted)] disabled:opacity-50"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    )}
+                    {m.orderStatus === "success" && (
+                      <div className="mt-[0.7rem] py-[0.4rem] text-center text-[0.72rem] font-bold uppercase tracking-[0.08em] text-[var(--accent)]">
+                        ✓ Successful
+                      </div>
+                    )}
+                    {m.orderStatus === "failed" && (
+                      <div className="mt-[0.7rem] py-[0.4rem] text-center text-[0.72rem] font-bold uppercase tracking-[0.08em] text-red-400">
+                        ✗ Failed
+                      </div>
+                    )}
                   </div>
                 </div>
               );
@@ -286,7 +320,7 @@ export function AgentPanel({
               </div>
             );
           })}
-          {isSending && (
+          {(isSending || isExecuting) && (
             <div className="flex justify-start">
               <div className="flex items-center gap-[3px] border border-[var(--line)] bg-[#141414] px-[0.75rem] py-[0.65rem]">
                 <span
@@ -309,7 +343,7 @@ export function AgentPanel({
         {canCancel && (
           <button
             type="button"
-            onClick={onCancelFlow}
+            onClick={cancelFlowAndOrder}
             className="w-full py-[0.5rem] text-[0.7rem] font-bold uppercase tracking-[0.08em] text-[var(--muted)] hover:text-white"
           >
             Cancel

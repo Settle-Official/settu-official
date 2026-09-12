@@ -7,6 +7,7 @@ import {
   type OfframpSourceChainKey,
 } from "@/components/FormCard";
 import { AgentPanel } from "@/components/AgentPanel";
+import { SelectField, type SelectOption } from "@/components/SelectField";
 import { Header } from "@/components/Header";
 import { ProgressSteps } from "@/components/ProgressSteps";
 import { RecentTransactionsTable } from "@/components/RecentTransactionsTable";
@@ -31,6 +32,12 @@ import {
   type OfframpStep,
 } from "@/components/TransactionProgressModal";
 import * as StellarSdk from "@stellar/stellar-sdk";
+
+const MODE_OPTIONS: SelectOption[] = [
+  { code: "onramp", name: "On-ramp" },
+  { code: "offramp", name: "Off-ramp" },
+  { code: "agent", name: "Agent" },
+];
 
 /** Run a promise with a timeout. Rejects with a clear message on expiry. */
 function withTimeout<T>(
@@ -390,7 +397,9 @@ export function StellarampDashboard() {
   // Which surface started the currently-running (or last-run) offramp —
   // decides whether TransactionProgressModal or AgentPanel narrates it.
   // handleExecuteTrade/EVM/Solana are unmodified; this only wraps the call.
-  const [offrampInitiator, setOfframpInitiator] = useState<"form" | "agent">("form");
+  const [offrampInitiator, setOfframpInitiator] = useState<"form" | "agent">(
+    "form",
+  );
 
   // The shared top header reflects the external wallet only for an offramp
   // from a non-Stellar source; onramp is always the Stellar path.
@@ -725,6 +734,7 @@ export function StellarampDashboard() {
   const handleExecuteTrade = async (tradeData: {
     amount: string;
     rate: number;
+    destinationAmount: string;
     token: string;
     sourceChain: OfframpSourceChainKey;
     beneficiary: {
@@ -746,10 +756,6 @@ export function StellarampDashboard() {
 
     if (!wallet) {
       throw new Error("Wallet not connected");
-    }
-    if (!pricingState.quote) {
-      setToastError("Quote unavailable. Please enter an amount first.");
-      return;
     }
 
     // Pre-flight: check USDC balance against the raw figure, never the
@@ -1179,6 +1185,7 @@ export function StellarampDashboard() {
   const handleExecuteEvmTrade = async (tradeData: {
     amount: string;
     rate: number;
+    destinationAmount: string;
     token: string;
     sourceChain: OfframpSourceChainKey;
     beneficiary: {
@@ -1198,10 +1205,6 @@ export function StellarampDashboard() {
     const connectedAddress = evmWallet.address;
     if (!connectedAddress) {
       setToastError("Connect your EVM wallet first.");
-      return;
-    }
-    if (!pricingState.quote) {
-      setToastError("Quote unavailable. Please enter an amount first.");
       return;
     }
 
@@ -1450,7 +1453,7 @@ export function StellarampDashboard() {
           connectedAddress,
           amountUsdc: tradeData.amount,
           destinationCurrency: tradeData.beneficiary.currency,
-          destinationAmount: String(pricingState.quote.destinationAmount),
+          destinationAmount: String(tradeData.destinationAmount),
           paycrestOrderId: payoutOrderId,
         });
       }
@@ -1514,6 +1517,7 @@ export function StellarampDashboard() {
   const handleExecuteSolanaTrade = async (tradeData: {
     amount: string;
     rate: number;
+    destinationAmount: string;
     token: string;
     sourceChain: OfframpSourceChainKey;
     beneficiary: {
@@ -1527,10 +1531,6 @@ export function StellarampDashboard() {
     const connectedAddress = solanaWallet.address;
     if (!connectedAddress) {
       setToastError("Connect your Solana wallet first.");
-      return;
-    }
-    if (!pricingState.quote) {
-      setToastError("Quote unavailable. Please enter an amount first.");
       return;
     }
     const baseReturnAddress = process.env.NEXT_PUBLIC_BASE_RETURN_ADDRESS;
@@ -1976,7 +1976,10 @@ export function StellarampDashboard() {
             onDisconnect={handleDisconnect}
           />
 
-          <div className="flex gap-2">
+          {/* Three fixed-width buttons overflow narrow mobile viewports (the
+              Agent tab used to run off-screen); below `sm` this collapses to
+              a single native select instead of shrinking the buttons. */}
+          <div className="hidden gap-2 sm:flex">
             {(["onramp", "offramp", "agent"] as const).map((m) => {
               const isActive = mode === m;
               return (
@@ -2001,10 +2004,22 @@ export function StellarampDashboard() {
                   }}
                   className="min-w-[150px] px-4 py-[0.6rem] text-[0.75rem] font-semibold uppercase tracking-[0.08em] rounded-none transition-colors focus:outline-none focus:ring-2 focus:ring-[#C9A962]/70"
                 >
-                  {m === "onramp" ? "On-ramp" : m === "offramp" ? "Off-ramp" : "Agent"}
+                  {m === "onramp"
+                    ? "On-ramp"
+                    : m === "offramp"
+                      ? "Off-ramp"
+                      : "Agent"}
                 </button>
               );
             })}
+          </div>
+          <div className="sm:hidden text-[1rem]">
+            <SelectField
+              label="SELECT SETTUMENT TYPE"
+              value={mode}
+              onChange={(next) => setMode(next as typeof mode)}
+              options={MODE_OPTIONS}
+            />
           </div>
 
           {mode === "onramp" ? (
@@ -2043,7 +2058,6 @@ export function StellarampDashboard() {
                       active={offrampInitiator === "agent"}
                       onCancelFlow={handleCancelOfframpFlow}
                       onInitiateOfframp={handleAgentInitiateOfframp}
-                      onPricingUpdate={handlePricingUpdate}
                     />
                   ) : (
                     <FormCard

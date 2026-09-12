@@ -31,6 +31,7 @@ export interface FormCardProps {
   readonly onInitiateOfframp?: (tradeData: {
     amount: string;
     rate: number;
+    destinationAmount: string;
     token: string;
     sourceChain: OfframpSourceChainKey;
     beneficiary: {
@@ -531,6 +532,7 @@ export function FormCard({
       // route echoes the input back, so this is correct for both.
       amount: quote.sourceAmount,
       rate: quote.rate,
+      destinationAmount: quote.destinationAmount,
       token: "USDC",
       sourceChain,
       beneficiary: {
