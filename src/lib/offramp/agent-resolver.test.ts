@@ -117,6 +117,79 @@ test("resolveAgentOrder: failed account verification asks to double check the nu
   });
 });
 
+test("resolveAgentOrder: 'GTBank' resolves against the real Paycrest name 'Guaranty Trust Bank'", async () => {
+  await withFetch(async (url) => {
+    const u = String(url);
+    if (u.includes("/currencies")) return jsonResponse({ data: [{ code: "NGN", name: "Nigerian Naira", symbol: "₦" }] });
+    if (u.includes("/institutions/")) {
+      return jsonResponse({ data: [{ code: "GTBINGLA", name: "Guaranty Trust Bank" }, { code: "ABNGNGLA", name: "Access Bank" }] });
+    }
+    if (u.includes("/verify-account")) return jsonResponse({ data: { accountName: "JOHN DOE" } });
+    throw new Error(`unexpected fetch: ${u}`);
+  }, async () => {
+    const result = await resolveAgentOrder({ ...COMPLETE, institutionName: "GTBank" });
+    assert.equal(result.status, "resolved");
+    if (result.status === "resolved") {
+      assert.equal(result.order.beneficiary.institution, "GTBINGLA");
+    }
+  });
+});
+
+test("resolveAgentOrder: 'UBA' resolves against 'United Bank for Africa'", async () => {
+  await withFetch(async (url) => {
+    const u = String(url);
+    if (u.includes("/currencies")) return jsonResponse({ data: [{ code: "NGN", name: "Nigerian Naira", symbol: "₦" }] });
+    if (u.includes("/institutions/")) {
+      return jsonResponse({ data: [{ code: "UNAFNGLA", name: "United Bank for Africa" }, { code: "UBNINGLA", name: "Union Bank" }] });
+    }
+    if (u.includes("/verify-account")) return jsonResponse({ data: { accountName: "JOHN DOE" } });
+    throw new Error(`unexpected fetch: ${u}`);
+  }, async () => {
+    const result = await resolveAgentOrder({ ...COMPLETE, institutionName: "UBA" });
+    assert.equal(result.status, "resolved");
+    if (result.status === "resolved") {
+      assert.equal(result.order.beneficiary.institution, "UNAFNGLA");
+    }
+  });
+});
+
+test("resolveAgentOrder: '9PSB' resolves to '9 Payment Service Bank', not one of the other Payment Service Banks", async () => {
+  await withFetch(async (url) => {
+    const u = String(url);
+    if (u.includes("/currencies")) return jsonResponse({ data: [{ code: "NGN", name: "Nigerian Naira", symbol: "₦" }] });
+    if (u.includes("/institutions/")) {
+      return jsonResponse({
+        data: [
+          { code: "NINEPSB", name: "9 Payment Service Bank" },
+          { code: "HOPEPSB", name: "Hope Payment Service Bank" },
+          { code: "MOMOPSB", name: "MoMo Payment Service Bank" },
+        ],
+      });
+    }
+    if (u.includes("/verify-account")) return jsonResponse({ data: { accountName: "JOHN DOE" } });
+    throw new Error(`unexpected fetch: ${u}`);
+  }, async () => {
+    const result = await resolveAgentOrder({ ...COMPLETE, institutionName: "9PSB" });
+    assert.equal(result.status, "resolved");
+    if (result.status === "resolved") {
+      assert.equal(result.order.beneficiary.institution, "NINEPSB");
+    }
+  });
+});
+
+test("resolveAgentOrder: an alias that isn't in the given institution list still asks which bank", async () => {
+  await withFetch(async (url) => {
+    const u = String(url);
+    if (u.includes("/currencies")) return jsonResponse({ data: [{ code: "NGN", name: "Nigerian Naira", symbol: "₦" }] });
+    if (u.includes("/institutions/")) return jsonResponse({ data: [{ code: "ABNGNGLA", name: "Access Bank" }] });
+    throw new Error(`unexpected fetch: ${u}`);
+  }, async () => {
+    const result = await resolveAgentOrder({ ...COMPLETE, institutionName: "GTBank" });
+    assert.equal(result.status, "clarify");
+    if (result.status === "clarify") assert.match(result.message, /bank/i);
+  });
+});
+
 test("resolveAgentOrder: unsupported currency asks for a different one", async () => {
   await withFetch(async (url) => {
     const u = String(url);

@@ -1,6 +1,7 @@
 import { fetchCurrencies, fetchInstitutions, verifyAccount } from "./paycrest-directory";
 import { sourceChainOptions, type OfframpSourceChainKey } from "./source-chain-options";
 import { validateAmount } from "./utils/validation";
+import { resolveInstitutionAlias } from "./institution-aliases";
 
 export interface AgentOrderExtraction {
   amount: string | null;
@@ -77,11 +78,10 @@ export function classifyExtraction(
 }
 
 /** Case-insensitive exact match first, then substring, else ambiguous/none. */
-function matchInstitution(
+function matchInstitutionText(
   institutions: { code: string; name: string }[],
-  freeText: string,
+  needle: string,
 ): { code: string } | "none" | "ambiguous" {
-  const needle = freeText.trim().toLowerCase();
   const exact = institutions.filter((i) => i.name.toLowerCase() === needle);
   if (exact.length === 1) return { code: exact[0].code };
   const contains = institutions.filter(
@@ -90,6 +90,23 @@ function matchInstitution(
   if (contains.length === 1) return { code: contains[0].code };
   if (contains.length > 1) return "ambiguous";
   return "none";
+}
+
+/**
+ * Tries the free text as typed first; if that finds nothing, falls back to
+ * a known-nickname alias (see institution-aliases.ts) for cases like
+ * "GTBank" that share no substring with Paycrest's real institution name.
+ * An ambiguous direct match is never overridden by an alias attempt.
+ */
+function matchInstitution(
+  institutions: { code: string; name: string }[],
+  freeText: string,
+): { code: string } | "none" | "ambiguous" {
+  const direct = matchInstitutionText(institutions, freeText.trim().toLowerCase());
+  if (direct !== "none") return direct;
+  const alias = resolveInstitutionAlias(freeText);
+  if (!alias) return "none";
+  return matchInstitutionText(institutions, alias.toLowerCase());
 }
 
 export async function resolveAgentOrder(
