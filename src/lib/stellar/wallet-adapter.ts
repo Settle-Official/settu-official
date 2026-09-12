@@ -15,7 +15,7 @@
 
 import type { ModuleInterface } from "@creit.tech/stellar-wallets-kit";
 import { isMobileBrowser } from "@/lib/platform";
-import { warmSharedAppKit } from "@/lib/wallet/appkit";
+import { warmSharedAppKit, openSheet, closeSheet } from "@/lib/wallet/appkit";
 
 export interface StellarWallet {
   /** Kit module id of the connected wallet, e.g. "freighter" or "wallet_connect". */
@@ -38,6 +38,7 @@ let kitPromise: Promise<Kit> | null = null;
  * dependency on a shape the module already documents.
  */
 interface WalletConnectModuleLike extends ModuleInterface {
+  signClient?: unknown;
   modal?: {
     subscribeState?: (
       callback: (state: { open: boolean }) => void,
@@ -124,6 +125,25 @@ async function waitForWalletConnectReady(timeoutMs = 10_000): Promise<boolean> {
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   return false;
+}
+
+// The kit publishes its pairing URI to its own AppKit instance, which never
+// mounted an element (AppKit only mounts for the first instance created — see
+// src/lib/wallet/appkit.ts). Its open() therefore does nothing visible and the
+// connect promise waits forever. Listening for the same event and presenting
+// the URI in the mounted sheet is what makes Stellar behave like EVM, which
+// already routes through openSheet and works.
+let stellarUriHandlerAttached = false;
+
+function presentStellarUriInSharedSheet(module: WalletConnectModuleLike): void {
+  const client = module.signClient as
+    | { on?: (event: "display_uri", handler: (uri: string) => void) => unknown }
+    | undefined;
+  if (stellarUriHandlerAttached || !client?.on) return;
+  stellarUriHandlerAttached = true;
+  client.on("display_uri", (uri: string) => {
+    void openSheet(uri);
+  });
 }
 
 async function initKit(): Promise<Kit> {
@@ -240,6 +260,9 @@ export async function connectWallet(): Promise<StellarWallet> {
   const walletConnectReady = await waitForWalletConnectReady(
     onMobile ? 10_000 : 3_000,
   );
+  if (walletConnectReady && walletConnectModuleRef) {
+    presentStellarUriInSharedSheet(walletConnectModuleRef);
+  }
   if (!walletConnectReady && onMobile) {
     // On mobile WalletConnect is the only registered module, so an unready one
     // means an empty or broken picker. Say what actually went wrong instead of
