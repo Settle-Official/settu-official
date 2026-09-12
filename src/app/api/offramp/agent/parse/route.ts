@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateObject } from "ai";
+import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { z } from "zod";
 import { sourceChainOptions } from "@/lib/offramp/source-chain-options";
 import { fetchCurrencies } from "@/lib/offramp/paycrest-directory";
@@ -12,6 +13,16 @@ import { checkAgentRateLimit } from "@/lib/offramp/agent-rate-limit";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
+
+// Called directly against Google's own API (bypassing the Vercel AI Gateway)
+// so this runs on Google's genuinely free tier — every "free"-tagged model on
+// the Gateway turned out to be unreliable in practice (billing walls, empty
+// 400s, schemas ignored, 503/429 flapping under shared load). The package's
+// own default env var is GOOGLE_GENERATIVE_AI_API_KEY; GOOGLE_GEMINI_API_KEY
+// is accepted too since that's the name it's easy to reach for first.
+const google = createGoogleGenerativeAI({
+  apiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY,
+});
 
 const extractionSchema = z.object({
   amount: z.string().nullable().describe("The numeric USDC amount, as a plain string, e.g. \"1000\". Null if not stated."),
@@ -47,7 +58,7 @@ export async function POST(request: NextRequest) {
     const currencyCodes = currencies.map((c) => c.code).join(", ");
 
     const { object: extraction } = await generateObject({
-      model: process.env.AGENT_PARSE_MODEL || "inclusionai/ling-3.0-flash-sante-free",
+      model: google(process.env.AGENT_PARSE_MODEL || "gemini-3.5-flash-lite"),
       schema: extractionSchema,
       system:
         `You extract offramp order details from a conversation between a user ` +
