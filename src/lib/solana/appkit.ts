@@ -56,6 +56,17 @@ async function getKit(): Promise<Kit> {
           url: origin,
           icons: [`${origin}/icons/icon-192.png`],
         },
+        // Without this the sheet leads with whatever the registry ranks
+        // highest — Trust, Binance, SafePal — which are multi-chain but not
+        // what a Solana user reaches for, leaving Phantom and Jupiter buried
+        // behind a search. IDs come from the WalletConnect Explorer API, not
+        // guessed.
+        featuredWalletIds: [
+          "a797aa35c0fadbfc1a53e7f675162ed5226968b44a19ee3d24385c64d1d3c393", // Phantom
+          "1ca0bdd4747578705b1939af023d120677c64fe6ca76add81fda36e350605e79", // Solflare
+          "0ef262ca2a56b88d179c93a21383fee4e135bd7bc6680e5c2356ff8e38301037", // Jupiter
+          "2bd8c14e035c2d48f184aaa168559e86b0e3433228d3c4075900a221785019b0", // Backpack
+        ],
         features: { analytics: false, email: false, socials: false },
       } as never) as never;
     })();
