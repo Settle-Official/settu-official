@@ -402,8 +402,13 @@ export function StellarampDashboard() {
   );
 
   // The shared top header reflects the external wallet only for an offramp
-  // from a non-Stellar source; onramp is always the Stellar path.
-  const headerUsesExternal = mode === "offramp" && isExternalSource;
+  // from a non-Stellar source; onramp is always the Stellar path. Agent Mode
+  // is an offramp surface too — it shares sourceChain/uiIsConnected with
+  // FormCard rather than owning its own — so it needs the same treatment or
+  // the header (and handleConnect/handleDisconnect below) silently fall back
+  // to the Stellar wallet while the user is actually on a Solana/EVM source.
+  const isOfframpSurface = mode === "offramp" || mode === "agent";
+  const headerUsesExternal = isOfframpSurface && isExternalSource;
 
   const activeSourceChainLabel =
     sourceChain === "stellar"
@@ -658,12 +663,13 @@ export function StellarampDashboard() {
   const handleConnect = async () => {
     // Onramp is always Stellar; an offramp with the Stellar source keeps the
     // original Stellar Wallets Kit path below entirely unchanged. A
-    // non-Stellar offramp source opens its own picker.
-    if (mode === "offramp" && isSolanaSource) {
+    // non-Stellar offramp source opens its own picker — Agent Mode is an
+    // offramp surface too (isOfframpSurface), not just the FormCard tab.
+    if (isOfframpSurface && isSolanaSource) {
       setSolanaConnectOpen(true);
       return;
     }
-    if (mode === "offramp" && isEvmSource) {
+    if (isOfframpSurface && isEvmSource) {
       void evmWallet.openConnect();
       return;
     }
@@ -696,10 +702,11 @@ export function StellarampDashboard() {
 
   const handleDisconnect = async () => {
     // Disconnect whichever wallet is actually in use — a non-Stellar path
-    // only applies to an offramp; onramp is always Stellar.
-    if (mode === "offramp" && isSolanaSource) {
+    // only applies to an offramp surface (FormCard or Agent Mode); onramp is
+    // always Stellar.
+    if (isOfframpSurface && isSolanaSource) {
       await solanaWallet.disconnect();
-    } else if (mode === "offramp" && isEvmSource) {
+    } else if (isOfframpSurface && isEvmSource) {
       await evmWallet.disconnect();
     } else {
       await disconnect();
@@ -2047,7 +2054,11 @@ export function StellarampDashboard() {
             <>
               <div className="grid grid-cols-[1fr_370px] gap-3 max-[1100px]:grid-cols-1">
                 <div className="max-[1100px]:order-1">
-                  {mode === "agent" ? (
+                  {/* Both stay mounted (hidden, not unmounted) so switching
+                      between Off-ramp and Agent doesn't wipe the chat
+                      history or an in-progress form — only conditional
+                      rendering here would tear one down every time. */}
+                  <div hidden={mode !== "agent"}>
                     <AgentPanel
                       isConnected={uiIsConnected}
                       isConnecting={uiIsConnecting}
@@ -2060,7 +2071,8 @@ export function StellarampDashboard() {
                       onCancelFlow={handleCancelOfframpFlow}
                       onInitiateOfframp={handleAgentInitiateOfframp}
                     />
-                  ) : (
+                  </div>
+                  <div hidden={mode !== "offramp"}>
                     <FormCard
                       isConnected={uiIsConnected}
                       isConnecting={uiIsConnecting}
@@ -2085,7 +2097,7 @@ export function StellarampDashboard() {
                           : externalWallet.isConnected && !externalBalances
                       }
                     />
-                  )}
+                  </div>
                 </div>
                 <div className="row-span-2 col-start-2 max-[1100px]:order-2 max-[1100px]:row-auto max-[1100px]:col-auto">
                   <RightPanel
