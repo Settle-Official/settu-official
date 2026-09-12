@@ -47,7 +47,7 @@ export async function POST(request: NextRequest) {
     const currencyCodes = currencies.map((c) => c.code).join(", ");
 
     const { object: extraction } = await generateObject({
-      model: process.env.AGENT_PARSE_MODEL || "anthropic/claude-haiku-4-5",
+      model: process.env.AGENT_PARSE_MODEL || "anthropic/claude-haiku-4.5",
       schema: extractionSchema,
       system:
         `You extract offramp order details from a conversation between a user ` +
