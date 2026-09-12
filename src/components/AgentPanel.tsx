@@ -91,7 +91,7 @@ export function AgentPanel({
 
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
-  }, [messages]);
+  }, [messages, isSending]);
 
   // Narrate execution: every offrampStep change, while this panel owns the
   // current run, becomes one more chat message. Resets when a fresh run
@@ -288,6 +288,24 @@ export function AgentPanel({
               </div>
             );
           })}
+          {isSending && (
+            <div className="flex justify-start">
+              <div className="flex items-center gap-[3px] border border-[var(--line)] bg-[#141414] px-[0.75rem] py-[0.65rem]">
+                <span
+                  className="dot-bounce inline-block h-[5px] w-[5px] rounded-full bg-[var(--muted)]"
+                  style={{ animationDelay: "0ms" }}
+                />
+                <span
+                  className="dot-bounce inline-block h-[5px] w-[5px] rounded-full bg-[var(--muted)]"
+                  style={{ animationDelay: "150ms" }}
+                />
+                <span
+                  className="dot-bounce inline-block h-[5px] w-[5px] rounded-full bg-[var(--muted)]"
+                  style={{ animationDelay: "300ms" }}
+                />
+              </div>
+            </div>
+          )}
         </div>
 
         {canCancel && (
