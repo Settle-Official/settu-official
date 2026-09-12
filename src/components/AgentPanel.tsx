@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { stepToAgentEvent, type AgentStepEvent } from "@/lib/offramp/agent-step-bridge";
+import {
+  stepToAgentEvent,
+  type AgentStepEvent,
+} from "@/lib/offramp/agent-step-bridge";
 // Type-only import — erased at compile time, so this client component never
 // pulls in the resolver's server-side fetch logic at runtime. Reusing the
 // server's own type here (instead of hand-duplicating an equivalent shape)
@@ -93,12 +96,16 @@ export function AgentPanel({
   // on the wallet or the on-chain submit, and only for a run this panel
   // itself started.
   const canCancel =
-    active && (offrampStep === "awaiting-signature" || offrampStep === "submitting");
+    active &&
+    (offrampStep === "awaiting-signature" || offrampStep === "submitting");
 
   // Drives the typing dots during the gaps between step-narration messages
   // (e.g. while polling payout status) so the run doesn't look stalled.
   const isExecuting =
-    active && offrampStep !== "idle" && offrampStep !== "success" && offrampStep !== "error";
+    active &&
+    offrampStep !== "idle" &&
+    offrampStep !== "success" &&
+    offrampStep !== "error";
 
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
@@ -119,18 +126,29 @@ export function AgentPanel({
     }
     if (offrampStep === "success" || offrampStep === "error") {
       setMessages((prev) => {
-        const idx = [...prev].reverse().findIndex((m) => m.orderStatus === "confirmed");
+        const idx = [...prev]
+          .reverse()
+          .findIndex((m) => m.orderStatus === "confirmed");
         if (idx === -1) return prev;
         const realIdx = prev.length - 1 - idx;
         const next = [...prev];
-        next[realIdx] = { ...next[realIdx], orderStatus: offrampStep === "success" ? "success" : "failed" };
+        next[realIdx] = {
+          ...next[realIdx],
+          orderStatus: offrampStep === "success" ? "success" : "failed",
+        };
         return next;
       });
     }
-    const event = stepToAgentEvent(offrampStep, { sourceChainLabel, error: offrampError });
+    const event = stepToAgentEvent(offrampStep, {
+      sourceChainLabel,
+      error: offrampError,
+    });
     if (!event || event.id === lastRenderedStepId.current) return;
     lastRenderedStepId.current = event.id;
-    setMessages((prev) => [...prev, { id: nextId(), role: "agent", text: event.text, stepKind: event.kind }]);
+    setMessages((prev) => [
+      ...prev,
+      { id: nextId(), role: "agent", text: event.text, stepKind: event.kind },
+    ]);
   }, [active, offrampStep, offrampError, sourceChainLabel]);
 
   const conversationForOrder = (): { role: string; content: string }[] => {
@@ -138,7 +156,8 @@ export function AgentPanel({
     // hasn't yet produced a resolved order — a resolved-order card or a
     // completed run starts a fresh segment.
     const lastOrderIndex = [...messages].reverse().findIndex((m) => m.order);
-    const startIndex = lastOrderIndex === -1 ? 0 : messages.length - lastOrderIndex;
+    const startIndex =
+      lastOrderIndex === -1 ? 0 : messages.length - lastOrderIndex;
     return messages
       .slice(startIndex)
       .filter((m) => m.text)
@@ -150,7 +169,10 @@ export function AgentPanel({
     if (!text || isSending) return;
     setInput("");
     const userMessage: ChatMessage = { id: nextId(), role: "user", text };
-    const history = [...conversationForOrder(), { role: "user", content: text }];
+    const history = [
+      ...conversationForOrder(),
+      { role: "user", content: text },
+    ];
     setMessages((prev) => [...prev, userMessage]);
     setIsSending(true);
     try {
@@ -161,21 +183,38 @@ export function AgentPanel({
       });
       const data: ParseResponse = await res.json();
       if (data.kind === "clarify") {
-        setMessages((prev) => [...prev, { id: nextId(), role: "agent", text: data.message }]);
+        setMessages((prev) => [
+          ...prev,
+          { id: nextId(), role: "agent", text: data.message },
+        ]);
       } else if (data.kind === "recap") {
         setMessages((prev) => [
           ...prev,
-          { id: nextId(), role: "agent", text: `I still need: ${data.missing.join(", ")}.` },
+          {
+            id: nextId(),
+            role: "agent",
+            text: `I still need: ${data.missing.join(", ")}.`,
+          },
         ]);
       } else if (data.kind === "resolved") {
-        setMessages((prev) => [...prev, { id: nextId(), role: "agent", order: data.order }]);
+        setMessages((prev) => [
+          ...prev,
+          { id: nextId(), role: "agent", order: data.order },
+        ]);
       } else {
-        setMessages((prev) => [...prev, { id: nextId(), role: "agent", text: data.message }]);
+        setMessages((prev) => [
+          ...prev,
+          { id: nextId(), role: "agent", text: data.message },
+        ]);
       }
     } catch {
       setMessages((prev) => [
         ...prev,
-        { id: nextId(), role: "agent", text: "I couldn't reach the server — please try again." },
+        {
+          id: nextId(),
+          role: "agent",
+          text: "I couldn't reach the server — please try again.",
+        },
       ]);
     } finally {
       setIsSending(false);
@@ -216,7 +255,9 @@ export function AgentPanel({
     // typing indicator take over from here, and success/error resolve this
     // below via the offrampStep effect above.
     setMessages((prev) =>
-      prev.map((m) => (m.order === order ? { ...m, orderStatus: "confirmed" } : m)),
+      prev.map((m) =>
+        m.order === order ? { ...m, orderStatus: "confirmed" } : m,
+      ),
     );
     try {
       // The quote shown on the card (order.rate/destinationAmount) is reused
@@ -238,14 +279,22 @@ export function AgentPanel({
 
   const cancelOrder = (order: AgentOrderWithQuote) => {
     setMessages((prev) => [
-      ...prev.map((m) => (m.order === order ? { ...m, orderStatus: "cancelled" as const } : m)),
-      { id: nextId(), role: "agent", text: "Cancelled — send a new message whenever you're ready." },
+      ...prev.map((m) =>
+        m.order === order ? { ...m, orderStatus: "cancelled" as const } : m,
+      ),
+      {
+        id: nextId(),
+        role: "agent",
+        text: "Cancelled — send a new message whenever you're ready.",
+      },
     ]);
   };
 
   const cancelFlowAndOrder = () => {
     setMessages((prev) => {
-      const idx = [...prev].reverse().findIndex((m) => m.orderStatus === "confirmed");
+      const idx = [...prev]
+        .reverse()
+        .findIndex((m) => m.orderStatus === "confirmed");
       if (idx === -1) return prev;
       const realIdx = prev.length - 1 - idx;
       const next = [...prev];
@@ -259,11 +308,18 @@ export function AgentPanel({
     <div className="racing-border-wrapper">
       <section className="racing-border-content flex flex-col gap-[1.1rem] p-[1.2rem]">
         <div className="flex items-center justify-between border-b border-[var(--line)] pb-[0.6rem]">
-          <h2 className="m-0 font-space-grotesk text-[1.1rem] font-bold">AGENT MODE</h2>
-          <span className="text-[0.62rem] uppercase tracking-[0.1em] text-[var(--muted)]">Offramp</span>
+          <h2 className="m-0 font-space-grotesk text-[1.1rem] font-bold">
+            AGENT MODE
+          </h2>
+          <span className="text-[0.62rem] uppercase tracking-[0.1em] text-[var(--muted)]">
+            Offramp
+          </span>
         </div>
 
-        <div ref={listRef} className="flex max-h-[420px] min-h-[300px] flex-col gap-[0.65rem] overflow-y-auto">
+        <div
+          ref={listRef}
+          className="flex max-h-[420px] min-h-[300px] flex-col gap-[0.65rem] overflow-y-auto"
+        >
           {messages.map((m) => {
             if (m.order) {
               const o = m.order;
@@ -279,25 +335,30 @@ export function AgentPanel({
                       ["Bank", o.beneficiary.institution],
                       ["Account", o.beneficiary.accountIdentifier],
                     ].map(([label, value]) => (
-                      <div key={label} className="flex justify-between border-b border-dashed border-[#222] py-[0.22rem] text-[0.78rem]">
+                      <div
+                        key={label}
+                        className="flex justify-between gap-[0.6rem] border-b border-dashed border-[#222] py-[0.22rem] text-[0.78rem]"
+                      >
                         <span className="text-[var(--muted)]">{label}</span>
-                        <span>{value}</span>
+                        <span className="text-right">{value}</span>
                       </div>
                     ))}
-                    <div className="flex justify-between border-b border-dashed border-[#222] py-[0.22rem] text-[0.78rem]">
-                      <span className="text-[var(--muted)]">Account name</span>
-                      <span className="text-[var(--accent)]">{o.beneficiary.accountName} ✓ verified</span>
+                    <div className="flex justify-between gap-[0.6rem] border-b border-dashed border-[#222] py-[0.22rem] text-[0.78rem]">
+                      <span className="shrink-0 text-[var(--muted)]">Account name</span>
+                      <span className="text-right text-[var(--accent)]">
+                        {o.beneficiary.accountName} ✓ verified
+                      </span>
                     </div>
-                    <div className="flex justify-between border-b border-dashed border-[#222] py-[0.22rem] text-[0.78rem]">
+                    <div className="flex justify-between gap-[0.6rem] border-b border-dashed border-[#222] py-[0.22rem] text-[0.78rem]">
                       <span className="text-[var(--muted)]">Rate</span>
-                      <span>
+                      <span className="text-right">
                         {fiatSymbol(o.beneficiary.currency)}
                         {o.rate.toLocaleString()} / {o.token}
                       </span>
                     </div>
-                    <div className="flex justify-between py-[0.22rem] text-[0.78rem]">
+                    <div className="flex justify-between gap-[0.6rem] py-[0.22rem] text-[0.78rem]">
                       <span className="text-[var(--muted)]">You receive</span>
-                      <span className="font-bold text-[var(--accent)]">
+                      <span className="text-right font-bold text-[var(--accent)]">
                         {fiatSymbol(o.beneficiary.currency)}
                         {o.destinationAmount}
                       </span>
@@ -310,7 +371,11 @@ export function AgentPanel({
                           onClick={() => confirmOrder(o)}
                           className="flex-1 bg-[var(--accent)] py-[0.55rem] text-[0.72rem] font-bold uppercase tracking-[0.08em] text-[#0a0a0a] disabled:opacity-50"
                         >
-                          {confirming ? "Working…" : isConnected ? "Confirm" : "Connect Wallet"}
+                          {confirming
+                            ? "Working…"
+                            : isConnected
+                              ? "Confirm"
+                              : "Connect Wallet"}
                         </button>
                         <button
                           type="button"
@@ -337,13 +402,20 @@ export function AgentPanel({
               );
             }
             return (
-              <div key={m.id} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+              <div
+                key={m.id}
+                className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
+              >
                 <div
                   className={
                     m.role === "user"
                       ? "max-w-[82%] bg-[var(--accent)] px-[0.75rem] py-[0.55rem] text-[0.82rem] font-medium text-[#0a0a0a]"
                       : `max-w-[82%] border border-[var(--line)] bg-[#141414] px-[0.75rem] py-[0.55rem] text-[0.82rem] ${
-                          m.stepKind === "error" ? "text-red-400" : m.stepKind === "success" ? "text-[var(--accent)]" : ""
+                          m.stepKind === "error"
+                            ? "text-red-400"
+                            : m.stepKind === "success"
+                              ? "text-[var(--accent)]"
+                              : ""
                         }`
                   }
                 >
