@@ -346,6 +346,11 @@ export async function restoreWallet(): Promise<StellarWallet | null> {
 export async function onWalletStateChange(
   callback: (wallet: StellarWallet | null) => void,
 ): Promise<() => void> {
+  // A directly paired session isn't the kit's, so it has no state to report —
+  // and booting it here would stand up a second SignClient on the same storage,
+  // which is how the wallet's signature response goes missing.
+  if (directSession) return () => {};
+
   const kit = await getKit();
   const { KitEventType } = await import("@creit.tech/stellar-wallets-kit");
   return kit.on(KitEventType.STATE_UPDATED, (event) => {

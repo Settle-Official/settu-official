@@ -1,36 +1,12 @@
-import { SignClient } from "@walletconnect/sign-client";
 import { EVM_SOURCE_CHAINS } from "@/lib/cctp/evm-chains";
 import { openSheet, closeSheet, watchSheetDismissal } from "@/lib/wallet/appkit";
 import { isMobileBrowser } from "@/lib/platform";
+import { getSignClient } from "@/lib/wallet/sign-client";
 
-let clientPromise: ReturnType<typeof SignClient.init> | null = null;
-
-function getClient() {
-  if (!clientPromise) {
-    const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID;
-    if (!projectId) throw new Error("NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID is missing");
-    const origin =
-      typeof window !== "undefined" ? window.location.origin : "https://settu.xyz";
-    clientPromise = SignClient.init({
-      projectId,
-      metadata: {
-        name: "Settu",
-        description: "Stellar USDC <-> fiat, multi-chain",
-        url: origin,
-        icons: [`${origin}/icons/icon-192.png`],
-        // Tells the wallet app how to bounce the user back here after they
-        // approve. Without it, a mobile wallet can leave the user sitting in
-        // the wallet app after signing, and the backgrounded browser tab
-        // stays that way long enough that the relay drops the undelivered
-        // response — the same "stuck on confirm transaction" failure
-        // confirmed on the Stellar side (see wallet-adapter.ts) and fixed
-        // there with this same field.
-        redirect: { native: "", universal: origin },
-      },
-    });
-  }
-  return clientPromise;
-}
+// The shared client, not one of our own. Two SignClients share the "wc@2:core"
+// storage namespace while keeping separate in-memory state, so a relay response
+// can land on the instance that isn't waiting for it.
+const getClient = getSignClient;
 
 const ALL_CHAIN_IDS = Object.values(EVM_SOURCE_CHAINS).map((c) => `eip155:${c.chainId}`);
 
