@@ -71,6 +71,8 @@ interface TransactionProgressModalProps {
   readonly isOpen: boolean;
   readonly currentStep: OfframpStep;
   readonly error?: string | null;
+  /** Where the flow stopped — "error" itself carries no position. */
+  readonly failedAtStep?: OfframpStep;
   /** Where the burn/transfer is signed — "Stellar" (default), "Arbitrum", … */
   readonly sourceChainLabel?: string;
   readonly onClose?: () => void;
@@ -86,6 +88,7 @@ export function TransactionProgressModal({
   isOpen,
   currentStep,
   error,
+  failedAtStep,
   sourceChainLabel = "Stellar",
   onClose,
   onCancel,
@@ -107,7 +110,10 @@ export function TransactionProgressModal({
   const isSuccess = currentStep === "success";
   const isError = currentStep === "error";
   const isDone = isSuccess || isError;
-  const activeIndex = getStepIndex(currentStep);
+  // On error, fall back to the last real step so progress stays visible.
+  const activeIndex = isError
+    ? getStepIndex(failedAtStep ?? "idle")
+    : getStepIndex(currentStep);
   const canCancel =
     !isDone &&
     !!onCancel &&

@@ -90,9 +90,22 @@ function describeError(error: unknown): string {
   const message = (error as { message?: unknown })?.message;
   if (typeof message === "string" && message.trim()) return message;
   if (typeof error === "string" && error.trim()) return error;
-  const serialized = error === undefined ? "" : safeJson(error);
-  return serialized && serialized !== "{}"
-    ? `Unexpected wallet error: ${serialized}`
+
+  // An Error stringifies to "{}" — message/stack aren't enumerable — so pull
+  // out identifying fields by hand rather than reporting nothing at all.
+  const err = error as Record<string, unknown> | undefined;
+  const parts: string[] = [];
+  const name = err?.name ?? (error as object)?.constructor?.name;
+  if (typeof name === "string" && name && name !== "Object") parts.push(name);
+  if (err?.code !== undefined) parts.push(`code ${String(err.code)}`);
+  if (err?.status !== undefined) parts.push(`status ${String(err.status)}`);
+  const keys = err ? Object.keys(err) : [];
+  if (keys.length) parts.push(`fields: ${keys.slice(0, 6).join(", ")}`);
+  const stack = typeof err?.stack === "string" ? err.stack.split("\n")[1] : "";
+  if (stack) parts.push(stack.trim());
+
+  return parts.length
+    ? `Unexpected error (${parts.join(" · ")}). Please screenshot this.`
     : "Something went wrong and the wallet gave no reason. Please try again.";
 }
 
@@ -414,6 +427,15 @@ export function StellarampDashboard() {
   const [formResetKey, setFormResetKey] = useState(0);
   const [offrampStep, setOfframpStep] = useState<OfframpStep>("idle");
   const [offrampError, setOfframpError] = useState<string | null>(null);
+
+  // The error state carries no position, so the modal would grey every step and
+  // hide how far the flow actually got. Remember the last real one.
+  const lastOfframpStepRef = useRef<OfframpStep>("idle");
+  useEffect(() => {
+    if (offrampStep !== "error" && offrampStep !== "idle") {
+      lastOfframpStepRef.current = offrampStep;
+    }
+  }, [offrampStep]);
   // Bumped whenever an offramp starts or is cancelled. A flow whose id no
   // longer matches must not write step/error state — otherwise a signature
   // that resolves late (or a cancelled flow's WalletConnect request finally
@@ -2107,6 +2129,7 @@ export function StellarampDashboard() {
       <TransactionProgressModal
         isOpen={showProgressModal}
         currentStep={offrampStep}
+        failedAtStep={lastOfframpStepRef.current}
         error={offrampError}
         sourceChainLabel={activeSourceChainLabel}
         onCancel={() => {
