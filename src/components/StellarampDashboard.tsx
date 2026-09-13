@@ -91,22 +91,14 @@ function describeError(error: unknown): string {
   if (typeof message === "string" && message.trim()) return message;
   if (typeof error === "string" && error.trim()) return error;
 
-  // An Error stringifies to "{}" — message/stack aren't enumerable — so pull
-  // out identifying fields by hand rather than reporting nothing at all.
-  const err = error as Record<string, unknown> | undefined;
-  const parts: string[] = [];
-  const name = err?.name ?? (error as object)?.constructor?.name;
-  if (typeof name === "string" && name && name !== "Object") parts.push(name);
-  if (err?.code !== undefined) parts.push(`code ${String(err.code)}`);
-  if (err?.status !== undefined) parts.push(`status ${String(err.status)}`);
-  const keys = err ? Object.keys(err) : [];
-  if (keys.length) parts.push(`fields: ${keys.slice(0, 6).join(", ")}`);
-  const stack = typeof err?.stack === "string" ? err.stack.split("\n")[1] : "";
-  if (stack) parts.push(stack.trim());
-
-  return parts.length
-    ? `Unexpected error (${parts.join(" · ")}). Please screenshot this.`
-    : "Something went wrong and the wallet gave no reason. Please try again.";
+  // A thrown Error with no message would otherwise reach the user as a blank
+  // modal. Full detail goes to the console; the UI gets a code at most, since
+  // stack frames are minified here and mean nothing to whoever is reading.
+  console.error("[offramp] failure with no message", error);
+  const code = (error as { code?: unknown })?.code;
+  return code === undefined
+    ? "Something went wrong and the wallet gave no reason. Please try again."
+    : `The wallet returned an error (code ${String(code)}). Please try again.`;
 }
 
 function safeJson(value: unknown): string {
