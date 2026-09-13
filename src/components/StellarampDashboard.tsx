@@ -83,6 +83,19 @@ async function signWithTimeout(
   }
 }
 
+// Not everything thrown is an Error — a WalletConnect/RPC rejection can be a
+// bare object, and `.message` is then undefined, which renders the failure
+// modal with no explanation at all. Always produce something readable.
+function describeError(error: unknown): string {
+  const message = (error as { message?: unknown })?.message;
+  if (typeof message === "string" && message.trim()) return message;
+  if (typeof error === "string" && error.trim()) return error;
+  const serialized = error === undefined ? "" : safeJson(error);
+  return serialized && serialized !== "{}"
+    ? `Unexpected wallet error: ${serialized}`
+    : "Something went wrong and the wallet gave no reason. Please try again.";
+}
+
 function safeJson(value: unknown): string {
   try {
     return JSON.stringify(
@@ -1128,14 +1141,14 @@ export function StellarampDashboard() {
       // repaint the modal — its late signature rejection lands here too.
       if (offrampFlowRef.current !== myFlow) return;
 
-      setTradeState((prev) => ({ ...prev, error: error.message }));
+      setTradeState((prev) => ({ ...prev, error: describeError(error) }));
       setOfframpStep("error");
-      setOfframpError(error.message);
+      setOfframpError(describeError(error));
 
       // Mark as failed
       TransactionStorage.update(txId, {
         status: "failed",
-        error: error.message,
+        error: describeError(error),
       });
       setUserTransactions(TransactionStorage.getByUser(wallet.publicKey));
 
@@ -1470,12 +1483,12 @@ export function StellarampDashboard() {
       setFormResetKey((k) => k + 1);
     } catch (error: any) {
       if (offrampFlowRef.current !== myFlow) return;
-      setTradeState((prev) => ({ ...prev, error: error.message }));
+      setTradeState((prev) => ({ ...prev, error: describeError(error) }));
       setOfframpStep("error");
-      setOfframpError(error.message);
+      setOfframpError(describeError(error));
       TransactionStorage.update(txId, {
         status: "failed",
-        error: error.message,
+        error: describeError(error),
       });
       setUserTransactions(TransactionStorage.getByUser(connectedAddress));
     } finally {
@@ -1710,12 +1723,12 @@ export function StellarampDashboard() {
       setFormResetKey((k) => k + 1);
     } catch (error: any) {
       if (offrampFlowRef.current !== myFlow) return;
-      setTradeState((prev) => ({ ...prev, error: error.message }));
+      setTradeState((prev) => ({ ...prev, error: describeError(error) }));
       setOfframpStep("error");
-      setOfframpError(error.message);
+      setOfframpError(describeError(error));
       TransactionStorage.update(txId, {
         status: "failed",
-        error: error.message,
+        error: describeError(error),
       });
       setUserTransactions(TransactionStorage.getByUser(connectedAddress));
     } finally {
