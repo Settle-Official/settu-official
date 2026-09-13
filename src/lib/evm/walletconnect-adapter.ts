@@ -1,6 +1,7 @@
 import { SignClient } from "@walletconnect/sign-client";
 import { EVM_SOURCE_CHAINS } from "@/lib/cctp/evm-chains";
 import { openSheet, closeSheet } from "@/lib/wallet/appkit";
+import { isMobileBrowser } from "@/lib/platform";
 
 let clientPromise: ReturnType<typeof SignClient.init> | null = null;
 
@@ -120,6 +121,21 @@ async function assertSession(topic: string): Promise<void> {
   }
 }
 
+// A request over an existing session carries no pairing URI, so nothing brings
+// the wallet forward — on mobile it arrives backgrounded and the user sees no
+// prompt at all. Deep-link into the wallet ourselves using its own redirect.
+async function focusWallet(topic: string): Promise<void> {
+  if (!isMobileBrowser() || typeof window === "undefined") return;
+  try {
+    const client = await getClient();
+    const redirect = client.session.get(topic)?.peer?.metadata?.redirect;
+    const target = redirect?.native || redirect?.universal;
+    if (target) window.location.href = target;
+  } catch {
+    // Never let the focus attempt take down the request it belongs to.
+  }
+}
+
 // Disconnecting an already-gone session is the outcome the caller wanted, so
 // treat a missing topic as success rather than an error.
 export async function disconnectEvmSession(topic: string): Promise<void> {
@@ -134,7 +150,7 @@ export async function disconnectEvmSession(topic: string): Promise<void> {
 export async function requestChainSwitch(topic: string, chainId: number): Promise<void> {
   await assertSession(topic);
   const client = await getClient();
-  await client.request({
+  const pending = client.request({
     topic,
     chainId: `eip155:${chainId}`,
     request: {
@@ -142,6 +158,8 @@ export async function requestChainSwitch(topic: string, chainId: number): Promis
       params: [{ chainId: `0x${chainId.toString(16)}` }],
     },
   });
+  await focusWallet(topic);
+  await pending;
 }
 
 export async function sendTransaction(
@@ -152,7 +170,7 @@ export async function sendTransaction(
 ): Promise<string> {
   await assertSession(topic);
   const client = await getClient();
-  return client.request({
+  const pending = client.request({
     topic,
     chainId: `eip155:${chainId}`,
     request: {
@@ -160,6 +178,8 @@ export async function sendTransaction(
       params: [{ from, to: call.to, data: call.data }],
     },
   }) as Promise<string>;
+  await focusWallet(topic);
+  return pending;
 }
 
 // personal_sign over the relay. The message is hex-encoded because the RPC
@@ -173,9 +193,11 @@ export async function signPersonalMessage(
   await assertSession(topic);
   const client = await getClient();
   const hex = `0x${Buffer.from(message, "utf8").toString("hex")}`;
-  return client.request({
+  const pending = client.request({
     topic,
     chainId: `eip155:${chainId}`,
     request: { method: "personal_sign", params: [hex, from] },
   }) as Promise<string>;
+  await focusWallet(topic);
+  return pending;
 }

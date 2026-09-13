@@ -4,6 +4,7 @@
 
 import { getSignClient } from "@/lib/wallet/sign-client";
 import { openSheet, closeSheet } from "@/lib/wallet/appkit";
+import { isMobileBrowser } from "@/lib/platform";
 
 const CHAIN = "stellar:pubnet";
 const SIGN_METHOD = "stellar_signXDR";
@@ -52,6 +53,20 @@ export async function connectStellarViaWalletConnect(): Promise<StellarWcSession
   }
 }
 
+// A signing request carries no pairing URI, so nothing brings the wallet
+// forward — on mobile it arrives backgrounded and shows no prompt at all.
+async function focusWallet(topic: string): Promise<void> {
+  if (!isMobileBrowser() || typeof window === "undefined") return;
+  try {
+    const client = await getSignClient();
+    const redirect = client.session.get(topic)?.peer?.metadata?.redirect;
+    const target = redirect?.native || redirect?.universal;
+    if (target) window.location.href = target;
+  } catch {
+    // Never let the focus attempt take down the request it belongs to.
+  }
+}
+
 export async function signXdrViaWalletConnect(
   topic: string,
   xdr: string,
@@ -64,12 +79,13 @@ export async function signXdrViaWalletConnect(
     throw new Error("Your wallet session has expired. Reconnect and try again.");
   }
 
-  const result = await client.request<{ signedXDR: string }>({
+  const pending = client.request<{ signedXDR: string }>({
     topic,
     chainId: CHAIN,
     request: { method: SIGN_METHOD, params: { xdr } },
   });
-  return result.signedXDR;
+  await focusWallet(topic);
+  return (await pending).signedXDR;
 }
 
 export async function disconnectStellarWalletConnect(topic: string): Promise<void> {

@@ -248,7 +248,12 @@ export function useEvmWallet() {
         return;
       }
       if (transport === "walletconnect" && topicRef.current) {
-        await requestChainSwitch(topicRef.current, chainId);
+        // Bounded for the same reason signing is: a dropped relay response
+        // otherwise hangs here forever with no way out.
+        await withTimeout(
+          requestChainSwitch(topicRef.current, chainId),
+          SIGN_TIMEOUT_MS,
+        );
         return;
       }
       throw new Error("No wallet connected");
