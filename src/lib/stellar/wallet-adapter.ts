@@ -15,7 +15,12 @@
 
 import type { ModuleInterface } from "@creit.tech/stellar-wallets-kit";
 import { isMobileBrowser } from "@/lib/platform";
-import { warmSharedAppKit, openSheet, closeSheet } from "@/lib/wallet/appkit";
+import { warmSharedAppKit } from "@/lib/wallet/appkit";
+import {
+  connectStellarViaWalletConnect,
+  signXdrViaWalletConnect,
+  disconnectStellarWalletConnect,
+} from "./walletconnect";
 
 export interface StellarWallet {
   /** Kit module id of the connected wallet, e.g. "freighter" or "wallet_connect". */
@@ -38,7 +43,6 @@ let kitPromise: Promise<Kit> | null = null;
  * dependency on a shape the module already documents.
  */
 interface WalletConnectModuleLike extends ModuleInterface {
-  signClient?: unknown;
   modal?: {
     subscribeState?: (
       callback: (state: { open: boolean }) => void,
@@ -51,6 +55,9 @@ interface WalletConnectModuleLike extends ModuleInterface {
  * before opening the picker. See waitForWalletConnectReady.
  */
 let walletConnectModuleRef: WalletConnectModuleLike | null = null;
+
+// Set when mobile paired through our own SignClient instead of the kit.
+let directSession: { address: string; topic: string } | null = null;
 
 /**
  * Reject as soon as the wallet sheet is dismissed without a selection.
@@ -125,25 +132,6 @@ async function waitForWalletConnectReady(timeoutMs = 10_000): Promise<boolean> {
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   return false;
-}
-
-// The kit publishes its pairing URI to its own AppKit instance, which never
-// mounted an element (AppKit only mounts for the first instance created — see
-// src/lib/wallet/appkit.ts). Its open() therefore does nothing visible and the
-// connect promise waits forever. Listening for the same event and presenting
-// the URI in the mounted sheet is what makes Stellar behave like EVM, which
-// already routes through openSheet and works.
-let stellarUriHandlerAttached = false;
-
-function presentStellarUriInSharedSheet(module: WalletConnectModuleLike): void {
-  const client = module.signClient as
-    | { on?: (event: "display_uri", handler: (uri: string) => void) => unknown }
-    | undefined;
-  if (stellarUriHandlerAttached || !client?.on) return;
-  stellarUriHandlerAttached = true;
-  client.on("display_uri", (uri: string) => {
-    void openSheet(uri);
-  });
 }
 
 async function initKit(): Promise<Kit> {
@@ -249,56 +237,37 @@ export async function connectWallet(): Promise<StellarWallet> {
     );
   }
 
+  const onMobile = isMobileBrowser();
+
+  // Mobile never touches the kit: it pairs with our own SignClient and presents
+  // in the mounted sheet, the same path EVM uses. The kit's own sheet cannot
+  // appear while another AppKit instance owns the modal element, which is what
+  // left this hanging on "connecting".
+  if (onMobile) {
+    try {
+      const session = await connectStellarViaWalletConnect();
+      directSession = session;
+      return {
+        type: "wallet_connect",
+        publicKey: session.address,
+        isConnected: true,
+      };
+    } catch (error: any) {
+      throw new Error(explainConnectError(error));
+    }
+  }
+
   const kit = await getKit();
 
-  // Must happen before authModal(), which snapshots wallet availability as it
-  // opens and never refreshes it. Mobile waits longer because WalletConnect is
-  // the only module registered there and is worth waiting for; desktop has
-  // extensions as an immediate fallback, so it shouldn't sit behind a slow
-  // relay for long.
-  const onMobile = isMobileBrowser();
-  const walletConnectReady = await waitForWalletConnectReady(
-    onMobile ? 10_000 : 3_000,
-  );
-  if (walletConnectReady && walletConnectModuleRef) {
-    presentStellarUriInSharedSheet(walletConnectModuleRef);
-  }
-  if (!walletConnectReady && onMobile) {
-    // On mobile WalletConnect is the only registered module, so an unready one
-    // means an empty or broken picker. Say what actually went wrong instead of
-    // rendering a wallet the user can only "install".
-    throw new Error(
-      "Couldn't reach the WalletConnect relay. Check your connection and try again.",
-    );
-  }
+  // Desktop only. authModal snapshots wallet availability as it opens and never
+  // refreshes it, so WalletConnect has to have finished booting first or it is
+  // listed as uninstalled. Bounded, because extensions are the usual path here
+  // and shouldn't sit behind a slow relay.
+  await waitForWalletConnectReady(3_000);
 
   let address: string;
   try {
-    if (onMobile && walletConnectModuleRef) {
-      // Skip the kit's own picker on mobile: WalletConnect is the only module
-      // registered there, so it would be a one-item list whose only purpose is
-      // to open the sheet behind it. Selecting it directly takes the user
-      // straight to the actual wallet list (Freighter, LOBSTR, ...) in one tap.
-      //
-      // setWallet + fetchAddress reproduce exactly what the picker's own
-      // selection handler does — set selectedModuleId, call the module's
-      // getAddress, store activeAddress — and both signals are persisted to
-      // localStorage by the kit's effects, so session restore is unaffected.
-      kit.setWallet(walletConnectModuleRef.productId);
-
-      const watcher = watchForSheetDismissal(walletConnectModuleRef);
-      const pending = kit.fetchAddress();
-      // If dismissal wins the race, this one still rejects later (on proposal
-      // expiry). Attach a sink now so that lands as a handled rejection.
-      pending.catch(() => {});
-      try {
-        ({ address } = await Promise.race([pending, watcher.dismissed]));
-      } finally {
-        watcher.dispose();
-      }
-    } else {
-      ({ address } = await kit.authModal());
-    }
+    ({ address } = await kit.authModal());
   } catch (error: any) {
     throw new Error(explainConnectError(error));
   }
@@ -365,6 +334,14 @@ export function hasStoredWalletSession(): boolean {
 
 /** Read a persisted session from kit state without prompting the wallet. */
 export async function restoreWallet(): Promise<StellarWallet | null> {
+  if (directSession) {
+    return {
+      type: "wallet_connect",
+      publicKey: directSession.address,
+      isConnected: true,
+    };
+  }
+
   try {
     const kit = await getKit();
     const { address } = await kit.getAddress();
@@ -406,6 +383,12 @@ export async function signTransaction(
   xdr: string,
   address?: string,
 ): Promise<string> {
+  // A mobile session paired outside the kit has to sign through the same
+  // session; the kit knows nothing about it and would fail to find a wallet.
+  if (directSession) {
+    return signXdrViaWalletConnect(directSession.topic, xdr);
+  }
+
   const kit = await getKit();
   const { signedTxXdr } = await kit.signTransaction(xdr, {
     networkPassphrase: NETWORK_PASSPHRASE,
@@ -415,6 +398,12 @@ export async function signTransaction(
 }
 
 export async function disconnectWallet(): Promise<void> {
+  if (directSession) {
+    const { topic } = directSession;
+    directSession = null;
+    await disconnectStellarWalletConnect(topic);
+    return;
+  }
   const kit = await getKit();
   await kit.disconnect();
 }
