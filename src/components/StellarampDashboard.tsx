@@ -86,6 +86,54 @@ async function signWithTimeout(
 // Not everything thrown is an Error — a WalletConnect/RPC rejection can be a
 // bare object, and `.message` is then undefined, which renders the failure
 // modal with no explanation at all. Always produce something readable.
+// An Error's message and stack aren't enumerable, so JSON.stringify drops
+// exactly the fields worth having. Walk own property names instead.
+function serializeError(error: unknown): string {
+  if (error === null || error === undefined) return String(error);
+  if (typeof error !== "object") return `${typeof error}: ${String(error)}`;
+  const out: Record<string, unknown> = {
+    __type: (error as object)?.constructor?.name ?? "unknown",
+  };
+  for (const key of Object.getOwnPropertyNames(error).slice(0, 20)) {
+    try {
+      out[key] = String((error as Record<string, unknown>)[key]).slice(0, 300);
+    } catch {
+      out[key] = "<unreadable>";
+    }
+  }
+  return safeJson(out);
+}
+
+// A phone's console is unreachable, so a wallet failure that only reproduces on
+// mobile can't otherwise be read. Beacon survives the tab being backgrounded.
+function reportClientError(
+  context: string,
+  error: unknown,
+  extra: { step?: string; chain?: string } = {},
+): void {
+  try {
+    const payload = JSON.stringify({
+      context,
+      detail: serializeError(error),
+      ...extra,
+    });
+    const sent = navigator.sendBeacon?.(
+      "/api/client-error",
+      new Blob([payload], { type: "application/json" }),
+    );
+    if (!sent) {
+      void fetch("/api/client-error", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: payload,
+        keepalive: true,
+      }).catch(() => {});
+    }
+  } catch {
+    // Reporting a failure must never cause one.
+  }
+}
+
 function describeError(error: unknown): string {
   const message = (error as { message?: unknown })?.message;
   if (typeof message === "string" && message.trim()) return message;
@@ -1158,6 +1206,10 @@ export function StellarampDashboard() {
       setTradeState((prev) => ({ ...prev, error: describeError(error) }));
       setOfframpStep("error");
       setOfframpError(describeError(error));
+      reportClientError("offramp failed", error, {
+        step: lastOfframpStepRef.current,
+        chain: sourceChain,
+      });
 
       // Mark as failed
       TransactionStorage.update(txId, {
@@ -1500,6 +1552,10 @@ export function StellarampDashboard() {
       setTradeState((prev) => ({ ...prev, error: describeError(error) }));
       setOfframpStep("error");
       setOfframpError(describeError(error));
+      reportClientError("offramp failed", error, {
+        step: lastOfframpStepRef.current,
+        chain: sourceChain,
+      });
       TransactionStorage.update(txId, {
         status: "failed",
         error: describeError(error),
@@ -1740,6 +1796,10 @@ export function StellarampDashboard() {
       setTradeState((prev) => ({ ...prev, error: describeError(error) }));
       setOfframpStep("error");
       setOfframpError(describeError(error));
+      reportClientError("offramp failed", error, {
+        step: lastOfframpStepRef.current,
+        chain: sourceChain,
+      });
       TransactionStorage.update(txId, {
         status: "failed",
         error: describeError(error),
