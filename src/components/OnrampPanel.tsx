@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { cn } from "@/lib/cn";
 import { SelectField } from "@/components/SelectField";
 
@@ -93,6 +93,10 @@ export function OnrampPanel({
   const [providerAccount, setProviderAccount] =
     useState<ProviderAccount | null>(null);
   const [status, setStatus] = useState<string>("pending");
+  const [checkState, setCheckState] = useState<"idle" | "checking" | "waiting">(
+    "idle",
+  );
+  const lastCheckRef = useRef(0);
   const esRef = useRef<EventSource | null>(null);
 
   // Load currencies
@@ -162,41 +166,112 @@ export function OnrampPanel({
     }
   }, [accountNumber, bank]);
 
-  // Subscribe to status stream once an order exists.
+  // Applies a status from either transport. Returns true once terminal;
+  // bridge_failed is held for manual resolution, so it stays subscribed.
+  const applyStatus = useCallback(
+    (next: string): boolean => {
+      setStatus(next);
+      if (next === "settled" || next === "bridging") {
+        setPhase("processing");
+        return false;
+      }
+      if (next === "delivered") {
+        setPhase("done");
+        onDelivered?.();
+        return true;
+      }
+      if (next === "refunded" || next === "expired") {
+        setPhase("error");
+        return true;
+      }
+      if (next === "bridge_failed") setPhase("error");
+      return false;
+    },
+    [onDelivered],
+  );
+
+  // Authoritative read, shared by the backstop poller and the manual check.
+  // It only asks the server what it already knows — it never claims payment.
+  const fetchStatus = useCallback(async (): Promise<boolean> => {
+    if (!orderId) return false;
+    const res = await fetch(`/api/onramp/order/${orderId}`);
+    if (!res.ok) return false;
+    const next = (await res.json())?.data?.status;
+    return next ? applyStatus(next) : false;
+  }, [orderId, applyStatus]);
+
+  // Manual re-check, debounced so impatient taps can't hammer the API.
+  const checkNow = useCallback(async () => {
+    const now = Date.now();
+    if (now - lastCheckRef.current < 5000) return;
+    lastCheckRef.current = now;
+    setCheckState("checking");
+    const terminal = await fetchStatus().catch(() => false);
+    // "Not yet" is the normal answer here, not an error worth shouting about.
+    setCheckState(terminal ? "idle" : "waiting");
+  }, [fetchStatus]);
+
+  // The stream alone isn't enough here: paying the bank means leaving the
+  // browser, and a backgrounded tab can lose the connection with no event we
+  // can see. Reconnect, poll, and re-check whenever the tab comes back.
   useEffect(() => {
     if (!orderId) return;
-    const es = new EventSource(`/api/onramp/stream/${orderId}`);
-    esRef.current = es;
-    es.onmessage = (evt) => {
-      try {
-        const rec = JSON.parse(evt.data) as { status?: string };
-        if (!rec.status) return;
-        setStatus(rec.status);
-        if (rec.status === "settled" || rec.status === "bridging") {
-          setPhase("processing");
-        } else if (rec.status === "delivered") {
-          setPhase("done");
-          es.close();
-          onDelivered?.();
-        } else if (
-          rec.status === "refunded" ||
-          rec.status === "expired" ||
-          rec.status === "bridge_failed"
-        ) {
-          setPhase("error");
-          // bridge_failed is held for manual resolution — keep the stream open
-          // so a later move to delivered/refunded still lands.
-          if (rec.status !== "bridge_failed") es.close();
+    let done = false;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const connect = () => {
+      if (done) return;
+      const es = new EventSource(`/api/onramp/stream/${orderId}`);
+      esRef.current = es;
+      es.onmessage = (evt) => {
+        try {
+          const rec = JSON.parse(evt.data) as { status?: string };
+          if (rec.status && applyStatus(rec.status)) {
+            done = true;
+            es.close();
+          }
+        } catch {
+          /* ignore malformed frame */
         }
-      } catch {
-        /* ignore malformed frame */
-      }
+      };
+      // A closed stream is routine (the route caps at 60s), not a failure.
+      es.onerror = () => {
+        if (es.readyState !== EventSource.CLOSED) return;
+        es.close();
+        esRef.current = null;
+        if (!done) reconnectTimer = setTimeout(connect, 3000);
+      };
     };
+
+    const check = () => {
+      if (done) return;
+      fetchStatus()
+        .then((terminal) => {
+          if (terminal) {
+            done = true;
+            esRef.current?.close();
+          }
+        })
+        .catch(() => {});
+    };
+
+    const onVisible = () => {
+      if (document.visibilityState === "visible") check();
+    };
+
+    connect();
+    const pollTimer = setInterval(check, 12000);
+    document.addEventListener("visibilitychange", onVisible);
+
     return () => {
-      es.close();
+      done = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      clearInterval(pollTimer);
+      document.removeEventListener("visibilitychange", onVisible);
+      esRef.current?.close();
       esRef.current = null;
     };
-  }, [orderId]);
+  }, [orderId, applyStatus, fetchStatus]);
 
   const destinationAddress = useCustomAddress
     ? customAddress.trim()
@@ -276,6 +351,8 @@ export function OnrampPanel({
         account={providerAccount}
         status={status}
         onCancel={reset}
+        onCheckNow={checkNow}
+        checkState={checkState}
       />
     );
   }
@@ -417,10 +494,14 @@ function VirtualAccountView({
   account,
   status,
   onCancel,
+  onCheckNow,
+  checkState,
 }: {
   account: ProviderAccount;
   status: string;
   onCancel: () => void;
+  onCheckNow: () => void;
+  checkState: "idle" | "checking" | "waiting";
 }) {
   const [copied, setCopied] = useState<string | null>(null);
   const copy = (label: string, value: string) => {
@@ -475,6 +556,24 @@ function VirtualAccountView({
         <span className="text-[0.8rem] text-[var(--muted)]">
           {STATUS_LABEL[status] ?? STATUS_LABEL.pending}
         </span>
+      </div>
+
+      <div className="flex flex-col gap-[0.4rem]">
+        <button
+          type="button"
+          onClick={onCheckNow}
+          disabled={checkState === "checking"}
+          style={{ borderColor: "#c9a962", color: "#c9a962" }}
+          className="h-10 border text-[0.75rem] uppercase tracking-[0.08em] disabled:opacity-60"
+        >
+          {checkState === "checking" ? "Checking…" : "I've sent it — check now"}
+        </button>
+        {checkState === "waiting" && (
+          <p className="m-0 text-[0.7rem] text-[var(--muted)]">
+            Not showing yet — bank transfers can take a few minutes. This
+            updates automatically, so you can leave this page open.
+          </p>
+        )}
       </div>
 
       <button
