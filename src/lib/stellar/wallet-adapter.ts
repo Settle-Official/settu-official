@@ -14,6 +14,13 @@
 // dropped the connection on return.
 
 import type { ModuleInterface } from "@creit.tech/stellar-wallets-kit";
+import { isMobileBrowser } from "@/lib/platform";
+import { warmSharedAppKit } from "@/lib/wallet/appkit";
+import {
+  connectStellarViaWalletConnect,
+  signXdrViaWalletConnect,
+  disconnectStellarWalletConnect,
+} from "./walletconnect";
 
 export interface StellarWallet {
   /** Kit module id of the connected wallet, e.g. "freighter" or "wallet_connect". */
@@ -30,57 +37,14 @@ type Kit = typeof import("@creit.tech/stellar-wallets-kit").StellarWalletsKit;
 let kitPromise: Promise<Kit> | null = null;
 
 /**
- * The WalletConnect module also exposes the underlying Reown AppKit instance,
- * which we need in order to notice the user dismissing the wallet sheet.
- * Narrowed structurally rather than imported, so this stays a type-only
- * dependency on a shape the module already documents.
- */
-interface WalletConnectModuleLike extends ModuleInterface {
-  modal?: {
-    subscribeState?: (
-      callback: (state: { open: boolean }) => void,
-    ) => () => void;
-  };
-}
-
-/**
  * Handle on the WalletConnect module so we can wait for it to finish booting
  * before opening the picker. See waitForWalletConnectReady.
  */
-let walletConnectModuleRef: WalletConnectModuleLike | null = null;
+let walletConnectModuleRef: ModuleInterface | null = null;
 
-/**
- * Reject as soon as the wallet sheet is dismissed without a selection.
- *
- * Needed because the connect promise ultimately settles on WalletConnect's
- * `approval()`, which only resolves on approval, explicit rejection, or
- * proposal expiry — roughly five minutes. Closing the sheet is none of those,
- * so without this the caller waits on a promise that will not settle and the
- * button stays in its connecting state until a page reload.
- *
- * Only a close that follows an open counts: the sheet starts closed, so
- * reacting to the initial state would abort before it ever appeared.
- */
-function watchForSheetDismissal(module: WalletConnectModuleLike): {
-  dismissed: Promise<never>;
-  dispose: () => void;
-} {
-  let dispose = () => {};
-  const dismissed = new Promise<never>((_resolve, reject) => {
-    const subscribe = module.modal?.subscribeState;
-    if (!subscribe) return; // Never settles — the race then rests on fetchAddress alone.
-    let sawOpen = false;
-    const unsubscribe = subscribe.call(module.modal, (state) => {
-      if (state.open) {
-        sawOpen = true;
-      } else if (sawOpen) {
-        reject(new Error("Connection cancelled."));
-      }
-    });
-    dispose = () => unsubscribe();
-  });
-  return { dismissed, dispose };
-}
+// Set when mobile paired through our own SignClient instead of the kit.
+let directSession: { address: string; topic: string } | null = null;
+
 
 /**
  * Lazily import + initialize the kit, once per page load.
@@ -94,40 +58,6 @@ async function getKit(): Promise<Kit> {
   return kitPromise;
 }
 
-/**
- * iPadOS 13+ reports a Macintosh UA, so touch points are the tiebreaker.
- */
-function isMobileBrowser(): boolean {
-  if (typeof navigator === "undefined") return false;
-  const ua = navigator.userAgent;
-  if (/Android|iPhone|iPad|iPod|Opera Mini|IEMobile/i.test(ua)) return true;
-  return /Macintosh/.test(ua) && navigator.maxTouchPoints > 1;
-}
-
-/**
- * `isAvailable()` only proves the SignClient object and modal instance exist
- * — not that the relay WebSocket underneath them is actually usable. A phone
- * on a network that can reach the relay's TLS handshake but not sustain a
- * publish (iCloud Private Relay, some carrier/firewall setups, a flaky relay
- * node) sails past `waitForWalletConnectReady` and then hangs on
- * `approval()`, which WalletConnect does not time out client-side. Race
- * against our own clock instead of trusting the SDK to ever settle.
- */
-function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(message)), ms);
-    promise.then(
-      (v) => {
-        clearTimeout(timer);
-        resolve(v);
-      },
-      (e) => {
-        clearTimeout(timer);
-        reject(e);
-      },
-    );
-  });
-}
 
 /**
  * Block until the WalletConnect module has finished booting, or give up.
@@ -160,6 +90,13 @@ async function waitForWalletConnectReady(timeoutMs = 10_000): Promise<boolean> {
 }
 
 async function initKit(): Promise<Kit> {
+  // Must run first. stellar-wallets-kit constructs its own AppKit internally,
+  // and AppKit only mounts a <w3m-modal> for whichever instance is created
+  // first — every later one shares the controllers but has no element. Warming
+  // the shared instance here means the kit's open() renders our sheet instead
+  // of silently driving a modal that was never mounted.
+  await warmSharedAppKit();
+
   const [{ StellarWalletsKit, Networks }, { defaultModules }, walletConnect] =
     await Promise.all([
       import("@creit.tech/stellar-wallets-kit"),
@@ -255,61 +192,41 @@ export async function connectWallet(): Promise<StellarWallet> {
     );
   }
 
+  const onMobile = isMobileBrowser();
+
+  // Mobile never touches the kit: it pairs with our own SignClient and presents
+  // in the mounted sheet, the same path EVM uses. The kit's own sheet cannot
+  // appear while another AppKit instance owns the modal element, which is what
+  // left this hanging on "connecting".
+  if (onMobile) {
+    try {
+      const session = await connectStellarViaWalletConnect();
+      directSession = session;
+      return {
+        type: "wallet_connect",
+        publicKey: session.address,
+        isConnected: true,
+      };
+    } catch (error: any) {
+      throw new Error(explainConnectError(error));
+    }
+  }
+
   const kit = await getKit();
 
-  // Must happen before authModal(), which snapshots wallet availability as it
-  // opens and never refreshes it. Mobile waits longer because WalletConnect is
-  // the only module registered there and is worth waiting for; desktop has
-  // extensions as an immediate fallback, so it shouldn't sit behind a slow
-  // relay for long.
-  const onMobile = isMobileBrowser();
-  const walletConnectReady = await waitForWalletConnectReady(
-    onMobile ? 10_000 : 3_000,
-  );
-  if (!walletConnectReady && onMobile) {
-    // On mobile WalletConnect is the only registered module, so an unready one
-    // means an empty or broken picker. Say what actually went wrong instead of
-    // rendering a wallet the user can only "install".
-    throw new Error(
-      "Couldn't reach the WalletConnect relay. Check your connection and try again.",
-    );
-  }
+  // Desktop only. authModal snapshots wallet availability as it opens and never
+  // refreshes it, so WalletConnect has to have finished booting first or it is
+  // listed as uninstalled. Bounded, because extensions are the usual path here
+  // and shouldn't sit behind a slow relay.
+  await waitForWalletConnectReady(3_000);
 
   let address: string;
   try {
-    if (onMobile && walletConnectModuleRef) {
-      // Skip the kit's own picker on mobile: WalletConnect is the only module
-      // registered there, so it would be a one-item list whose only purpose is
-      // to open the sheet behind it. Selecting it directly takes the user
-      // straight to the actual wallet list (Freighter, LOBSTR, ...) in one tap.
-      //
-      // setWallet + fetchAddress reproduce exactly what the picker's own
-      // selection handler does — set selectedModuleId, call the module's
-      // getAddress, store activeAddress — and both signals are persisted to
-      // localStorage by the kit's effects, so session restore is unaffected.
-      kit.setWallet(walletConnectModuleRef.productId);
-
-      const watcher = watchForSheetDismissal(walletConnectModuleRef);
-      const pending = kit.fetchAddress();
-      // If dismissal wins the race, this one still rejects later (on proposal
-      // expiry). Attach a sink now so that lands as a handled rejection.
-      pending.catch(() => {});
-      try {
-        ({ address } = await withTimeout(
-          Promise.race([pending, watcher.dismissed]),
-          90_000,
-          "Couldn't complete the connection in time. Some mobile carriers " +
-            "block the connection over cellular data — try switching to Wi-Fi.",
-        ));
-      } finally {
-        watcher.dispose();
-      }
-    } else {
-      ({ address } = await kit.authModal());
-    }
+    ({ address } = await kit.authModal());
   } catch (error: any) {
     throw new Error(explainConnectError(error));
   }
+
 
   const wallet = toWallet(kit, address);
   if (!wallet) throw new Error("Wallet did not return an address");
@@ -391,6 +308,14 @@ export function hasStoredWalletSession(): boolean {
 
 /** Read a persisted session from kit state without prompting the wallet. */
 export async function restoreWallet(): Promise<StellarWallet | null> {
+  if (directSession) {
+    return {
+      type: "wallet_connect",
+      publicKey: directSession.address,
+      isConnected: true,
+    };
+  }
+
   try {
     const kit = await getKit();
     const { address } = await kit.getAddress();
@@ -432,6 +357,12 @@ export async function signTransaction(
   xdr: string,
   address?: string,
 ): Promise<string> {
+  // A mobile session paired outside the kit has to sign through the same
+  // session; the kit knows nothing about it and would fail to find a wallet.
+  if (directSession) {
+    return signXdrViaWalletConnect(directSession.topic, xdr);
+  }
+
   const kit = await getKit();
   const { signedTxXdr } = await kit.signTransaction(xdr, {
     networkPassphrase: NETWORK_PASSPHRASE,
@@ -441,6 +372,12 @@ export async function signTransaction(
 }
 
 export async function disconnectWallet(): Promise<void> {
+  if (directSession) {
+    const { topic } = directSession;
+    directSession = null;
+    await disconnectStellarWalletConnect(topic);
+    return;
+  }
   const kit = await getKit();
   await kit.disconnect();
 }

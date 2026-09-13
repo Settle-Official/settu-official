@@ -1,39 +1,9 @@
 import { SignClient } from "@walletconnect/sign-client";
 import { EVM_SOURCE_CHAINS } from "@/lib/cctp/evm-chains";
+import { openSheet, closeSheet, watchSheetDismissal } from "@/lib/wallet/appkit";
+import { isMobileBrowser } from "@/lib/platform";
 
 let clientPromise: ReturnType<typeof SignClient.init> | null = null;
-let modalPromise: Promise<{ open: (o: { uri: string }) => void; close: () => void }> | null = null;
-
-/**
- * Reown AppKit's modal, opened with our own pairing URI (manualWCControl), so
- * the session still comes from SignClient above.
- *
- * A raw QR is unusable on a phone — you cannot scan your own screen — which
- * left mobile with no way to connect an EVM wallet at all. AppKit resolves each
- * wallet's deep link from the WalletConnect Explorer registry, so mobile gets a
- * wallet list that opens the app, and desktop still gets a QR.
- *
- * Imported dynamically: AppKit touches `window` at module scope and would
- * break Next's server prerender.
- */
-function getModal() {
-  if (!modalPromise) {
-    modalPromise = (async () => {
-      const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID;
-      if (!projectId) throw new Error("NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID is missing");
-      const [{ createAppKit }, { mainnet }] = await Promise.all([
-        import("@reown/appkit/core"),
-        import("@reown/appkit/networks"),
-      ]);
-      return createAppKit({
-        projectId,
-        manualWCControl: true,
-        networks: [mainnet],
-      } as never) as never;
-    })();
-  }
-  return modalPromise;
-}
 
 function getClient() {
   if (!clientPromise) {
@@ -82,7 +52,6 @@ export async function proposeEvmSession(
   onUri: (uri: string) => void,
 ): Promise<EvmSession> {
   const client = await getClient();
-  const modal = await getModal();
 
   // Only Ethereum is required; the rest are optional. Listing all six as
   // required means a wallet that lacks any one of them rejects the whole
@@ -104,9 +73,12 @@ export async function proposeEvmSession(
     },
   });
 
+  // Watch before opening so the close-after-open transition can't be missed.
+  const watcher = watchSheetDismissal();
   if (uri) {
     onUri(uri);
-    modal.open({ uri });
+    // The one AppKit instance on the page — see src/lib/wallet/appkit.ts.
+    await openSheet(uri);
   }
 
   const timeout = new Promise<never>((_, reject) =>
@@ -120,13 +92,19 @@ export async function proposeEvmSession(
       180_000,
     ),
   );
+  // approval() still settles later on proposal expiry; sink it so losing the
+  // race doesn't surface as an unhandled rejection.
+  const pending = approval();
+  pending.catch(() => {});
+
   let session;
   try {
-    session = await Promise.race([approval(), timeout]);
+    session = await Promise.race([pending, watcher.dismissed, timeout]);
   } finally {
-    // Close whether approved, rejected or timed out, so the sheet never
-    // outlives the attempt it belongs to.
-    modal.close();
+    // Close whether approved, rejected, dismissed or timed out, so the sheet
+    // never outlives the attempt it belongs to.
+    watcher.dispose();
+    await closeSheet();
   }
 
   const account = session.namespaces.eip155?.accounts?.[0];
@@ -136,8 +114,41 @@ export async function proposeEvmSession(
   return { topic: session.topic, address };
 }
 
+/**
+ * A session topic outlives the session it names: the wallet can disconnect, the
+ * session can expire, or storage can be cleared while the app still holds the
+ * string. Using it then throws WalletConnect's "No matching key. session topic
+ * doesn't exist", which tells a user nothing they can act on.
+ */
+async function assertSession(topic: string): Promise<void> {
+  const client = await getClient();
+  if (!client.session.keys.includes(topic)) {
+    throw new Error(
+      "Your wallet session has expired. Reconnect your wallet and try again.",
+    );
+  }
+}
+
+// A request over an existing session carries no pairing URI, so nothing brings
+// the wallet forward — on mobile it arrives backgrounded and the user sees no
+// prompt at all. Deep-link into the wallet ourselves using its own redirect.
+async function focusWallet(topic: string): Promise<void> {
+  if (!isMobileBrowser() || typeof window === "undefined") return;
+  try {
+    const client = await getClient();
+    const redirect = client.session.get(topic)?.peer?.metadata?.redirect;
+    const target = redirect?.native || redirect?.universal;
+    if (target) window.location.href = target;
+  } catch {
+    // Never let the focus attempt take down the request it belongs to.
+  }
+}
+
+// Disconnecting an already-gone session is the outcome the caller wanted, so
+// treat a missing topic as success rather than an error.
 export async function disconnectEvmSession(topic: string): Promise<void> {
   const client = await getClient();
+  if (!client.session.keys.includes(topic)) return;
   await client.disconnect({
     topic,
     reason: { code: 6000, message: "User disconnected" },
@@ -145,8 +156,9 @@ export async function disconnectEvmSession(topic: string): Promise<void> {
 }
 
 export async function requestChainSwitch(topic: string, chainId: number): Promise<void> {
+  await assertSession(topic);
   const client = await getClient();
-  await client.request({
+  const pending = client.request({
     topic,
     chainId: `eip155:${chainId}`,
     request: {
@@ -154,6 +166,8 @@ export async function requestChainSwitch(topic: string, chainId: number): Promis
       params: [{ chainId: `0x${chainId.toString(16)}` }],
     },
   });
+  await focusWallet(topic);
+  await pending;
 }
 
 export async function sendTransaction(
@@ -162,8 +176,9 @@ export async function sendTransaction(
   from: `0x${string}`,
   call: { to: `0x${string}`; data: `0x${string}` },
 ): Promise<string> {
+  await assertSession(topic);
   const client = await getClient();
-  return client.request({
+  const pending = client.request({
     topic,
     chainId: `eip155:${chainId}`,
     request: {
@@ -171,6 +186,8 @@ export async function sendTransaction(
       params: [{ from, to: call.to, data: call.data }],
     },
   }) as Promise<string>;
+  await focusWallet(topic);
+  return pending;
 }
 
 // personal_sign over the relay. The message is hex-encoded because the RPC
@@ -181,11 +198,14 @@ export async function signPersonalMessage(
   from: `0x${string}`,
   message: string,
 ): Promise<string> {
+  await assertSession(topic);
   const client = await getClient();
   const hex = `0x${Buffer.from(message, "utf8").toString("hex")}`;
-  return client.request({
+  const pending = client.request({
     topic,
     chainId: `eip155:${chainId}`,
     request: { method: "personal_sign", params: [hex, from] },
   }) as Promise<string>;
+  await focusWallet(topic);
+  return pending;
 }

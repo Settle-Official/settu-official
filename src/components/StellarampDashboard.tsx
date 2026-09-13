@@ -24,12 +24,12 @@ import {
 import { TransactionStorage, Transaction } from "@/lib/transaction-storage";
 import { ErrorToast } from "@/components/ErrorToast";
 import { EvmConnectModal } from "@/components/EvmConnectModal";
-import { SolanaConnectModal } from "@/components/SolanaConnectModal";
 import {
   TransactionProgressModal,
   type OfframpStep,
 } from "@/components/TransactionProgressModal";
 import * as StellarSdk from "@stellar/stellar-sdk";
+import { closeSheet } from "@/lib/wallet/appkit";
 
 /** Run a promise with a timeout. Rejects with a clear message on expiry. */
 function withTimeout<T>(
@@ -81,6 +81,19 @@ async function signWithTimeout(
     }
     throw err;
   }
+}
+
+// Not everything thrown is an Error — a WalletConnect/RPC rejection can be a
+// bare object, and `.message` is then undefined, which renders the failure
+// modal with no explanation at all. Always produce something readable.
+function describeError(error: unknown): string {
+  const message = (error as { message?: unknown })?.message;
+  if (typeof message === "string" && message.trim()) return message;
+  if (typeof error === "string" && error.trim()) return error;
+  const serialized = error === undefined ? "" : safeJson(error);
+  return serialized && serialized !== "{}"
+    ? `Unexpected wallet error: ${serialized}`
+    : "Something went wrong and the wallet gave no reason. Please try again.";
 }
 
 function safeJson(value: unknown): string {
@@ -353,7 +366,6 @@ export function StellarampDashboard() {
   // the others down (see handleSourceChainChange).
   const evmWallet = useEvmWallet();
   const solanaWallet = useSolanaWallet();
-  const [solanaConnectOpen, setSolanaConnectOpen] = useState(false);
 
   const [sourceChain, setSourceChain] =
     useState<OfframpSourceChainKey>("stellar");
@@ -645,11 +657,19 @@ export function StellarampDashboard() {
     // original Stellar Wallets Kit path below entirely unchanged. A
     // non-Stellar offramp source opens its own picker.
     if (mode === "offramp" && isSolanaSource) {
-      setSolanaConnectOpen(true);
+      void solanaWallet.connect().catch((e: any) => {
+        setToastError(e?.message || "Failed to connect wallet");
+      });
       return;
     }
     if (mode === "offramp" && isEvmSource) {
-      void evmWallet.openConnect();
+      void evmWallet.openConnect().catch((e: any) => {
+        // Declining in the wallet is a normal action, not an error.
+        const message = e?.message || "Failed to connect wallet";
+        if (!/reject|denied|cancel|closed|dismiss/i.test(message)) {
+          setToastError(message);
+        }
+      });
       return;
     }
 
@@ -699,19 +719,31 @@ export function StellarampDashboard() {
    */
   const handleSourceChainChange = async (next: OfframpSourceChainKey) => {
     if (next === sourceChain) return;
+
+    // Close the shared sheet and tear down regardless of connection state. The
+    // old code only cleaned up an already-connected wallet, so switching chains
+    // mid-connect left that attempt running and both chains showed
+    // "connecting" at once, neither ever settling.
+    try {
+      await closeSheet();
+    } catch {
+      // Nothing open.
+    }
+
     try {
       if (sourceChain === "stellar") {
-        if (isConnected) await disconnect();
+        await disconnect();
       } else if (sourceChain === "solana") {
-        if (solanaWallet.isConnected) await solanaWallet.disconnect();
-      } else if (evmWallet.isConnected) {
+        await solanaWallet.disconnect();
+      } else {
+        // Bumps the attempt counter, which abandons any pairing in flight.
+        evmWallet.closeConnect();
         await evmWallet.disconnect();
       }
     } catch {
       // A teardown failure shouldn't block the switch — worst case a stale
       // session lingers in the other adapter until its own next connect.
     }
-    setSolanaConnectOpen(false);
     setUserTransactions([]);
     setSourceChain(next);
   };
@@ -1109,14 +1141,14 @@ export function StellarampDashboard() {
       // repaint the modal — its late signature rejection lands here too.
       if (offrampFlowRef.current !== myFlow) return;
 
-      setTradeState((prev) => ({ ...prev, error: error.message }));
+      setTradeState((prev) => ({ ...prev, error: describeError(error) }));
       setOfframpStep("error");
-      setOfframpError(error.message);
+      setOfframpError(describeError(error));
 
       // Mark as failed
       TransactionStorage.update(txId, {
         status: "failed",
-        error: error.message,
+        error: describeError(error),
       });
       setUserTransactions(TransactionStorage.getByUser(wallet.publicKey));
 
@@ -1451,12 +1483,12 @@ export function StellarampDashboard() {
       setFormResetKey((k) => k + 1);
     } catch (error: any) {
       if (offrampFlowRef.current !== myFlow) return;
-      setTradeState((prev) => ({ ...prev, error: error.message }));
+      setTradeState((prev) => ({ ...prev, error: describeError(error) }));
       setOfframpStep("error");
-      setOfframpError(error.message);
+      setOfframpError(describeError(error));
       TransactionStorage.update(txId, {
         status: "failed",
-        error: error.message,
+        error: describeError(error),
       });
       setUserTransactions(TransactionStorage.getByUser(connectedAddress));
     } finally {
@@ -1691,12 +1723,12 @@ export function StellarampDashboard() {
       setFormResetKey((k) => k + 1);
     } catch (error: any) {
       if (offrampFlowRef.current !== myFlow) return;
-      setTradeState((prev) => ({ ...prev, error: error.message }));
+      setTradeState((prev) => ({ ...prev, error: describeError(error) }));
       setOfframpStep("error");
-      setOfframpError(error.message);
+      setOfframpError(describeError(error));
       TransactionStorage.update(txId, {
         status: "failed",
-        error: error.message,
+        error: describeError(error),
       });
       setUserTransactions(TransactionStorage.getByUser(connectedAddress));
     } finally {
@@ -2070,21 +2102,7 @@ export function StellarampDashboard() {
         onClose={evmWallet.closeConnect}
       />
 
-      <SolanaConnectModal
-        open={solanaConnectOpen}
-        wallets={solanaWallet.detectedWallets}
-        isConnecting={solanaWallet.isConnecting}
-        error={solanaWallet.error}
-        onPick={(name) => {
-          void solanaWallet
-            .connect(name)
-            .then(() => setSolanaConnectOpen(false))
-            .catch((e: any) =>
-              setToastError(e?.message || "Failed to connect wallet"),
-            );
-        }}
-        onClose={() => setSolanaConnectOpen(false)}
-      />
+
 
       <TransactionProgressModal
         isOpen={showProgressModal}
