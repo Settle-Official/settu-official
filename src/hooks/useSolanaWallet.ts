@@ -87,9 +87,8 @@ export function useSolanaWallet() {
       // the payer/owner slot and broadcasts.
       tx.sign([eventKeypair]);
 
-      const { signature } = await provider.signAndSendTransaction(tx);
-      // Wallets return either a base58 string or raw bytes.
-      return typeof signature === "string" ? signature : bs58.encode(signature);
+      // Already a base58 signature string.
+      return provider.signAndSendTransaction(tx);
     },
     [],
   );
@@ -97,10 +96,14 @@ export function useSolanaWallet() {
   // Proves control of the address for wallet linking.
   const signMessage = useCallback(async (message: string): Promise<string> => {
     const provider = await getSolanaProvider();
-    const signature = await provider.signMessage(
+    // Declared as Uint8Array, but some wallets return a base58 string — the
+    // mismatch that broke the burn path, so tolerate both here.
+    const signature: unknown = await provider.signMessage(
       new TextEncoder().encode(message),
     );
-    return typeof signature === "string" ? signature : bs58.encode(signature);
+    return typeof signature === "string"
+      ? signature
+      : bs58.encode(signature as Uint8Array);
   }, []);
 
   return {

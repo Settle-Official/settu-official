@@ -20,10 +20,18 @@
 
 const SOLANA_NAMESPACE = "solana" as const;
 
-/** The subset of AppKit's Solana provider this app uses. */
+/**
+ * The subset of AppKit's Solana provider this app uses, matching
+ * SolanaTypesUtil.d.ts exactly.
+ *
+ * signAndSendTransaction resolves to a TransactionSignature, which is a plain
+ * base58 string — not an object. Declaring it wrapped is what produced
+ * "Expected Buffer": destructuring `.signature` off a string yields undefined,
+ * and bs58.encode(undefined) throws that.
+ */
 export interface SolanaProvider {
   signMessage(message: Uint8Array): Promise<Uint8Array>;
-  signAndSendTransaction(transaction: unknown): Promise<{ signature: string }>;
+  signAndSendTransaction(transaction: unknown): Promise<string>;
 }
 
 type Kit = {
