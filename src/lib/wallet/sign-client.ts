@@ -1,11 +1,16 @@
-// One WalletConnect SignClient for every chain that pairs directly.
+// One WalletConnect SignClient for every chain that pairs directly, on storage
+// of its own.
 //
-// Two clients would mean two copies of the same storage namespace
-// ("wc@2:core") with independent in-memory state, which is how pairing data got
-// corrupted before. One client can hold sessions for several namespaces at
-// once, so Stellar and EVM share it.
+// AppKit runs a second WalletConnect core for Solana. Left on the default
+// "wc@2:core" prefix both cores share one keychain and subscribe to the same
+// topics, so a response can reach the instance that can't decrypt it — which
+// surfaces as "onRelayMessage() -> failed to process an inbound message" and a
+// signature that never arrives.
 
 import { SignClient } from "@walletconnect/sign-client";
+
+// Changing this orphans existing sessions: they live under the old prefix.
+const STORAGE_PREFIX = "settu";
 
 let clientPromise: ReturnType<typeof SignClient.init> | null = null;
 
@@ -19,6 +24,7 @@ export function getSignClient() {
       typeof window !== "undefined" ? window.location.origin : "https://settu.xyz";
     clientPromise = SignClient.init({
       projectId,
+      customStoragePrefix: STORAGE_PREFIX,
       metadata: {
         name: "Settu",
         description: "Convert USDC to your bank account in minutes.",
