@@ -24,6 +24,10 @@ export function getSignClient() {
         description: "Convert USDC to your bank account in minutes.",
         url: origin,
         icons: [`${origin}/icons/icon-192.png`],
+        // Without this the wallet has no way to hand its response back: the
+        // user approves, the wallet reports success, and the signature is
+        // dropped on the relay. Confirmed against Freighter on mobile.
+        redirect: { native: "", universal: origin },
       },
     });
   }
