@@ -110,6 +110,46 @@ const RECEIVE_MESSAGE_ABI = [
   },
 ] as const;
 
+const ALLOWANCE_ABI = [
+  {
+    type: "function",
+    name: "allowance",
+    stateMutability: "view",
+    inputs: [
+      { name: "owner", type: "address" },
+      { name: "spender", type: "address" },
+    ],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+] as const;
+
+/**
+ * Blocks until the approval is visible, because a confirmed receipt only
+ * proves one node applied it. Broadcasting the burn before the node serving
+ * eth_estimateGas catches up makes viem throw on a simulated revert.
+ */
+async function waitForAllowance(
+  publicClient: ReturnType<typeof getClients>["publicClient"],
+  owner: `0x${string}`,
+  amount: bigint,
+): Promise<void> {
+  for (let attempt = 0; attempt < 30; attempt++) {
+    const seen = await publicClient
+      .readContract({
+        address: CCTP_CONFIG.baseUsdc,
+        abi: ALLOWANCE_ABI,
+        functionName: "allowance",
+        args: [owner, CCTP_CONFIG.baseTokenMessengerV2],
+      })
+      .catch(() => BigInt(0));
+    if (seen >= amount) return;
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  throw new Error(
+    "Approval confirmed on-chain but not yet visible to the RPC pool — the burn was not attempted.",
+  );
+}
+
 /**
  * Onramp burn: Base source, Stellar destination. Always uses the CctpForwarder
  * hook pattern — TokenMessengerMinter treats `mintRecipient` as a contract on
@@ -159,6 +199,7 @@ export async function submitBaseBurnWithHook(params: {
       }),
     });
     await publicClient.waitForTransactionReceipt({ hash: approveTx });
+    await waitForAllowance(publicClient, account.address, amount);
   }
 
   const burnTx = await walletClient.sendTransaction({

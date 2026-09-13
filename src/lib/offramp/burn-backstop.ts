@@ -30,10 +30,10 @@ const GRACE_MS = 8 * 60_000;
 // Older than this is manual triage, not auto-recovery.
 const MAX_AGE_MS = 24 * 60 * 60_000;
 const MAX_OPS_SCANNED = 30;
-// Widest block span most RPC providers accept for one eth_getLogs.
-const EVM_LOG_SPAN = 9_000;
+// Base's public RPC rejects anything wider than 2,000 blocks per eth_getLogs.
+const EVM_LOG_SPAN = 2_000;
 // Bounds lookback per order so one slow chain can't stall the sweep.
-const EVM_MAX_CHUNKS = 12;
+const EVM_MAX_CHUNKS = 24;
 // CCTP v2 DepositForBurn, verified against live TokenMessengerV2 logs on Base.
 const DEPOSIT_FOR_BURN_TOPIC =
   "0x0c8c1cbdc5190613ebd485511d4e2812cfa45eecb79d845893331fedad5130a5";
