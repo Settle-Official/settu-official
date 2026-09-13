@@ -68,7 +68,10 @@ async function focusWallet(topic: string): Promise<void> {
   try {
     const client = await getSignClient();
     const redirect = client.session.get(topic)?.peer?.metadata?.redirect;
-    const target = redirect?.native || redirect?.universal;
+    // Only a native scheme is safe here. A universal https link is a real
+    // navigation that unloads this page and takes the relay socket with it,
+    // so the signature we are waiting on never arrives.
+    const target = redirect?.native;
     if (target) window.location.href = target;
   } catch {
     // Never let the focus attempt take down the request it belongs to.
