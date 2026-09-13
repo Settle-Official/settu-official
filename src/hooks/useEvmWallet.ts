@@ -204,7 +204,10 @@ export function useEvmWallet() {
       setIsConnectModalOpen(false);
     } catch (err: any) {
       if (attemptRef.current === attempt) {
-        setError(err?.message || "Failed to connect wallet");
+        const message = err?.message || "Failed to connect wallet";
+        // Dismissing the sheet is a normal action, not an error to show.
+        if (/reject|denied|cancel|closed|dismiss|4001/i.test(message)) return;
+        setError(message);
         throw err;
       }
     } finally {

@@ -63,7 +63,10 @@ export function useStellarWallet() {
       await subscribe();
       return connected;
     } catch (err: any) {
-      setError(err?.message || "Failed to connect wallet");
+      const message = err?.message || "Failed to connect wallet";
+      // Dismissing the sheet is a normal action, not an error to show.
+      if (/reject|denied|cancel|closed|dismiss/i.test(message)) return null;
+      setError(message);
       throw err;
     } finally {
       setIsConnecting(false);

@@ -1,6 +1,6 @@
 import { SignClient } from "@walletconnect/sign-client";
 import { EVM_SOURCE_CHAINS } from "@/lib/cctp/evm-chains";
-import { openSheet, closeSheet } from "@/lib/wallet/appkit";
+import { openSheet, closeSheet, watchSheetDismissal } from "@/lib/wallet/appkit";
 import { isMobileBrowser } from "@/lib/platform";
 
 let clientPromise: ReturnType<typeof SignClient.init> | null = null;
@@ -73,6 +73,8 @@ export async function proposeEvmSession(
     },
   });
 
+  // Watch before opening so the close-after-open transition can't be missed.
+  const watcher = watchSheetDismissal();
   if (uri) {
     onUri(uri);
     // The one AppKit instance on the page — see src/lib/wallet/appkit.ts.
@@ -90,12 +92,18 @@ export async function proposeEvmSession(
       180_000,
     ),
   );
+  // approval() still settles later on proposal expiry; sink it so losing the
+  // race doesn't surface as an unhandled rejection.
+  const pending = approval();
+  pending.catch(() => {});
+
   let session;
   try {
-    session = await Promise.race([approval(), timeout]);
+    session = await Promise.race([pending, watcher.dismissed, timeout]);
   } finally {
-    // Close whether approved, rejected or timed out, so the sheet never
-    // outlives the attempt it belongs to.
+    // Close whether approved, rejected, dismissed or timed out, so the sheet
+    // never outlives the attempt it belongs to.
+    watcher.dispose();
     await closeSheet();
   }
 

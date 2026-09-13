@@ -44,6 +44,7 @@ type Kit = {
     callback: (state: { address?: string; isConnected: boolean }) => void,
     namespace?: string,
   ) => () => void;
+  subscribeState?: (callback: (state: { open: boolean }) => void) => () => void;
 };
 
 let kitPromise: Promise<Kit> | null = null;
@@ -120,6 +121,33 @@ export async function closeSheet(): Promise<void> {
   }
 }
 
+export interface SheetDismissal {
+  dismissed: Promise<never>;
+  dispose: () => void;
+}
+
+// Rejects once the sheet closes without a connection. approval() ignores
+// dismissal — it settles only on approve, reject or ~5min expiry — so without
+// this the caller sits on "connecting" until the timeout.
+export function watchSheetDismissal(): SheetDismissal {
+  let dispose = () => {};
+  const dismissed = new Promise<never>((_resolve, reject) => {
+    getKit()
+      .then((kit) => {
+        if (!kit.subscribeState) return;
+        // The sheet starts closed, so only a close that follows an open counts.
+        let sawOpen = false;
+        const unsubscribe = kit.subscribeState((state) => {
+          if (state.open) sawOpen = true;
+          else if (sawOpen) reject(new Error("Connection cancelled."));
+        });
+        dispose = () => unsubscribe();
+      })
+      .catch(() => {});
+  });
+  return { dismissed, dispose };
+}
+
 /** Opens the wallet picker. Resolves once a wallet connects, or rejects. */
 export async function connectSolana(): Promise<string> {
   const kit = await getKit();
@@ -127,11 +155,14 @@ export async function connectSolana(): Promise<string> {
   const existing = kit.getAddress(SOLANA_NAMESPACE);
   if (existing) return existing;
 
+  // Subscribed before opening, so the close-after-open transition can't be
+  // missed by a subscription that only reports changes.
+  const watcher = watchSheetDismissal();
   await kit.open({ namespace: SOLANA_NAMESPACE });
 
   // AppKit's modal has no "await the connection" API, so resolve off the
   // account subscription and let a closed modal without a connection reject.
-  return new Promise<string>((resolve, reject) => {
+  const connected = new Promise<string>((resolve, reject) => {
     const unsubscribe = kit.subscribeAccount((state) => {
       if (state.isConnected && state.address) {
         unsubscribe();
@@ -139,8 +170,7 @@ export async function connectSolana(): Promise<string> {
       }
     }, SOLANA_NAMESPACE);
 
-    // Bounded so a dismissed sheet doesn't leave the caller waiting forever —
-    // the failure mode that made the old connect button stick on "connecting".
+    // Last resort if the sheet never reports a close.
     setTimeout(() => {
       unsubscribe();
       const address = kit.getAddress(SOLANA_NAMESPACE);
@@ -148,6 +178,12 @@ export async function connectSolana(): Promise<string> {
       else reject(new Error("Connection cancelled."));
     }, 180_000);
   });
+
+  try {
+    return await Promise.race([connected, watcher.dismissed]);
+  } finally {
+    watcher.dispose();
+  }
 }
 
 export async function disconnectSolana(): Promise<void> {

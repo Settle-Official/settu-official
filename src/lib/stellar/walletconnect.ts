@@ -3,7 +3,7 @@
 // which hung mobile connects forever. Desktop still goes through the kit.
 
 import { getSignClient } from "@/lib/wallet/sign-client";
-import { openSheet, closeSheet } from "@/lib/wallet/appkit";
+import { openSheet, closeSheet, watchSheetDismissal } from "@/lib/wallet/appkit";
 import { isMobileBrowser } from "@/lib/platform";
 
 const CHAIN = "stellar:pubnet";
@@ -34,21 +34,29 @@ export async function connectStellarViaWalletConnect(): Promise<StellarWcSession
     },
   });
 
+  // Watch before opening so the close-after-open transition can't be missed.
+  const watcher = watchSheetDismissal();
   if (uri) await openSheet(uri);
 
   const timeout = new Promise<never>((_resolve, reject) =>
     setTimeout(() => reject(new Error(TIMEOUT_MESSAGE)), APPROVAL_TIMEOUT_MS),
   );
 
+  // approval() still settles later on proposal expiry; sink it so losing the
+  // race doesn't surface as an unhandled rejection.
+  const pending = approval();
+  pending.catch(() => {});
+
   try {
-    const session = await Promise.race([approval(), timeout]);
+    const session = await Promise.race([pending, watcher.dismissed, timeout]);
     const account = session.namespaces.stellar?.accounts?.[0];
     if (!account) throw new Error("Wallet did not return a Stellar account");
     // CAIP-10: "stellar:pubnet:G..."
     return { address: account.split(":")[2], topic: session.topic };
   } finally {
-    // Closes on approval, rejection and timeout alike, so the sheet never
-    // outlives the attempt that opened it.
+    // Closes on approval, rejection, dismissal and timeout alike, so the sheet
+    // never outlives the attempt that opened it.
+    watcher.dispose();
     await closeSheet();
   }
 }
