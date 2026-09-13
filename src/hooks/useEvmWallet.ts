@@ -2,6 +2,40 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import { isMobileBrowser } from "@/lib/platform";
+
+// The Stellar wallet path bounds its own sign step at 150s (signWithTimeout
+// in StellarampDashboard.tsx) after a confirmed real-world incident: a
+// dropped WalletConnect relay response left the UI stuck on "Confirm
+// transaction in wallet" forever, with no way out. eth_sendTransaction below
+// goes over the exact same kind of relay (for the WalletConnect transport)
+// and had no bound at all — this closes that gap so a lost response times
+// out with an actionable message instead of hanging indefinitely.
+const SIGN_TIMEOUT_MS = 150_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () =>
+        reject(
+          new Error(
+            "We didn't hear back from your wallet. If you approved it, the transaction may still go through — check your wallet's recent activity in a minute before trying again.",
+          ),
+        ),
+      ms,
+    );
+    promise.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      },
+    );
+  });
+}
+
 import {
   proposeEvmSession,
   disconnectEvmSession,
@@ -266,7 +300,10 @@ export function useEvmWallet() {
       if (transport === "walletconnect" && topicRef.current) {
         for (const call of calls) {
           hashes.push(
-            await sendTransaction(topicRef.current, chainId, address, call),
+            await withTimeout(
+              sendTransaction(topicRef.current, chainId, address, call),
+              SIGN_TIMEOUT_MS,
+            ),
           );
         }
         return hashes;

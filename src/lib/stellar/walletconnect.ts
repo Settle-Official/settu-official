@@ -18,8 +18,17 @@ const CHAIN = "stellar:pubnet";
 const SIGN_METHOD = "stellar_signXDR";
 
 // Long enough to switch apps, approve and come back; short enough that a
-// dismissed sheet doesn't strand the caller on "connecting".
-const APPROVAL_TIMEOUT_MS = 180_000;
+// dismissed sheet doesn't strand the caller on "connecting". WalletConnect
+// never times this out itself — `approval()` settles only on approval,
+// rejection or proposal expiry (~5 min), and a dismissed sheet is none of
+// those — so this clock is the only thing that frees the caller.
+const APPROVAL_TIMEOUT_MS = 90_000;
+
+// Carrier/cellular blocking of the relay is the confirmed cause of a connect
+// that opens the sheet and then never settles, so lead with it.
+const TIMEOUT_MESSAGE =
+  "Couldn't complete the connection in time. Some mobile carriers block the " +
+  "connection over cellular data — try switching to Wi-Fi.";
 
 export interface StellarWcSession {
   address: string;
@@ -45,10 +54,7 @@ export async function connectStellarViaWalletConnect(): Promise<StellarWcSession
   if (uri) await openSheet(uri);
 
   const timeout = new Promise<never>((_resolve, reject) =>
-    setTimeout(
-      () => reject(new Error("Connection timed out. Please try again.")),
-      APPROVAL_TIMEOUT_MS,
-    ),
+    setTimeout(() => reject(new Error(TIMEOUT_MESSAGE)), APPROVAL_TIMEOUT_MS),
   );
 
   try {

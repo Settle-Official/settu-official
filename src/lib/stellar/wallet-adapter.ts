@@ -37,60 +37,14 @@ type Kit = typeof import("@creit.tech/stellar-wallets-kit").StellarWalletsKit;
 let kitPromise: Promise<Kit> | null = null;
 
 /**
- * The WalletConnect module also exposes the underlying Reown AppKit instance,
- * which we need in order to notice the user dismissing the wallet sheet.
- * Narrowed structurally rather than imported, so this stays a type-only
- * dependency on a shape the module already documents.
- */
-interface WalletConnectModuleLike extends ModuleInterface {
-  modal?: {
-    subscribeState?: (
-      callback: (state: { open: boolean }) => void,
-    ) => () => void;
-  };
-}
-
-/**
  * Handle on the WalletConnect module so we can wait for it to finish booting
  * before opening the picker. See waitForWalletConnectReady.
  */
-let walletConnectModuleRef: WalletConnectModuleLike | null = null;
+let walletConnectModuleRef: ModuleInterface | null = null;
 
 // Set when mobile paired through our own SignClient instead of the kit.
 let directSession: { address: string; topic: string } | null = null;
 
-/**
- * Reject as soon as the wallet sheet is dismissed without a selection.
- *
- * Needed because the connect promise ultimately settles on WalletConnect's
- * `approval()`, which only resolves on approval, explicit rejection, or
- * proposal expiry — roughly five minutes. Closing the sheet is none of those,
- * so without this the caller waits on a promise that will not settle and the
- * button stays in its connecting state until a page reload.
- *
- * Only a close that follows an open counts: the sheet starts closed, so
- * reacting to the initial state would abort before it ever appeared.
- */
-function watchForSheetDismissal(module: WalletConnectModuleLike): {
-  dismissed: Promise<never>;
-  dispose: () => void;
-} {
-  let dispose = () => {};
-  const dismissed = new Promise<never>((_resolve, reject) => {
-    const subscribe = module.modal?.subscribeState;
-    if (!subscribe) return; // Never settles — the race then rests on fetchAddress alone.
-    let sawOpen = false;
-    const unsubscribe = subscribe.call(module.modal, (state) => {
-      if (state.open) {
-        sawOpen = true;
-      } else if (sawOpen) {
-        reject(new Error("Connection cancelled."));
-      }
-    });
-    dispose = () => unsubscribe();
-  });
-  return { dismissed, dispose };
-}
 
 /**
  * Lazily import + initialize the kit, once per page load.
@@ -103,6 +57,7 @@ async function getKit(): Promise<Kit> {
   if (!kitPromise) kitPromise = initKit();
   return kitPromise;
 }
+
 
 /**
  * Block until the WalletConnect module has finished booting, or give up.
@@ -272,6 +227,7 @@ export async function connectWallet(): Promise<StellarWallet> {
     throw new Error(explainConnectError(error));
   }
 
+
   const wallet = toWallet(kit, address);
   if (!wallet) throw new Error("Wallet did not return an address");
   return wallet;
@@ -287,6 +243,24 @@ export async function connectWallet(): Promise<StellarWallet> {
 function explainConnectError(error: any): string {
   const message: string =
     typeof error === "string" ? error : error?.message || String(error ?? "");
+
+  // The relay accepted the WebSocket handshake but couldn't carry a message
+  // over it — the SDK's own wording for "the socket looked open but isn't
+  // usable". Confirmed against a real report: failed every time on one
+  // phone's cellular data (no iCloud+, so not Private Relay) and worked
+  // immediately on Wi-Fi — some mobile carriers interfere with the relay's
+  // persistent WebSocket over cellular. It's a network condition on that
+  // device/connection, not a broken session — reconnecting Freighter or
+  // clearing the kit's storage won't help. iCloud Private Relay or a VPN can
+  // cause the same symptom for someone who has one of those enabled.
+  if (/failed to publish/i.test(message)) {
+    return (
+      "Your connection to the WalletConnect network dropped mid-handshake. " +
+      "Some mobile carriers block this over cellular data — try switching to " +
+      "Wi-Fi. If you have iCloud Private Relay or a VPN on, try turning that " +
+      "off too, then try again."
+    );
+  }
 
   if (/origin not allowed/i.test(message) || /\b3000\b/.test(message)) {
     const origin =
