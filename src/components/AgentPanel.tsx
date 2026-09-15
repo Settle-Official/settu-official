@@ -113,6 +113,35 @@ export function AgentPanel({
   const lastRenderedStepId = useRef<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
+  // Tracks the currently-active onramp delivery watcher (SSE + backstop poll
+  // + visibility recheck — see confirmOnrampOrder). A ref, not state: this is
+  // plumbing for a background subscription, not something that should
+  // trigger a re-render on its own.
+  const onrampStreamRef = useRef<{
+    es: EventSource | null;
+    reconnectTimer: ReturnType<typeof setTimeout> | null;
+    pollTimer: ReturnType<typeof setInterval> | null;
+    onVisible: () => void;
+    done: boolean;
+  } | null>(null);
+
+  const teardownOnrampStream = () => {
+    const s = onrampStreamRef.current;
+    if (!s) return;
+    s.done = true;
+    if (s.reconnectTimer) clearTimeout(s.reconnectTimer);
+    if (s.pollTimer) clearInterval(s.pollTimer);
+    document.removeEventListener("visibilitychange", s.onVisible);
+    s.es?.close();
+    onrampStreamRef.current = null;
+  };
+
+  // Tears down the watcher on unmount only — confirmOnrampOrder itself tears
+  // down any previous watcher before starting a new one, so a user
+  // confirming a second onramp order in the same session doesn't leak the
+  // first one's poller.
+  useEffect(() => teardownOnrampStream, []);
+
   // Mirrors TransactionProgressModal's own `canCancel` — only while waiting
   // on the wallet or the on-chain submit, and only for a run this panel
   // itself started.
@@ -349,35 +378,96 @@ export function AgentPanel({
         },
       ]);
 
-      const source = new EventSource(`/api/onramp/stream/${result.id}`);
-      const lastOnrampStatus = { current: "" };
-      source.onmessage = (evt) => {
-        let payload: { status?: string; stellarTxHash?: string };
+      // Tear down any previous onramp watcher before starting a new one —
+      // mirrors OnrampPanel's own per-orderId effect cleanup, so confirming
+      // a second onramp order in the same chat doesn't leak the first
+      // poller/listener.
+      teardownOnrampStream();
+
+      const lastStatus = { current: "" };
+      const applyOnrampStatus = (status: string, stellarTxHash?: string): boolean => {
+        if (status === lastStatus.current) return false;
+        lastStatus.current = status;
+        const event = onrampStatusToAgentEvent(status, { stellarTxHash });
+        if (event) {
+          setMessages((prev) => [
+            ...prev,
+            { id: nextId(), role: "agent", text: event.text, stepKind: event.kind },
+          ]);
+        }
+        return status === "delivered" || status === "refunded" || status === "expired";
+      };
+
+      // Authoritative read, shared by the backstop poller and the
+      // visibility recheck — same endpoint OnrampPanel itself falls back to.
+      const fetchOnrampStatus = async (): Promise<boolean> => {
         try {
-          payload = JSON.parse(evt.data);
+          const res = await fetch(`/api/onramp/order/${result.id}`);
+          if (!res.ok) return false;
+          const next = (await res.json())?.data?.status;
+          return next ? applyOnrampStatus(next) : false;
         } catch {
-          return;
+          return false;
         }
-        if (!payload.status || payload.status === lastOnrampStatus.current) return;
-        lastOnrampStatus.current = payload.status;
-        const event = onrampStatusToAgentEvent(payload.status, {
-          stellarTxHash: payload.stellarTxHash,
+      };
+
+      const state: NonNullable<typeof onrampStreamRef.current> = {
+        es: null,
+        reconnectTimer: null,
+        pollTimer: null,
+        onVisible: () => {},
+        done: false,
+      };
+      onrampStreamRef.current = state;
+
+      // Paying the bank means leaving the browser, and a backgrounded tab
+      // can lose the SSE connection with no event we can see — reconnect,
+      // poll a backstop, and re-check whenever the tab comes back. Same
+      // mechanism OnrampPanel uses, for the exact same reason: a plain
+      // one-shot EventSource with no reconnect left delivery stuck behind a
+      // manual "check status" step in practice.
+      const connect = () => {
+        if (state.done) return;
+        const es = new EventSource(`/api/onramp/stream/${result.id}`);
+        state.es = es;
+        es.onmessage = (evt) => {
+          let payload: { status?: string; stellarTxHash?: string };
+          try {
+            payload = JSON.parse(evt.data);
+          } catch {
+            return;
+          }
+          if (payload.status && applyOnrampStatus(payload.status, payload.stellarTxHash)) {
+            state.done = true;
+            es.close();
+          }
+        };
+        // A closed stream is routine (the route caps at 60s), not a failure.
+        es.onerror = () => {
+          if (es.readyState !== EventSource.CLOSED) return;
+          es.close();
+          state.es = null;
+          if (!state.done) state.reconnectTimer = setTimeout(connect, 3000);
+        };
+      };
+
+      const check = () => {
+        if (state.done) return;
+        fetchOnrampStatus().then((terminal) => {
+          if (terminal) {
+            state.done = true;
+            state.es?.close();
+          }
         });
-        if (!event) return;
-        setMessages((prev) => [
-          ...prev,
-          { id: nextId(), role: "agent", text: event.text, stepKind: event.kind },
-        ]);
-        if (payload.status === "delivered" || payload.status === "refunded" || payload.status === "expired") {
-          source.close();
-        }
       };
-      source.onerror = () => {
-        // The stream itself auto-reconnects on the server side across
-        // reconnects; a client-side error here just means this particular
-        // connection dropped. Nothing to narrate — the next successful
-        // message picks up wherever the order actually is.
+
+      state.onVisible = () => {
+        if (document.visibilityState === "visible") check();
       };
+
+      connect();
+      state.pollTimer = setInterval(check, 12000);
+      document.addEventListener("visibilitychange", state.onVisible);
     } catch (e: any) {
       // Nothing was created — clear the status (not "failed") so
       // Confirm/Cancel reappear and the user can just retry.
