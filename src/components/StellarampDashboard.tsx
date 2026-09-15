@@ -2090,6 +2090,7 @@ export function StellarampDashboard() {
                       onCancelFlow={handleCancelOfframpFlow}
                       onInitiateOfframp={handleAgentInitiateOfframp}
                       onInitiateOnramp={handleAgentInitiateOnramp}
+                      connectedStellarAddress={wallet?.publicKey ?? null}
                     />
                   </div>
                   <div hidden={mode !== "offramp"}>

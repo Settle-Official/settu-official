@@ -72,8 +72,11 @@ export interface AgentPanelProps {
     beneficiary: AgentOrderWithQuote["beneficiary"];
   }) => Promise<void> | void;
   // No isConnected/onConnect gate needed for onramp — the destination
-  // Stellar address is always given explicitly in the conversation.
+  // address can be given explicitly in the conversation. If the user
+  // instead refers to "my connected wallet", the parse route substitutes
+  // this address server-side; null if no Stellar wallet is connected.
   readonly onInitiateOnramp: (order: ResolvedOnrampOrder) => Promise<CreateOnrampOrderResult>;
+  readonly connectedStellarAddress: string | null;
 }
 
 /**
@@ -95,6 +98,7 @@ export function AgentPanel({
   onCancelFlow,
   onInitiateOfframp,
   onInitiateOnramp,
+  connectedStellarAddress,
 }: Readonly<AgentPanelProps>) {
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
@@ -196,7 +200,7 @@ export function AgentPanel({
       const res = await fetch("/api/offramp/agent/parse", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: history }),
+        body: JSON.stringify({ messages: history, connectedStellarAddress }),
       });
       const data: ParseResponse = await res.json();
       if (data.kind === "clarify") {

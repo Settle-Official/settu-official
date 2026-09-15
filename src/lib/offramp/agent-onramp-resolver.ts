@@ -60,21 +60,48 @@ export function classifyOnrampExtraction(
   return { status: "recap", missing: missing.map((key) => FIELD_LABELS[key]) };
 }
 
+export interface ResolveOnrampOptions {
+  /**
+   * The user's currently connected Stellar wallet address, if any. Onramp's
+   * destination is always Stellar regardless of which chain is selected for
+   * offramp elsewhere in the app, so this is specifically the Stellar
+   * Wallets Kit connection, not whatever externalWallet is active.
+   */
+  connectedStellarAddress?: string | null;
+}
+
+// What the extraction schema instructs the model to emit when the user
+// refers to their own wallet ("my connected wallet", "send it to my
+// wallet") instead of stating an address outright — see the parse route's
+// schema description for destinationStellarAddress.
+const CONNECTED_WALLET_SENTINEL = "connected";
+
 export async function resolveOnrampOrder(
   extraction: OnrampAgentExtraction,
+  opts: ResolveOnrampOptions = {},
 ): Promise<OnrampResolveResult> {
   const classified = classifyOnrampExtraction(extraction);
   if (classified.status !== "complete") return classified;
 
   // All five fields are non-null past this point (classifyOnrampExtraction gated it).
   const fiatAmount = extraction.fiatAmount!;
-  const destinationAddress = extraction.destinationStellarAddress!;
   const currencyRaw = extraction.fiatCurrency!.toUpperCase();
   const refundInstitutionName = extraction.refundInstitutionName!;
   const refundAccountIdentifier = extraction.refundAccountIdentifier!;
 
   if (!validateAmount(fiatAmount)) {
     return { status: "clarify", message: "What amount would you like to onramp?" };
+  }
+
+  let destinationAddress = extraction.destinationStellarAddress!;
+  if (destinationAddress.trim().toLowerCase() === CONNECTED_WALLET_SENTINEL) {
+    if (!opts.connectedStellarAddress) {
+      return {
+        status: "clarify",
+        message: "You don't have a Stellar wallet connected — connect one, or give me the Stellar address to send the USDC to.",
+      };
+    }
+    destinationAddress = opts.connectedStellarAddress;
   }
 
   if (!validateAddress(destinationAddress, "stellar")) {

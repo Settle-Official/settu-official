@@ -181,6 +181,83 @@ test("resolveOnrampOrder: unresolvable refund bank asks which bank, not a guess"
   );
 });
 
+test("resolveOnrampOrder: 'connected' sentinel resolves to the client's connected Stellar wallet", async () => {
+  await withFetch(
+    async (url) => {
+      const u = String(url);
+      if (u.includes("/currencies")) {
+        return jsonResponse({
+          data: [{ code: "NGN", name: "Nigerian Naira", symbol: "₦" }],
+        });
+      }
+      if (u.includes("/institutions/")) {
+        return jsonResponse({ data: [{ code: "OPAYNGPC", name: "OPay" }] });
+      }
+      if (u.includes("/verify-account")) {
+        return jsonResponse({ data: { accountName: "JOHN DOE" } });
+      }
+      throw new Error(`unexpected fetch: ${u}`);
+    },
+    async () => {
+      const result = await resolveOnrampOrder(
+        { ...COMPLETE, destinationStellarAddress: "connected" },
+        {
+          connectedStellarAddress:
+            "GDRXE2BQUC3AZNPVFSCEZ76NJ3WWL25FYFK6RGZGIEKWE4SOOHSUJUJ6",
+        },
+      );
+      assert.equal(result.status, "resolved");
+      if (result.status === "resolved") {
+        assert.equal(
+          result.order.destinationAddress,
+          "GDRXE2BQUC3AZNPVFSCEZ76NJ3WWL25FYFK6RGZGIEKWE4SOOHSUJUJ6",
+        );
+      }
+    },
+  );
+});
+
+test("resolveOnrampOrder: 'connected' sentinel with no wallet connected asks the user to connect or give an address", async () => {
+  const result = await resolveOnrampOrder(
+    { ...COMPLETE, destinationStellarAddress: "connected" },
+    { connectedStellarAddress: null },
+  );
+  assert.equal(result.status, "clarify");
+  if (result.status === "clarify") {
+    assert.match(result.message, /connect|address/i);
+  }
+});
+
+test("resolveOnrampOrder: 'connected' sentinel is case-insensitive and trims whitespace", async () => {
+  await withFetch(
+    async (url) => {
+      const u = String(url);
+      if (u.includes("/currencies")) {
+        return jsonResponse({
+          data: [{ code: "NGN", name: "Nigerian Naira", symbol: "₦" }],
+        });
+      }
+      if (u.includes("/institutions/")) {
+        return jsonResponse({ data: [{ code: "OPAYNGPC", name: "OPay" }] });
+      }
+      if (u.includes("/verify-account")) {
+        return jsonResponse({ data: { accountName: "JOHN DOE" } });
+      }
+      throw new Error(`unexpected fetch: ${u}`);
+    },
+    async () => {
+      const result = await resolveOnrampOrder(
+        { ...COMPLETE, destinationStellarAddress: " Connected " },
+        {
+          connectedStellarAddress:
+            "GDRXE2BQUC3AZNPVFSCEZ76NJ3WWL25FYFK6RGZGIEKWE4SOOHSUJUJ6",
+        },
+      );
+      assert.equal(result.status, "resolved");
+    },
+  );
+});
+
 test("resolveOnrampOrder: failed refund-account verification asks to double check the number", async () => {
   await withFetch(
     async (url) => {

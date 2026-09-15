@@ -43,7 +43,7 @@ const extractionSchema = z.object({
   // Onramp fields.
   fiatAmount: z.string().nullable().describe("The fiat amount the user wants to pay in, as a plain string. Null if not stated. Onramp only."),
   fiatCurrency: z.string().nullable().describe("The 3-letter fiat currency code the user is paying in. Null if not stated or unclear. Onramp only."),
-  destinationStellarAddress: z.string().nullable().describe("The Stellar G... address that should receive the USDC. Null if not stated. Onramp only."),
+  destinationStellarAddress: z.string().nullable().describe("The Stellar G... address that should receive the USDC. If the user refers to their own connected wallet instead of stating an address (e.g. \"my connected wallet\", \"send it to my wallet\"), extract the literal value \"connected\" rather than guessing an address. Null if truly not mentioned. Onramp only."),
   refundInstitutionName: z.string().nullable().describe("The bank the user wants refunded if the fiat payment can't be matched, as free text exactly as written. Null if not stated. Onramp only."),
   refundAccountIdentifier: z.string().nullable().describe("The refund bank account number, digits only. Null if not stated. Onramp only."),
 });
@@ -67,6 +67,14 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       );
     }
+    // Onramp's destination is always Stellar, so this is specifically the
+    // client's connected Stellar Wallets Kit address — supplied by
+    // AgentPanel so "my connected wallet" can resolve without the server
+    // knowing anything about the browser's wallet state on its own.
+    const connectedStellarAddress =
+      typeof body?.connectedStellarAddress === "string"
+        ? body.connectedStellarAddress
+        : null;
 
     const chains = sourceChainOptions().map((c) => c.code);
     const currencies = await fetchCurrencies();
@@ -129,7 +137,9 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ kind: "recap", missing: classifiedOnramp.missing });
       }
 
-      const resolvedOnramp = await resolveOnrampOrder(typedOnrampExtraction);
+      const resolvedOnramp = await resolveOnrampOrder(typedOnrampExtraction, {
+        connectedStellarAddress,
+      });
       if (resolvedOnramp.status === "clarify") {
         return NextResponse.json({ kind: "clarify", message: resolvedOnramp.message });
       }
