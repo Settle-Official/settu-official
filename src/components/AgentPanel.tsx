@@ -22,7 +22,41 @@ type ParseResponse =
   | { kind: "recap"; missing: string[] }
   | { kind: "resolved"; order: AgentOrderWithQuote }
   | { kind: "resolved-onramp"; order: ResolvedOnrampOrder }
+  | { kind: "status"; message: string }
   | { kind: "error"; message: string };
+
+// What's currently live (confirmed but not yet finished) or most recently
+// finished, in the minimal shape the parse route needs — sent on every
+// request so it can tell a status comment on THIS order apart from a new
+// request, and so "do that again" has something concrete to repeat. Kept
+// separate from AgentOrderWithQuote/ResolvedOnrampOrder (rather than reusing
+// them directly) since those carry quote/rate fields the route doesn't need
+// and shouldn't have to keep in sync with.
+type PendingOrderSummary =
+  | {
+      direction: "offramp";
+      amount: string;
+      token: string;
+      sourceChain: string;
+      beneficiary: { institution: string; accountIdentifier: string; currency: string };
+    }
+  | { direction: "onramp"; fiatAmount: string; currency: string; refundAccount: { institution: string } };
+
+type CompletedOrderSummary =
+  | {
+      direction: "offramp";
+      amount: string;
+      token: string;
+      sourceChain: string;
+      beneficiary: { institution: string; accountIdentifier: string; currency: string };
+    }
+  | {
+      direction: "onramp";
+      fiatAmount: string;
+      currency: string;
+      destinationAddress: string;
+      refundAccount: { institution: string; accountIdentifier: string };
+    };
 
 interface ChatMessage {
   id: string;
@@ -31,14 +65,16 @@ interface ChatMessage {
   order?: AgentOrderWithQuote; // present only on the confirmation-card message
   // Lifecycle of a confirmation card: undefined until Confirm/Cancel is
   // clicked, "confirmed" while the run is in flight, then "success"/"failed"
-  // once offrampStep resolves (or "cancelled" if declined or aborted mid-run).
-  orderStatus?: "confirmed" | "success" | "failed" | "cancelled";
+  // once offrampStep resolves ("cancelled" if declined/aborted mid-run, or
+  // "superseded" if an edit to this same draft produced a newer card before
+  // this one was ever confirmed).
+  orderStatus?: "confirmed" | "success" | "failed" | "cancelled" | "superseded";
   stepKind?: AgentStepEvent["kind"]; // present only on step-narration messages
   onrampOrder?: ResolvedOnrampOrder; // present only on the onramp confirmation-card message
   // Same lifecycle shape as orderStatus, but a pre-creation failure clears
   // back to undefined instead of "failed" — nothing was created yet, so the
   // card should stay retryable rather than presenting a dead end.
-  onrampOrderStatus?: "confirmed" | "success" | "failed" | "cancelled";
+  onrampOrderStatus?: "confirmed" | "success" | "failed" | "cancelled" | "superseded";
   virtualAccount?: {
     orderId: string;
     account: CreateOnrampOrderResult["providerAccount"];
@@ -110,8 +146,24 @@ export function AgentPanel({
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  // The most recently *finished* order (offramp success or onramp
+  // "delivered"), regardless of how long ago or how many segment resets have
+  // happened since — this is what "do that again" repeats. Never cleared by
+  // a fresh conversation segment; only ever overwritten by the next
+  // completion.
+  const [lastCompletedOrder, setLastCompletedOrder] = useState<CompletedOrderSummary | null>(null);
+  // The onramp order currently awaiting the user's bank transfer (from the
+  // moment it's created until a terminal status arrives). Offramp has no
+  // equivalent state here — its "pending" window is `isExecuting` below,
+  // derived straight from offrampStep.
+  const [onrampPending, setOnrampPending] = useState<ResolvedOnrampOrder | null>(null);
   const lastRenderedStepId = useRef<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  // Lets `send()` force an immediate status re-check (instead of waiting up
+  // to 12s for the backstop poll) the moment the user says something like
+  // "I've sent the money" while an onramp order is pending. Set by
+  // confirmOnrampOrder, cleared by teardownOnrampStream.
+  const onrampCheckNowRef = useRef<(() => void) | null>(null);
 
   // Tracks the currently-active onramp delivery watcher (SSE + backstop poll
   // + visibility recheck — see confirmOnrampOrder). A ref, not state: this is
@@ -134,6 +186,7 @@ export function AgentPanel({
     document.removeEventListener("visibilitychange", s.onVisible);
     s.es?.close();
     onrampStreamRef.current = null;
+    onrampCheckNowRef.current = null;
   };
 
   // Tears down the watcher on unmount only — confirmOnrampOrder itself tears
@@ -175,6 +228,24 @@ export function AgentPanel({
       return;
     }
     if (offrampStep === "success" || offrampStep === "error") {
+      if (offrampStep === "success") {
+        const confirmedOrder = [...messages]
+          .reverse()
+          .find((m) => m.order && m.orderStatus === "confirmed")?.order;
+        if (confirmedOrder) {
+          setLastCompletedOrder({
+            direction: "offramp",
+            amount: confirmedOrder.amount,
+            token: confirmedOrder.token,
+            sourceChain: confirmedOrder.sourceChain,
+            beneficiary: {
+              institution: confirmedOrder.beneficiary.institution,
+              accountIdentifier: confirmedOrder.beneficiary.accountIdentifier,
+              currency: confirmedOrder.beneficiary.currency,
+            },
+          });
+        }
+      }
       setMessages((prev) => {
         const idx = [...prev]
           .reverse()
@@ -201,17 +272,58 @@ export function AgentPanel({
     ]);
   }, [active, offrampStep, offrampError, sourceChainLabel]);
 
+  // A card that's merely been shown, or superseded by an edit, is NOT a
+  // boundary — a follow-up correction ("actually make it 300") still needs
+  // the draft's prior fields in view to merge against. Only an order that's
+  // actually been acted on (confirmed/executing, cancelled, or resolved to
+  // success/failure) closes the segment.
+  const isSegmentBoundary = (m: ChatMessage): boolean =>
+    (!!m.order && !!m.orderStatus && m.orderStatus !== "superseded") ||
+    (!!m.onrampOrder && !!m.onrampOrderStatus && m.onrampOrderStatus !== "superseded");
+
   const conversationForOrder = (): { role: string; content: string }[] => {
-    // Everything back to (and including) the last user/agent exchange that
-    // hasn't yet produced a resolved order — a resolved-order card or a
-    // completed run starts a fresh segment.
-    const lastOrderIndex = [...messages].reverse().findIndex((m) => m.order);
+    // Everything back to (and including) the last user/agent exchange since
+    // the last segment boundary — see isSegmentBoundary above.
+    const lastBoundaryIndex = [...messages].reverse().findIndex(isSegmentBoundary);
     const startIndex =
-      lastOrderIndex === -1 ? 0 : messages.length - lastOrderIndex;
+      lastBoundaryIndex === -1 ? 0 : messages.length - lastBoundaryIndex;
     return messages
       .slice(startIndex)
       .filter((m) => m.text)
       .map((m) => ({ role: m.role, content: m.text! }));
+  };
+
+  // Tells the parse route what's currently live, so it can recognize a
+  // status comment ("I've sent the money") on THAT order instead of trying
+  // to build a new one from the still-visible full field set.
+  const pendingOrderPayload = (): PendingOrderSummary | null => {
+    if (isExecuting) {
+      const confirmed = [...messages]
+        .reverse()
+        .find((m) => m.order && m.orderStatus === "confirmed")?.order;
+      if (confirmed) {
+        return {
+          direction: "offramp",
+          amount: confirmed.amount,
+          token: confirmed.token,
+          sourceChain: confirmed.sourceChain,
+          beneficiary: {
+            institution: confirmed.beneficiary.institution,
+            accountIdentifier: confirmed.beneficiary.accountIdentifier,
+            currency: confirmed.beneficiary.currency,
+          },
+        };
+      }
+    }
+    if (onrampPending) {
+      return {
+        direction: "onramp",
+        fiatAmount: onrampPending.fiatAmount,
+        currency: onrampPending.currency,
+        refundAccount: { institution: onrampPending.refundAccount.institution },
+      };
+    }
+    return null;
   };
 
   const send = async () => {
@@ -229,7 +341,12 @@ export function AgentPanel({
       const res = await fetch("/api/offramp/agent/parse", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: history, connectedStellarAddress }),
+        body: JSON.stringify({
+          messages: history,
+          connectedStellarAddress,
+          pendingOrder: pendingOrderPayload(),
+          lastCompletedOrder,
+        }),
       });
       const data: ParseResponse = await res.json();
       if (data.kind === "clarify") {
@@ -246,14 +363,28 @@ export function AgentPanel({
             text: `I still need: ${data.missing.join(", ")}.`,
           },
         ]);
-      } else if (data.kind === "resolved") {
+      } else if (data.kind === "status") {
         setMessages((prev) => [
           ...prev,
+          { id: nextId(), role: "agent", text: data.message },
+        ]);
+        // Don't make them wait up to 12s for the backstop poll to notice —
+        // "I've sent the money" is exactly the moment to check right away.
+        onrampCheckNowRef.current?.();
+      } else if (data.kind === "resolved") {
+        setMessages((prev) => [
+          ...prev.map((m) =>
+            m.order && !m.orderStatus ? { ...m, orderStatus: "superseded" as const } : m,
+          ),
           { id: nextId(), role: "agent", order: data.order },
         ]);
       } else if (data.kind === "resolved-onramp") {
         setMessages((prev) => [
-          ...prev,
+          ...prev.map((m) =>
+            m.onrampOrder && !m.onrampOrderStatus
+              ? { ...m, onrampOrderStatus: "superseded" as const }
+              : m,
+          ),
           { id: nextId(), role: "agent", onrampOrder: data.order },
         ]);
       } else {
@@ -383,6 +514,10 @@ export function AgentPanel({
       // a second onramp order in the same chat doesn't leak the first
       // poller/listener.
       teardownOnrampStream();
+      // Marks this order "pending" from the caller's perspective — while
+      // set, a plain status comment ("I've sent the money") gets a status
+      // reply instead of a new confirmation card. See pendingOrderPayload().
+      setOnrampPending(order);
 
       const lastStatus = { current: "" };
       const applyOnrampStatus = (status: string, stellarTxHash?: string): boolean => {
@@ -395,7 +530,26 @@ export function AgentPanel({
             { id: nextId(), role: "agent", text: event.text, stepKind: event.kind },
           ]);
         }
-        return status === "delivered" || status === "refunded" || status === "expired";
+        const terminal = status === "delivered" || status === "refunded" || status === "expired";
+        if (terminal) {
+          setOnrampPending(null);
+          // Only an actual delivery is worth repeating — a refund/expiry
+          // means nothing landed, so "do that again" shouldn't offer to
+          // redo the same order that just failed to complete.
+          if (status === "delivered") {
+            setLastCompletedOrder({
+              direction: "onramp",
+              fiatAmount: order.fiatAmount,
+              currency: order.currency,
+              destinationAddress: order.destinationAddress,
+              refundAccount: {
+                institution: order.refundAccount.institution,
+                accountIdentifier: order.refundAccount.accountIdentifier,
+              },
+            });
+          }
+        }
+        return terminal;
       };
 
       // Authoritative read, shared by the backstop poller and the
@@ -460,6 +614,7 @@ export function AgentPanel({
           }
         });
       };
+      onrampCheckNowRef.current = check;
 
       state.onVisible = () => {
         if (document.visibilityState === "visible") check();
@@ -471,6 +626,7 @@ export function AgentPanel({
     } catch (e: any) {
       // Nothing was created — clear the status (not "failed") so
       // Confirm/Cancel reappear and the user can just retry.
+      setOnrampPending(null);
       setMessages((prev) => [
         ...prev.map((m) =>
           m.onrampOrder === order ? { ...m, onrampOrderStatus: undefined } : m,
@@ -591,6 +747,11 @@ export function AgentPanel({
                         ✗ Failed
                       </div>
                     )}
+                    {m.orderStatus === "superseded" && (
+                      <div className="mt-[0.7rem] py-[0.4rem] text-center text-[0.72rem] uppercase tracking-[0.08em] text-[var(--muted)]">
+                        ↻ Updated — see below
+                      </div>
+                    )}
                   </div>
                 </div>
               );
@@ -644,6 +805,11 @@ export function AgentPanel({
                     {m.onrampOrderStatus === "success" && (
                       <div className="mt-[0.7rem] py-[0.4rem] text-center text-[0.72rem] font-bold uppercase tracking-[0.08em] text-[var(--accent)]">
                         ✓ Order created
+                      </div>
+                    )}
+                    {m.onrampOrderStatus === "superseded" && (
+                      <div className="mt-[0.7rem] py-[0.4rem] text-center text-[0.72rem] uppercase tracking-[0.08em] text-[var(--muted)]">
+                        ↻ Updated — see below
                       </div>
                     )}
                   </div>

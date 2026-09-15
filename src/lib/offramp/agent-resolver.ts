@@ -77,12 +77,20 @@ export function classifyExtraction(
   return { status: "recap", missing: missing.map((key) => FIELD_LABELS[key]) };
 }
 
-/** Case-insensitive exact match first, then substring, else ambiguous/none. */
+/**
+ * Case-insensitive exact match first, then substring, else ambiguous/none.
+ * Matches against the institution's Paycrest code as well as its display
+ * name — needed so a "repeat that" order (which carries the previously
+ * resolved code forward, not the free text the user originally typed) still
+ * resolves directly instead of failing to match against `.name`.
+ */
 function matchInstitutionText(
   institutions: { code: string; name: string }[],
   needle: string,
 ): { code: string } | "none" | "ambiguous" {
-  const exact = institutions.filter((i) => i.name.toLowerCase() === needle);
+  const exact = institutions.filter(
+    (i) => i.name.toLowerCase() === needle || i.code.toLowerCase() === needle,
+  );
   if (exact.length === 1) return { code: exact[0].code };
   const contains = institutions.filter(
     (i) => i.name.toLowerCase().includes(needle) || needle.includes(i.name.toLowerCase()),

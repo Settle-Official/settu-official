@@ -15,6 +15,12 @@ import {
   type OnrampAgentExtraction,
 } from "@/lib/offramp/agent-onramp-resolver";
 import { checkAgentRateLimit } from "@/lib/offramp/agent-rate-limit";
+import {
+  mergeRepeat,
+  summarizeOrder,
+  type CompletedOrder,
+  type PendingOrder,
+} from "@/lib/offramp/agent-order-context";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -30,6 +36,19 @@ const google = createGoogleGenerativeAI({
 });
 
 const extractionSchema = z.object({
+  intent: z.enum(["new_or_edit", "status_check", "repeat"]).describe(
+    "Classify the LATEST user message. 'status_check' — a PENDING order is " +
+      "given in context below and this message is just commenting on, " +
+      "confirming payment for, or asking about it, without describing " +
+      "something new or different (e.g. \"I've sent the money\", \"any " +
+      "update?\", \"done\", \"ok thanks\"). 'repeat' — a COMPLETED order is " +
+      "given in context and the user wants to redo it, exactly or with " +
+      "changes (e.g. \"do that again\", \"same thing but 200 this time\", " +
+      "\"repeat but to my UBA account\") — only fill in the fields the user " +
+      "explicitly wants CHANGED, leave the rest null so they carry over. " +
+      "'new_or_edit' otherwise: a fresh transaction, or a correction to a " +
+      "draft that hasn't been confirmed yet. Default to 'new_or_edit' when unsure.",
+  ),
   direction: z.enum(["onramp", "offramp"]).nullable().describe(
     "Whether the user wants to convert fiat to crypto (onramp — they're paying money to receive USDC) or crypto to fiat (offramp — they're sending USDC to receive money in their bank). Null if genuinely ambiguous.",
   ),
@@ -75,12 +94,32 @@ export async function POST(request: NextRequest) {
       typeof body?.connectedStellarAddress === "string"
         ? body.connectedStellarAddress
         : null;
+    // Both are optional and supplied by AgentPanel from its own message
+    // history — see PendingOrder/CompletedOrder above for why the model
+    // needs them (telling a status comment apart from a new request, and
+    // giving "do that again" something to actually repeat).
+    const pendingOrder: PendingOrder | null =
+      body?.pendingOrder?.direction === "offramp" || body?.pendingOrder?.direction === "onramp"
+        ? body.pendingOrder
+        : null;
+    const lastCompletedOrder: CompletedOrder | null =
+      body?.lastCompletedOrder?.direction === "offramp" || body?.lastCompletedOrder?.direction === "onramp"
+        ? body.lastCompletedOrder
+        : null;
 
     const chains = sourceChainOptions().map((c) => c.code);
     const currencies = await fetchCurrencies();
     const currencyCodes = currencies.map((c) => c.code).join(", ");
 
-    const { object: extraction } = await generateObject({
+    let contextNote = "";
+    if (pendingOrder) {
+      contextNote += ` There is currently a PENDING order awaiting completion — ${summarizeOrder(pendingOrder)}.`;
+    }
+    if (lastCompletedOrder) {
+      contextNote += ` The user's last COMPLETED order was — ${summarizeOrder(lastCompletedOrder)}.`;
+    }
+
+    const { object: rawExtraction } = await generateObject({
       model: google(process.env.AGENT_PARSE_MODEL || "gemini-3.5-flash-lite"),
       schema: extractionSchema,
       system:
@@ -94,12 +133,32 @@ export async function POST(request: NextRequest) {
         `for either direction: ${currencyCodes}. ` +
         `Read the WHOLE conversation, not just the latest message — earlier ` +
         `turns may have already supplied fields the latest message doesn't ` +
-        `repeat. Never invent a value that wasn't stated or clearly implied.`,
+        `repeat. Never invent a value that wasn't stated or clearly implied.` +
+        contextNote,
       messages: messages.map((m: { role: string; content: string }) => ({
         role: m.role === "agent" ? "assistant" : "user",
         content: m.content,
       })),
     });
+
+    if (rawExtraction.intent === "status_check" && pendingOrder) {
+      const message =
+        pendingOrder.direction === "onramp"
+          ? "Thanks — I'm still watching for that transfer to land. I'll let you know the moment it's confirmed."
+          : "Got it — your offramp is still being processed, I'll update you as soon as it's done.";
+      return NextResponse.json({ kind: "status", message });
+    }
+
+    // "Repeat" only ever restates what the user wants CHANGED (per the
+    // schema's instruction to leave everything else null) — fill the rest
+    // back in from the last completed order before running the exact same
+    // classify/resolve pipeline any other extraction goes through, so a
+    // repeat still gets a fresh bank verification and a fresh live quote
+    // rather than reusing stale ones.
+    const extraction =
+      rawExtraction.intent === "repeat" && lastCompletedOrder
+        ? mergeRepeat(rawExtraction, lastCompletedOrder)
+        : rawExtraction;
 
     // The model may leave "direction" null on a short/ambiguous first
     // message — fall back to which set of fields it actually populated.

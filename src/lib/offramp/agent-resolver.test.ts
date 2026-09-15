@@ -222,6 +222,24 @@ test("resolveAgentOrder: an alias that isn't in the given institution list still
   });
 });
 
+test("resolveAgentOrder: an institution CODE (as carried forward by a 'repeat') resolves directly, not just a display name", async () => {
+  await withFetch(async (url) => {
+    const u = String(url);
+    if (u.includes("/currencies")) return jsonResponse({ data: [{ code: "NGN", name: "Nigerian Naira", symbol: "₦" }] });
+    if (u.includes("/institutions/")) {
+      return jsonResponse({ data: [{ code: "OPAYNGPC", name: "OPay" }, { code: "GTBNGPC", name: "GTBank" }] });
+    }
+    if (u.includes("/verify-account")) return jsonResponse({ data: { accountName: "JOHN DOE" } });
+    throw new Error(`unexpected fetch: ${u}`);
+  }, async () => {
+    const result = await resolveAgentOrder({ ...COMPLETE, institutionName: "OPAYNGPC" });
+    assert.equal(result.status, "resolved");
+    if (result.status === "resolved") {
+      assert.equal(result.order.beneficiary.institution, "OPAYNGPC");
+    }
+  });
+});
+
 test("resolveAgentOrder: unsupported currency asks for a different one", async () => {
   await withFetch(async (url) => {
     const u = String(url);
