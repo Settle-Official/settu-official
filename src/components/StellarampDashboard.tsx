@@ -31,6 +31,8 @@ import {
   TransactionProgressModal,
   type OfframpStep,
 } from "@/components/TransactionProgressModal";
+import { createOnrampOrder } from "@/lib/onramp/client";
+import type { ResolvedOnrampOrder } from "@/lib/offramp/agent-onramp-resolver";
 import * as StellarSdk from "@stellar/stellar-sdk";
 
 const MODE_OPTIONS: SelectOption[] = [
@@ -1166,6 +1168,23 @@ export function StellarampDashboard() {
     [handleExecuteTrade],
   );
 
+  // ResolvedOnrampOrder (Agent Mode's shape) and CreateOnrampOrderInput
+  // (the order-creation route's shape) differ slightly — destinationAddress
+  // vs userStellarAddress, and refundAccount carries an extra currency
+  // field Agent Mode's resolver includes for symmetry with offramp's
+  // beneficiary shape. This just maps one to the other.
+  const handleAgentInitiateOnramp = (order: ResolvedOnrampOrder) =>
+    createOnrampOrder({
+      fiatAmount: order.fiatAmount,
+      currency: order.currency,
+      userStellarAddress: order.destinationAddress,
+      refundAccount: {
+        institution: order.refundAccount.institution,
+        accountIdentifier: order.refundAccount.accountIdentifier,
+        accountName: order.refundAccount.accountName,
+      },
+    });
+
   // Same invalidation the progress modal's own Cancel does (search for
   // `offrampFlowRef.current++` in this file to find it) — AgentPanel needs
   // an equivalent so its own "waiting on your wallet" message can offer a
@@ -2070,6 +2089,7 @@ export function StellarampDashboard() {
                       active={offrampInitiator === "agent"}
                       onCancelFlow={handleCancelOfframpFlow}
                       onInitiateOfframp={handleAgentInitiateOfframp}
+                      onInitiateOnramp={handleAgentInitiateOnramp}
                     />
                   </div>
                   <div hidden={mode !== "offramp"}>
