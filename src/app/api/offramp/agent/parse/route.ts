@@ -9,6 +9,11 @@ import {
   resolveAgentOrder,
   type AgentOrderExtraction,
 } from "@/lib/offramp/agent-resolver";
+import {
+  classifyOnrampExtraction,
+  resolveOnrampOrder,
+  type OnrampAgentExtraction,
+} from "@/lib/offramp/agent-onramp-resolver";
 import { checkAgentRateLimit } from "@/lib/offramp/agent-rate-limit";
 
 export const runtime = "nodejs";
@@ -25,12 +30,22 @@ const google = createGoogleGenerativeAI({
 });
 
 const extractionSchema = z.object({
-  amount: z.string().nullable().describe("The numeric USDC amount, as a plain string, e.g. \"1000\". Null if not stated."),
-  token: z.string().nullable().describe("The token symbol, e.g. \"USDC\". Null if not stated — default to USDC if the user clearly means a stablecoin offramp but didn't name one."),
-  sourceChain: z.string().nullable().describe("The lowercase chain key the user is sending from, matching one of the allowed values. Null if not stated or unclear."),
-  destinationCurrency: z.string().nullable().describe("The 3-letter fiat currency code the recipient should be paid in, inferred from context (e.g. a Nigerian bank implies NGN) if not stated explicitly. Null only if truly unclear."),
-  institutionName: z.string().nullable().describe("The recipient's bank or mobile-money provider, as free text exactly as the user wrote it (do not correct spelling). Null if not stated."),
-  accountIdentifier: z.string().nullable().describe("The recipient's account number or phone number, digits only. Null if not stated."),
+  direction: z.enum(["onramp", "offramp"]).nullable().describe(
+    "Whether the user wants to convert fiat to crypto (onramp — they're paying money to receive USDC) or crypto to fiat (offramp — they're sending USDC to receive money in their bank). Null if genuinely ambiguous.",
+  ),
+  // Offramp fields.
+  amount: z.string().nullable().describe("The numeric USDC amount, as a plain string, e.g. \"1000\". Null if not stated. Offramp only."),
+  token: z.string().nullable().describe("The token symbol, e.g. \"USDC\". Null if not stated — default to USDC if the user clearly means a stablecoin offramp but didn't name one. Offramp only."),
+  sourceChain: z.string().nullable().describe("The lowercase chain key the user is sending from, matching one of the allowed values. Null if not stated or unclear. Offramp only."),
+  destinationCurrency: z.string().nullable().describe("The 3-letter fiat currency code the recipient should be paid in, inferred from context (e.g. a Nigerian bank implies NGN) if not stated explicitly. Null only if truly unclear. Offramp only."),
+  institutionName: z.string().nullable().describe("The recipient's bank or mobile-money provider, as free text exactly as the user wrote it (do not correct spelling). Null if not stated. Offramp only."),
+  accountIdentifier: z.string().nullable().describe("The recipient's account number or phone number, digits only. Null if not stated. Offramp only."),
+  // Onramp fields.
+  fiatAmount: z.string().nullable().describe("The fiat amount the user wants to pay in, as a plain string. Null if not stated. Onramp only."),
+  fiatCurrency: z.string().nullable().describe("The 3-letter fiat currency code the user is paying in. Null if not stated or unclear. Onramp only."),
+  destinationStellarAddress: z.string().nullable().describe("The Stellar G... address that should receive the USDC. Null if not stated. Onramp only."),
+  refundInstitutionName: z.string().nullable().describe("The bank the user wants refunded if the fiat payment can't be matched, as free text exactly as written. Null if not stated. Onramp only."),
+  refundAccountIdentifier: z.string().nullable().describe("The refund bank account number, digits only. Null if not stated. Onramp only."),
 });
 
 export async function POST(request: NextRequest) {
@@ -61,10 +76,14 @@ export async function POST(request: NextRequest) {
       model: google(process.env.AGENT_PARSE_MODEL || "gemini-3.5-flash-lite"),
       schema: extractionSchema,
       system:
-        `You extract offramp order details from a conversation between a user ` +
-        `and Settu's offramp agent. The user wants to send crypto and have it ` +
-        `paid out as fiat. Only use these source chains: ${chains.join(", ")}. ` +
-        `Only use these destination currencies: ${currencyCodes}. ` +
+        `You extract order details from a conversation between a user and ` +
+        `Settu's crypto agent. The user wants EITHER to onramp (pay fiat, ` +
+        `receive USDC on Stellar) OR offramp (send crypto, receive a fiat ` +
+        `payout) — figure out which from context and set "direction" ` +
+        `accordingly; only fill in the fields for that direction, leave ` +
+        `every field for the other direction null. Only use these source ` +
+        `chains for offramp: ${chains.join(", ")}. Only use these currencies ` +
+        `for either direction: ${currencyCodes}. ` +
         `Read the WHOLE conversation, not just the latest message — earlier ` +
         `turns may have already supplied fields the latest message doesn't ` +
         `repeat. Never invent a value that wasn't stated or clearly implied.`,
@@ -73,6 +92,55 @@ export async function POST(request: NextRequest) {
         content: m.content,
       })),
     });
+
+    // The model may leave "direction" null on a short/ambiguous first
+    // message — fall back to which set of fields it actually populated.
+    // Defaults to offramp when both/neither are populated, preserving the
+    // existing behavior for a vague opening message.
+    const looksOnramp = !!(
+      extraction.fiatAmount ||
+      extraction.fiatCurrency ||
+      extraction.destinationStellarAddress ||
+      extraction.refundInstitutionName ||
+      extraction.refundAccountIdentifier
+    );
+    const looksOfframp = !!(
+      extraction.amount ||
+      extraction.token ||
+      extraction.sourceChain ||
+      extraction.institutionName ||
+      extraction.accountIdentifier
+    );
+    const direction = extraction.direction ?? (looksOnramp && !looksOfframp ? "onramp" : "offramp");
+
+    if (direction === "onramp") {
+      const typedOnrampExtraction: OnrampAgentExtraction = {
+        fiatAmount: extraction.fiatAmount,
+        fiatCurrency: extraction.fiatCurrency,
+        destinationStellarAddress: extraction.destinationStellarAddress,
+        refundInstitutionName: extraction.refundInstitutionName,
+        refundAccountIdentifier: extraction.refundAccountIdentifier,
+      };
+      const classifiedOnramp = classifyOnrampExtraction(typedOnrampExtraction);
+      if (classifiedOnramp.status === "clarify") {
+        return NextResponse.json({ kind: "clarify", message: classifiedOnramp.message });
+      }
+      if (classifiedOnramp.status === "recap") {
+        return NextResponse.json({ kind: "recap", missing: classifiedOnramp.missing });
+      }
+
+      const resolvedOnramp = await resolveOnrampOrder(typedOnrampExtraction);
+      if (resolvedOnramp.status === "clarify") {
+        return NextResponse.json({ kind: "clarify", message: resolvedOnramp.message });
+      }
+      if (resolvedOnramp.status === "recap") {
+        return NextResponse.json({ kind: "recap", missing: resolvedOnramp.missing });
+      }
+
+      // No quote to pull here — Paycrest doesn't return a rate until the
+      // order actually exists, unlike offramp's pre-fetched quote below.
+      return NextResponse.json({ kind: "resolved-onramp", order: resolvedOnramp.order });
+    }
 
     const typedExtraction: AgentOrderExtraction = extraction;
     const classified = classifyExtraction(typedExtraction);
