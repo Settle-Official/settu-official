@@ -10,6 +10,9 @@ import {
 // server's own type here (instead of hand-duplicating an equivalent shape)
 // is what keeps the two from silently drifting apart.
 import type { AgentOrderWithQuote } from "@/lib/offramp/agent-resolver";
+import type { ResolvedOnrampOrder } from "@/lib/offramp/agent-onramp-resolver";
+import { onrampStatusToAgentEvent } from "@/lib/offramp/agent-onramp-step-bridge";
+import type { CreateOnrampOrderResult } from "@/lib/onramp/client";
 import type { OfframpStep } from "@/components/TransactionProgressModal";
 import { fiatSymbol } from "@/lib/format/currency";
 import { sourceChainOptions } from "@/lib/offramp/source-chain-options";
@@ -18,6 +21,7 @@ type ParseResponse =
   | { kind: "clarify"; message: string }
   | { kind: "recap"; missing: string[] }
   | { kind: "resolved"; order: AgentOrderWithQuote }
+  | { kind: "resolved-onramp"; order: ResolvedOnrampOrder }
   | { kind: "error"; message: string };
 
 interface ChatMessage {
@@ -30,6 +34,15 @@ interface ChatMessage {
   // once offrampStep resolves (or "cancelled" if declined or aborted mid-run).
   orderStatus?: "confirmed" | "success" | "failed" | "cancelled";
   stepKind?: AgentStepEvent["kind"]; // present only on step-narration messages
+  onrampOrder?: ResolvedOnrampOrder; // present only on the onramp confirmation-card message
+  // Same lifecycle shape as orderStatus, but a pre-creation failure clears
+  // back to undefined instead of "failed" — nothing was created yet, so the
+  // card should stay retryable rather than presenting a dead end.
+  onrampOrderStatus?: "confirmed" | "success" | "failed" | "cancelled";
+  virtualAccount?: {
+    orderId: string;
+    account: CreateOnrampOrderResult["providerAccount"];
+  }; // present only on the post-confirm account-details message
 }
 
 let messageSeq = 0;
@@ -58,6 +71,9 @@ export interface AgentPanelProps {
     sourceChain: AgentOrderWithQuote["sourceChain"];
     beneficiary: AgentOrderWithQuote["beneficiary"];
   }) => Promise<void> | void;
+  // No isConnected/onConnect gate needed for onramp — the destination
+  // Stellar address is always given explicitly in the conversation.
+  readonly onInitiateOnramp: (order: ResolvedOnrampOrder) => Promise<CreateOnrampOrderResult>;
 }
 
 /**
@@ -78,6 +94,7 @@ export function AgentPanel({
   active,
   onCancelFlow,
   onInitiateOfframp,
+  onInitiateOnramp,
 }: Readonly<AgentPanelProps>) {
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
@@ -201,6 +218,11 @@ export function AgentPanel({
           ...prev,
           { id: nextId(), role: "agent", order: data.order },
         ]);
+      } else if (data.kind === "resolved-onramp") {
+        setMessages((prev) => [
+          ...prev,
+          { id: nextId(), role: "agent", onrampOrder: data.order },
+        ]);
       } else {
         setMessages((prev) => [
           ...prev,
@@ -304,6 +326,84 @@ export function AgentPanel({
     onCancelFlow();
   };
 
+  const confirmOnrampOrder = async (order: ResolvedOnrampOrder) => {
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.onrampOrder === order ? { ...m, onrampOrderStatus: "confirmed" } : m,
+      ),
+    );
+    try {
+      const result = await onInitiateOnramp(order);
+      setMessages((prev) => [
+        ...prev.map((m) =>
+          m.onrampOrder === order ? { ...m, onrampOrderStatus: "success" as const } : m,
+        ),
+        {
+          id: nextId(),
+          role: "agent",
+          virtualAccount: { orderId: result.id, account: result.providerAccount },
+        },
+      ]);
+
+      const source = new EventSource(`/api/onramp/stream/${result.id}`);
+      const lastOnrampStatus = { current: "" };
+      source.onmessage = (evt) => {
+        let payload: { status?: string; stellarTxHash?: string };
+        try {
+          payload = JSON.parse(evt.data);
+        } catch {
+          return;
+        }
+        if (!payload.status || payload.status === lastOnrampStatus.current) return;
+        lastOnrampStatus.current = payload.status;
+        const event = onrampStatusToAgentEvent(payload.status, {
+          stellarTxHash: payload.stellarTxHash,
+        });
+        if (!event) return;
+        setMessages((prev) => [
+          ...prev,
+          { id: nextId(), role: "agent", text: event.text, stepKind: event.kind },
+        ]);
+        if (payload.status === "delivered" || payload.status === "refunded" || payload.status === "expired") {
+          source.close();
+        }
+      };
+      source.onerror = () => {
+        // The stream itself auto-reconnects on the server side across
+        // reconnects; a client-side error here just means this particular
+        // connection dropped. Nothing to narrate — the next successful
+        // message picks up wherever the order actually is.
+      };
+    } catch (e: any) {
+      // Nothing was created — clear the status (not "failed") so
+      // Confirm/Cancel reappear and the user can just retry.
+      setMessages((prev) => [
+        ...prev.map((m) =>
+          m.onrampOrder === order ? { ...m, onrampOrderStatus: undefined } : m,
+        ),
+        {
+          id: nextId(),
+          role: "agent",
+          text: e?.message || "Something went wrong creating that order — please try again.",
+          stepKind: "error",
+        },
+      ]);
+    }
+  };
+
+  const cancelOnrampOrder = (order: ResolvedOnrampOrder) => {
+    setMessages((prev) => [
+      ...prev.map((m) =>
+        m.onrampOrder === order ? { ...m, onrampOrderStatus: "cancelled" as const } : m,
+      ),
+      {
+        id: nextId(),
+        role: "agent",
+        text: "Cancelled — send a new message whenever you're ready.",
+      },
+    ]);
+  };
+
   return (
     <div className="racing-border-wrapper">
       <section className="racing-border-content flex flex-col gap-[1.1rem] p-[1.2rem]">
@@ -397,6 +497,91 @@ export function AgentPanel({
                         ✗ Failed
                       </div>
                     )}
+                  </div>
+                </div>
+              );
+            }
+            if (m.onrampOrder) {
+              const o = m.onrampOrder;
+              return (
+                <div key={m.id} className="flex justify-start">
+                  <div className="max-w-[92%] border border-[var(--line)] bg-[#101010] p-[0.8rem]">
+                    <div className="mb-[0.55rem] text-[0.62rem] uppercase tracking-[0.1em] text-[var(--muted)]">
+                      Onramp Summary
+                    </div>
+                    {[
+                      ["Amount", `${o.fiatAmount} ${o.currency}`],
+                      ["Destination", `${o.destinationAddress.slice(0, 6)}…${o.destinationAddress.slice(-6)}`],
+                      ["Refund bank", o.refundAccount.institution],
+                      ["Refund account", o.refundAccount.accountIdentifier],
+                    ].map(([label, value]) => (
+                      <div
+                        key={label}
+                        className="flex justify-between gap-[0.6rem] border-b border-dashed border-[#222] py-[0.22rem] text-[0.78rem]"
+                      >
+                        <span className="text-[var(--muted)]">{label}</span>
+                        <span className="text-right">{value}</span>
+                      </div>
+                    ))}
+                    <div className="flex justify-between gap-[0.6rem] py-[0.22rem] text-[0.78rem]">
+                      <span className="shrink-0 text-[var(--muted)]">Refund account name</span>
+                      <span className="text-right text-[var(--accent)]">
+                        {o.refundAccount.accountName} ✓ verified
+                      </span>
+                    </div>
+                    {!m.onrampOrderStatus && (
+                      <div className="mt-[0.7rem] flex gap-[0.5rem]">
+                        <button
+                          type="button"
+                          onClick={() => confirmOnrampOrder(o)}
+                          className="flex-1 bg-[var(--accent)] py-[0.55rem] text-[0.72rem] font-bold uppercase tracking-[0.08em] text-[#0a0a0a] disabled:opacity-50"
+                        >
+                          Confirm
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => cancelOnrampOrder(o)}
+                          className="flex-1 border border-[var(--line)] py-[0.55rem] text-[0.72rem] font-bold uppercase tracking-[0.08em] text-[var(--muted)] disabled:opacity-50"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    )}
+                    {m.onrampOrderStatus === "success" && (
+                      <div className="mt-[0.7rem] py-[0.4rem] text-center text-[0.72rem] font-bold uppercase tracking-[0.08em] text-[var(--accent)]">
+                        ✓ Order created
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            }
+            if (m.virtualAccount) {
+              const { account } = m.virtualAccount;
+              return (
+                <div key={m.id} className="flex justify-start">
+                  <div className="max-w-[92%] border border-[var(--line)] bg-[#101010] p-[0.8rem]">
+                    <div className="mb-[0.55rem] text-[0.62rem] uppercase tracking-[0.1em] text-[var(--muted)]">
+                      Pay Into This Account
+                    </div>
+                    {[
+                      ["Bank", account.institution],
+                      ["Account number", account.accountIdentifier],
+                      ["Account name", account.accountName],
+                      ["Amount", `${account.amountToTransfer} ${account.currency}`],
+                    ].map(([label, value]) => (
+                      <div
+                        key={label}
+                        className="flex justify-between gap-[0.6rem] border-b border-dashed border-[#222] py-[0.22rem] text-[0.78rem]"
+                      >
+                        <span className="text-[var(--muted)]">{label}</span>
+                        <span className="text-right font-bold text-[var(--accent)]">{value}</span>
+                      </div>
+                    ))}
+                    <div className="flex justify-between gap-[0.6rem] py-[0.22rem] text-[0.78rem]">
+                      <span className="text-[var(--muted)]">Valid until</span>
+                      <span className="text-right">{account.validUntil}</span>
+                    </div>
                   </div>
                 </div>
               );
