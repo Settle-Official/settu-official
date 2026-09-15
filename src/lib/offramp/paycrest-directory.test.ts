@@ -51,29 +51,54 @@ test("verifyAccount returns the verified name", async () => {
   await withFetch(
     async () => jsonResponse({ data: { accountName: "JOHN DOE" } }),
     async () => {
-      assert.equal(await verifyAccount("OPAYNGPC", "0987654321"), "JOHN DOE");
+      assert.deepEqual(await verifyAccount("OPAYNGPC", "0987654321"), {
+        verified: true,
+        accountName: "JOHN DOE",
+      });
     },
   );
 });
 
-test("verifyAccount treats the literal 'OK' sentinel as unverifiable", async () => {
+test("verifyAccount: the literal 'OK' sentinel (e.g. KES M-Pesa) is verified with no name", async () => {
   await withFetch(
     async () => jsonResponse({ data: { accountName: "OK" } }),
     async () => {
-      assert.equal(await verifyAccount("SOMEBANK", "0987654321"), null);
+      assert.deepEqual(await verifyAccount("SOMEBANK", "0987654321"), {
+        verified: true,
+        accountName: null,
+      });
     },
   );
 });
 
-test("verifyAccount returns null on a network/HTTP failure", async () => {
+test("verifyAccount is not verified on a network/HTTP failure", async () => {
   await withFetch(
     async () => jsonResponse({}, false),
-    async () => assert.equal(await verifyAccount("SOMEBANK", "0987654321"), null),
+    async () =>
+      assert.deepEqual(await verifyAccount("SOMEBANK", "0987654321"), {
+        verified: false,
+        accountName: null,
+      }),
   );
   await withFetch(
     async () => {
       throw new Error("network down");
     },
-    async () => assert.equal(await verifyAccount("SOMEBANK", "0987654321"), null),
+    async () =>
+      assert.deepEqual(await verifyAccount("SOMEBANK", "0987654321"), {
+        verified: false,
+        accountName: null,
+      }),
+  );
+});
+
+test("verifyAccount is not verified when Paycrest returns no usable data at all", async () => {
+  await withFetch(
+    async () => jsonResponse({ data: null }),
+    async () =>
+      assert.deepEqual(await verifyAccount("SOMEBANK", "0987654321"), {
+        verified: false,
+        accountName: null,
+      }),
   );
 });
