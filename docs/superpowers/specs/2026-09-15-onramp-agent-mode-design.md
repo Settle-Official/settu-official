@@ -190,8 +190,10 @@ export function onrampStatusToAgentEvent(
 
 Maps each `OnrampRecord` status to a chat line using `STATUS_LABEL` as the
 base text, with two enrichments:
+
 - `delivered` → success kind, text includes a shortened `stellarTxHash`.
 - `bridge_failed` → error kind (but see "never closes the stream" below).
+
 `refunding`/`refunded`/`expired` → straightforward progress/error mapping,
 same copy as `STATUS_LABEL`.
 
@@ -220,6 +222,7 @@ alongside the existing `resolved` (offramp) — pushes a message with
 `onrampOrder` set, parallel to how `resolved` pushes one with `order` set.
 
 New `confirmOnrampOrder(order)`:
+
 1. Marks the card `onrampOrderStatus: "confirmed"` immediately (same
    pattern as `confirmOrder`, hides Confirm/Cancel right away).
 2. Calls `onInitiateOnramp(order)`.
