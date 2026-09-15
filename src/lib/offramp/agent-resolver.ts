@@ -98,7 +98,7 @@ function matchInstitutionText(
  * "GTBank" that share no substring with Paycrest's real institution name.
  * An ambiguous direct match is never overridden by an alias attempt.
  */
-function matchInstitution(
+export function matchInstitution(
   institutions: { code: string; name: string }[],
   freeText: string,
 ): { code: string } | "none" | "ambiguous" {
