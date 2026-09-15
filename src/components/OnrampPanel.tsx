@@ -4,6 +4,8 @@ import { useState, useEffect, useRef } from "react";
 import { cn } from "@/lib/cn";
 import { SelectField } from "@/components/SelectField";
 import { ONRAMP_STATUS_LABEL } from "@/lib/onramp/status-labels";
+import { createOnrampOrder } from "@/lib/onramp/client";
+import type { OnrampProviderAccount } from "@/lib/offramp/types";
 
 const PAYCREST_API_BASE = "https://api.paycrest.io/v1";
 
@@ -16,15 +18,6 @@ interface Currency {
   code: string;
   name: string;
   symbol: string;
-}
-
-interface ProviderAccount {
-  institution: string;
-  accountIdentifier: string;
-  accountName: string;
-  amountToTransfer: string;
-  currency: string;
-  validUntil: string;
 }
 
 type OnrampPhase =
@@ -77,7 +70,7 @@ export function OnrampPanel({
   const [error, setError] = useState<string | null>(null);
   const [orderId, setOrderId] = useState<string | null>(null);
   const [providerAccount, setProviderAccount] =
-    useState<ProviderAccount | null>(null);
+    useState<OnrampProviderAccount | null>(null);
   const [status, setStatus] = useState<string>("pending");
   const esRef = useRef<EventSource | null>(null);
 
@@ -209,27 +202,19 @@ export function OnrampPanel({
     setIsSubmitting(true);
     setError(null);
     try {
-      const res = await fetch("/api/onramp/order", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fiatAmount: amount,
-          currency,
-          userStellarAddress: destinationAddress,
-          refundAccount: {
-            institution: bank,
-            accountIdentifier: accountNumber,
-            accountName,
-          },
-        }),
+      const result = await createOnrampOrder({
+        fiatAmount: amount,
+        currency,
+        userStellarAddress: destinationAddress,
+        refundAccount: {
+          institution: bank,
+          accountIdentifier: accountNumber,
+          accountName,
+        },
       });
-      const payload = await res.json();
-      if (!res.ok) {
-        throw new Error(payload?.error || "Failed to create onramp order");
-      }
-      setOrderId(payload.data.id);
-      setProviderAccount(payload.data.providerAccount);
-      setStatus(payload.data.status || "pending");
+      setOrderId(result.id);
+      setProviderAccount(result.providerAccount);
+      setStatus(result.status || "pending");
       setPhase("awaiting-deposit");
     } catch (e: any) {
       setError(e?.message || "Something went wrong");
@@ -404,7 +389,7 @@ function VirtualAccountView({
   status,
   onCancel,
 }: {
-  account: ProviderAccount;
+  account: OnrampProviderAccount;
   status: string;
   onCancel: () => void;
 }) {
