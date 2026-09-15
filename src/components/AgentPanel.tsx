@@ -100,7 +100,7 @@ export function AgentPanel({
     {
       id: nextId(),
       role: "agent",
-      text: 'Tell me what you\'d like to offramp, e.g. "Offramp 500 USDC on Base to my GTBank account 0123456789, Jane Doe".',
+      text: 'Tell me what you\'d like to do — offramp crypto to your bank, e.g. "Offramp 500 USDC on Base to my GTBank account 0123456789, Jane Doe", or onramp fiat to USDC, e.g. "Buy 50000 NGN of USDC to GALC4...XZOQCR, refund to my OPay account 0987654321, Jane Doe".',
     },
   ]);
   const [input, setInput] = useState("");
@@ -650,7 +650,7 @@ export function AgentPanel({
               }
             }}
             disabled={isSending}
-            placeholder="e.g. Offramp 500 USDC on Solana to my GTBank account…"
+            placeholder="e.g. Offramp 500 USDC on Solana… or Buy 50000 NGN of USDC…"
             className="h-[42px] flex-1 border border-[var(--line)] bg-[#0a0a0a] px-[0.7rem] text-[0.8rem] text-[var(--foreground)] outline-none placeholder:text-[#555]"
           />
           <button
