@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
+import { isMobileBrowser } from "@/lib/platform";
 
 // The Stellar wallet path bounds its own sign step at 150s (signWithTimeout
 // in StellarampDashboard.tsx) after a confirmed real-world incident: a
@@ -34,6 +35,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
     );
   });
 }
+
 import {
   proposeEvmSession,
   disconnectEvmSession,
@@ -72,6 +74,9 @@ export function useEvmWallet() {
   // that resolves late (sign-client has no abort) is then ignored.
   const attemptRef = useRef(0);
   const refreshInjectedRef = useRef<() => void>(() => {});
+  // openConnect is declared before connectWalletConnect, so it reaches it
+  // through a ref rather than being reordered.
+  const connectWalletConnectRef = useRef<(() => Promise<void>) | null>(null);
 
   // Discover installed browser wallets (EIP-6963) for the lifetime of the
   // component — they can announce at any time, so we stay subscribed rather
@@ -106,8 +111,17 @@ export function useEvmWallet() {
   }, [transport, address, clearConnection]);
 
   // --- opening / closing the connect picker -------------------------------
-  const openConnect = useCallback(() => {
+  // Mobile has no browser extensions, so the in-app picker would only ever
+  // offer WalletConnect — an extra tap in front of the sheet that does the
+  // work. Skip straight to it, matching how the Stellar side behaves.
+  const openConnect = useCallback(async () => {
     setError(null);
+    // Returns the connect promise on mobile so the caller can surface a
+    // failure — the modal that would normally show `error` never opens there.
+    if (isMobileBrowser()) {
+      await connectWalletConnectRef.current?.();
+      return;
+    }
     setIsConnectModalOpen(true);
     // Re-probe in case a wallet loaded after mount.
     refreshInjectedRef.current();
@@ -190,7 +204,10 @@ export function useEvmWallet() {
       setIsConnectModalOpen(false);
     } catch (err: any) {
       if (attemptRef.current === attempt) {
-        setError(err?.message || "Failed to connect wallet");
+        const message = err?.message || "Failed to connect wallet";
+        // Dismissing the sheet is a normal action, not an error to show.
+        if (/reject|denied|cancel|closed|dismiss|4001/i.test(message)) return;
+        setError(message);
         throw err;
       }
     } finally {
@@ -200,6 +217,8 @@ export function useEvmWallet() {
       }
     }
   }, []);
+
+  connectWalletConnectRef.current = connectWalletConnect;
 
   const disconnect = useCallback(async () => {
     attemptRef.current++;
@@ -232,7 +251,12 @@ export function useEvmWallet() {
         return;
       }
       if (transport === "walletconnect" && topicRef.current) {
-        await requestChainSwitch(topicRef.current, chainId);
+        // Bounded for the same reason signing is: a dropped relay response
+        // otherwise hangs here forever with no way out.
+        await withTimeout(
+          requestChainSwitch(topicRef.current, chainId),
+          SIGN_TIMEOUT_MS,
+        );
         return;
       }
       throw new Error("No wallet connected");

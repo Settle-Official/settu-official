@@ -15,14 +15,15 @@
     "@allbridge/bridge-core-sdk": "^3.20.0",
     "@coral-xyz/anchor": "^0.32.1",
     "@creit.tech/stellar-wallets-kit": "^2.6.0",
-    "@reown/appkit": "^1.8.21",
+    "@reown/appkit": "^1.8.23",
+    "@reown/appkit-adapter-solana": "^1.8.23",
     "@stellar/freighter-api": "^6.0.1",
     "@stellar/stellar-sdk": "^14.6.1",
     "@upstash/redis": "^1.37.0",
     "@wallet-standard/app": "^1.1.1",
     "@wallet-standard/base": "^1.1.1",
-    "@walletconnect/sign-client": "^2.23.9",
-    "@walletconnect/types": "^2.23.9",
+    "@walletconnect/sign-client": "2.23.0",
+    "@walletconnect/types": "2.23.0",
     "ai": "^5.0.256",
     "next": "^15.5.12",
     "react": "19.0.0",
@@ -40,5 +41,11 @@
     "eslint-config-next": "15.2.0",
     "tailwindcss": "^4.2.1",
     "typescript": "5.7.3"
+  },
+  "overrides": {
+    "@walletconnect/core": "2.23.0",
+    "@walletconnect/sign-client": "2.23.0",
+    "@walletconnect/utils": "2.23.0",
+    "@walletconnect/types": "2.23.0"
   }
 }

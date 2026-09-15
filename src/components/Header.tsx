@@ -62,9 +62,13 @@ export function Header({
           </p>
         </div>
         <div className="flex flex-col items-end">
-          <div className="mb-[0.4rem]">
-            <AccountLink />
-          </div>
+          {/* Accounts are still being built, so the way in stays dev-only.
+              Next inlines NODE_ENV, so this drops out of the prod bundle. */}
+          {process.env.NODE_ENV !== "production" && (
+            <div className="mb-[0.4rem]">
+              <AccountLink />
+            </div>
+          )}
           <button
             type="button"
             onClick={isConnected ? onDisconnect : onConnect}
