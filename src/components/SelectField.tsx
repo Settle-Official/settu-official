@@ -9,7 +9,8 @@ export interface SelectOption {
 }
 
 export interface SelectFieldProps {
-  readonly label: string;
+  /** Omit for a bare dropdown with no field label above it (e.g. a toolbar/tab switcher). */
+  readonly label?: string;
   readonly value: string;
   readonly onChange: (value: string) => void;
   readonly options: SelectOption[];
@@ -129,9 +130,11 @@ export function SelectField({
 
   return (
     <div className="flex flex-col gap-[0.4rem]" ref={containerRef}>
-      <label className="text-[0.69rem] tracking-[0.08em] text-[var(--muted)]">
-        {label}
-      </label>
+      {label ? (
+        <label className="text-[0.69rem] tracking-[0.08em] text-[var(--muted)]">
+          {label}
+        </label>
+      ) : null}
       <div
         className={cn(
           "relative h-[46px] border border-[var(--line)] transition-colors",
@@ -189,8 +192,8 @@ export function SelectField({
                       if (filtered.length > 0) pick(filtered[0].code);
                     }
                   }}
-                  placeholder={`Search ${label.toLowerCase()}…`}
-                  aria-label={`Search ${label.toLowerCase()}`}
+                  placeholder={`Search ${(label ?? "options").toLowerCase()}…`}
+                  aria-label={`Search ${(label ?? "options").toLowerCase()}`}
                   autoComplete="off"
                   autoCorrect="off"
                   autoCapitalize="none"

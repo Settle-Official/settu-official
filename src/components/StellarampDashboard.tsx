@@ -6,6 +6,8 @@ import {
   type GasFeeOptions,
   type OfframpSourceChainKey,
 } from "@/components/FormCard";
+import { AgentPanel } from "@/components/AgentPanel";
+import { SelectField, type SelectOption } from "@/components/SelectField";
 import { Header } from "@/components/Header";
 import { ProgressSteps } from "@/components/ProgressSteps";
 import { RecentTransactionsTable } from "@/components/RecentTransactionsTable";
@@ -28,8 +30,16 @@ import {
   TransactionProgressModal,
   type OfframpStep,
 } from "@/components/TransactionProgressModal";
+import { createOnrampOrder } from "@/lib/onramp/client";
+import type { ResolvedOnrampOrder } from "@/lib/offramp/agent-onramp-resolver";
 import * as StellarSdk from "@stellar/stellar-sdk";
 import { closeSheet } from "@/lib/wallet/appkit";
+
+const MODE_OPTIONS: SelectOption[] = [
+  { code: "onramp", name: "On-ramp" },
+  { code: "offramp", name: "Off-ramp" },
+  { code: "agent", name: "Agent" },
+];
 
 /** Run a promise with a timeout. Rejects with a clear message on expiry. */
 function withTimeout<T>(
@@ -401,11 +411,23 @@ export function StellarampDashboard() {
   const activeUserAddress =
     sourceChain === "stellar" ? wallet?.publicKey : externalWallet.address;
 
-  const [mode, setMode] = useState<"offramp" | "onramp">("offramp");
+  const [mode, setMode] = useState<"offramp" | "onramp" | "agent">("offramp");
+
+  // Which surface started the currently-running (or last-run) offramp —
+  // decides whether TransactionProgressModal or AgentPanel narrates it.
+  // handleExecuteTrade/EVM/Solana are unmodified; this only wraps the call.
+  const [offrampInitiator, setOfframpInitiator] = useState<"form" | "agent">(
+    "form",
+  );
 
   // The shared top header reflects the external wallet only for an offramp
-  // from a non-Stellar source; onramp is always the Stellar path.
-  const headerUsesExternal = mode === "offramp" && isExternalSource;
+  // from a non-Stellar source; onramp is always the Stellar path. Agent Mode
+  // is an offramp surface too — it shares sourceChain/uiIsConnected with
+  // FormCard rather than owning its own — so it needs the same treatment or
+  // the header (and handleConnect/handleDisconnect below) silently fall back
+  // to the Stellar wallet while the user is actually on a Solana/EVM source.
+  const isOfframpSurface = mode === "offramp" || mode === "agent";
+  const headerUsesExternal = isOfframpSurface && isExternalSource;
 
   const activeSourceChainLabel =
     sourceChain === "stellar"
@@ -669,14 +691,15 @@ export function StellarampDashboard() {
   const handleConnect = async () => {
     // Onramp is always Stellar; an offramp with the Stellar source keeps the
     // original Stellar Wallets Kit path below entirely unchanged. A
-    // non-Stellar offramp source opens its own picker.
-    if (mode === "offramp" && isSolanaSource) {
+    // non-Stellar offramp source opens its own picker — Agent Mode is an
+    // offramp surface too (isOfframpSurface), not just the FormCard tab.
+    if (isOfframpSurface && isSolanaSource) {
       void solanaWallet.connect().catch((e: any) => {
         setToastError(e?.message || "Failed to connect wallet");
       });
       return;
     }
-    if (mode === "offramp" && isEvmSource) {
+    if (isOfframpSurface && isEvmSource) {
       void evmWallet.openConnect().catch((e: any) => {
         // Declining in the wallet is a normal action, not an error.
         const message = e?.message || "Failed to connect wallet";
@@ -715,10 +738,11 @@ export function StellarampDashboard() {
 
   const handleDisconnect = async () => {
     // Disconnect whichever wallet is actually in use — a non-Stellar path
-    // only applies to an offramp; onramp is always Stellar.
-    if (mode === "offramp" && isSolanaSource) {
+    // only applies to an offramp surface (FormCard or Agent Mode); onramp is
+    // always Stellar.
+    if (isOfframpSurface && isSolanaSource) {
       await solanaWallet.disconnect();
-    } else if (mode === "offramp" && isEvmSource) {
+    } else if (isOfframpSurface && isEvmSource) {
       await evmWallet.disconnect();
     } else {
       await disconnect();
@@ -765,6 +789,7 @@ export function StellarampDashboard() {
   const handleExecuteTrade = async (tradeData: {
     amount: string;
     rate: number;
+    destinationAmount: string;
     token: string;
     sourceChain: OfframpSourceChainKey;
     beneficiary: {
@@ -786,10 +811,6 @@ export function StellarampDashboard() {
 
     if (!wallet) {
       throw new Error("Wallet not connected");
-    }
-    if (!pricingState.quote) {
-      setToastError("Quote unavailable. Please enter an amount first.");
-      return;
     }
 
     // Pre-flight: check USDC balance against the raw figure, never the
@@ -1177,6 +1198,54 @@ export function StellarampDashboard() {
     }
   };
 
+  const handleFormInitiateOfframp = useCallback(
+    (tradeData: Parameters<typeof handleExecuteTrade>[0]) => {
+      setOfframpInitiator("form");
+      return handleExecuteTrade(tradeData);
+    },
+    [handleExecuteTrade],
+  );
+
+  const handleAgentInitiateOfframp = useCallback(
+    (tradeData: Parameters<typeof handleExecuteTrade>[0]) => {
+      setOfframpInitiator("agent");
+      return handleExecuteTrade(tradeData);
+    },
+    [handleExecuteTrade],
+  );
+
+  // ResolvedOnrampOrder (Agent Mode's shape) and CreateOnrampOrderInput
+  // (the order-creation route's shape) differ slightly — destinationAddress
+  // vs userStellarAddress, and refundAccount carries an extra currency
+  // field Agent Mode's resolver includes for symmetry with offramp's
+  // beneficiary shape. This just maps one to the other.
+  const handleAgentInitiateOnramp = (order: ResolvedOnrampOrder) =>
+    createOnrampOrder({
+      fiatAmount: order.fiatAmount,
+      currency: order.currency,
+      userStellarAddress: order.destinationAddress,
+      refundAccount: {
+        institution: order.refundAccount.institution,
+        accountIdentifier: order.refundAccount.accountIdentifier,
+        accountName: order.refundAccount.accountName,
+      },
+    });
+
+  // Same invalidation the progress modal's own Cancel does (search for
+  // `offrampFlowRef.current++` in this file to find it) — AgentPanel needs
+  // an equivalent so its own "waiting on your wallet" message can offer a
+  // way out, without needing the modal itself. Factored out here so both
+  // callers share exactly one reset sequence.
+  const handleCancelOfframpFlow = useCallback(() => {
+    offrampFlowRef.current++;
+    setShowProgressModal(false);
+    setOfframpStep("idle");
+    setOfframpError(null);
+    setTradeState({});
+    setIsExecutingOfframp(false);
+    setCurrentTxId(null);
+  }, []);
+
   /**
    * Offramp from an EVM source chain. Shares the Paycrest order + payout
    * polling machinery with the Stellar path, but the on-chain leg is
@@ -1188,6 +1257,7 @@ export function StellarampDashboard() {
   const handleExecuteEvmTrade = async (tradeData: {
     amount: string;
     rate: number;
+    destinationAmount: string;
     token: string;
     sourceChain: OfframpSourceChainKey;
     beneficiary: {
@@ -1207,10 +1277,6 @@ export function StellarampDashboard() {
     const connectedAddress = evmWallet.address;
     if (!connectedAddress) {
       setToastError("Connect your EVM wallet first.");
-      return;
-    }
-    if (!pricingState.quote) {
-      setToastError("Quote unavailable. Please enter an amount first.");
       return;
     }
 
@@ -1459,7 +1525,7 @@ export function StellarampDashboard() {
           connectedAddress,
           amountUsdc: tradeData.amount,
           destinationCurrency: tradeData.beneficiary.currency,
-          destinationAmount: String(pricingState.quote.destinationAmount),
+          destinationAmount: String(tradeData.destinationAmount),
           paycrestOrderId: payoutOrderId,
         });
       }
@@ -1523,6 +1589,7 @@ export function StellarampDashboard() {
   const handleExecuteSolanaTrade = async (tradeData: {
     amount: string;
     rate: number;
+    destinationAmount: string;
     token: string;
     sourceChain: OfframpSourceChainKey;
     beneficiary: {
@@ -1536,10 +1603,6 @@ export function StellarampDashboard() {
     const connectedAddress = solanaWallet.address;
     if (!connectedAddress) {
       setToastError("Connect your Solana wallet first.");
-      return;
-    }
-    if (!pricingState.quote) {
-      setToastError("Quote unavailable. Please enter an amount first.");
       return;
     }
     const baseReturnAddress = process.env.NEXT_PUBLIC_BASE_RETURN_ADDRESS;
@@ -1985,8 +2048,11 @@ export function StellarampDashboard() {
             onDisconnect={handleDisconnect}
           />
 
-          <div className="flex gap-2">
-            {(["onramp", "offramp"] as const).map((m) => {
+          {/* Three fixed-width buttons overflow narrow mobile viewports (the
+              Agent tab used to run off-screen); below `sm` this collapses to
+              a single native select instead of shrinking the buttons. */}
+          <div className="hidden gap-2 sm:flex">
+            {(["onramp", "offramp", "agent"] as const).map((m) => {
               const isActive = mode === m;
               return (
                 <button
@@ -2010,10 +2076,22 @@ export function StellarampDashboard() {
                   }}
                   className="min-w-[150px] px-4 py-[0.6rem] text-[0.75rem] font-semibold uppercase tracking-[0.08em] rounded-none transition-colors focus:outline-none focus:ring-2 focus:ring-[#C9A962]/70"
                 >
-                  {m === "onramp" ? "On-ramp" : "Off-ramp"}
+                  {m === "onramp"
+                    ? "On-ramp"
+                    : m === "offramp"
+                      ? "Off-ramp"
+                      : "Agent"}
                 </button>
               );
             })}
+          </div>
+          <div className="sm:hidden text-[1rem]">
+            <SelectField
+              label="SELECT SETTUMENT TYPE"
+              value={mode}
+              onChange={(next) => setMode(next as typeof mode)}
+              options={MODE_OPTIONS}
+            />
           </div>
 
           {mode === "onramp" ? (
@@ -2041,30 +2119,52 @@ export function StellarampDashboard() {
             <>
               <div className="grid grid-cols-[1fr_370px] gap-3 max-[1100px]:grid-cols-1">
                 <div className="max-[1100px]:order-1">
-                  <FormCard
-                    isConnected={uiIsConnected}
-                    isConnecting={uiIsConnecting}
-                    isExecutingOfframp={isExecutingOfframp}
-                    resetKey={formResetKey}
-                    onConnect={handleConnect}
-                    sourceChain={sourceChain}
-                    onSourceChainChange={handleSourceChainChange}
-                    walletAddress={activeUserAddress ?? null}
-                    onInitiateOfframp={handleExecuteTrade}
-                    onPricingUpdate={handlePricingUpdate}
-                    usdcBalance={
-                      sourceChain === "stellar"
-                        ? stellarUsdcBalanceRaw
-                        : externalBalances
-                          ? Number(externalBalances.usdc)
-                          : null
-                    }
-                    isLoadingBalance={
-                      sourceChain === "stellar"
-                        ? isLoadingBalance
-                        : externalWallet.isConnected && !externalBalances
-                    }
-                  />
+                  {/* Both stay mounted (hidden, not unmounted) so switching
+                      between Off-ramp and Agent doesn't wipe the chat
+                      history or an in-progress form — only conditional
+                      rendering here would tear one down every time. */}
+                  <div hidden={mode !== "agent"}>
+                    <AgentPanel
+                      isConnected={uiIsConnected}
+                      isConnecting={uiIsConnecting}
+                      onConnect={handleConnect}
+                      activeSourceChain={sourceChain}
+                      sourceChainLabel={activeSourceChainLabel}
+                      offrampStep={offrampStep}
+                      offrampError={offrampError}
+                      active={offrampInitiator === "agent"}
+                      onCancelFlow={handleCancelOfframpFlow}
+                      onInitiateOfframp={handleAgentInitiateOfframp}
+                      onInitiateOnramp={handleAgentInitiateOnramp}
+                      connectedStellarAddress={wallet?.publicKey ?? null}
+                    />
+                  </div>
+                  <div hidden={mode !== "offramp"}>
+                    <FormCard
+                      isConnected={uiIsConnected}
+                      isConnecting={uiIsConnecting}
+                      isExecutingOfframp={isExecutingOfframp}
+                      resetKey={formResetKey}
+                      onConnect={handleConnect}
+                      sourceChain={sourceChain}
+                      onSourceChainChange={handleSourceChainChange}
+                      walletAddress={activeUserAddress ?? null}
+                      onInitiateOfframp={handleFormInitiateOfframp}
+                      onPricingUpdate={handlePricingUpdate}
+                      usdcBalance={
+                        sourceChain === "stellar"
+                          ? stellarUsdcBalanceRaw
+                          : externalBalances
+                            ? Number(externalBalances.usdc)
+                            : null
+                      }
+                      isLoadingBalance={
+                        sourceChain === "stellar"
+                          ? isLoadingBalance
+                          : externalWallet.isConnected && !externalBalances
+                      }
+                    />
+                  </div>
                 </div>
                 <div className="row-span-2 col-start-2 max-[1100px]:order-2 max-[1100px]:row-auto max-[1100px]:col-auto">
                   <RightPanel
@@ -2119,23 +2219,12 @@ export function StellarampDashboard() {
 
 
       <TransactionProgressModal
-        isOpen={showProgressModal}
+        isOpen={showProgressModal && offrampInitiator === "form"}
         currentStep={offrampStep}
         failedAtStep={lastOfframpStepRef.current}
         error={offrampError}
         sourceChainLabel={activeSourceChainLabel}
-        onCancel={() => {
-          // Invalidate the in-flight flow so its (possibly much later)
-          // signature rejection can't reopen or repaint this modal, then
-          // reset as if it had never started.
-          offrampFlowRef.current++;
-          setShowProgressModal(false);
-          setOfframpStep("idle");
-          setOfframpError(null);
-          setTradeState({});
-          setIsExecutingOfframp(false);
-          setCurrentTxId(null);
-        }}
+        onCancel={handleCancelOfframpFlow}
         onClose={() => {
           setShowProgressModal(false);
           setOfframpStep("idle");

@@ -4,31 +4,17 @@ import { useState, useEffect } from "react";
 import { cn } from "@/lib/cn";
 import { SelectField } from "@/components/SelectField";
 import { MIN_USDC_AMOUNT } from "@/lib/offramp/fiat-conversion";
-import {
-  EVM_SOURCE_CHAINS,
-  isChainEnabled,
-  type EvmChainKey,
-} from "@/lib/cctp/evm-chains";
-import { isSolanaEnabled } from "@/lib/solana/config";
 import { fiatSymbol } from "@/lib/format/currency";
+import {
+  sourceChainOptions,
+  type OfframpSourceChainKey,
+} from "@/lib/offramp/source-chain-options";
+export type { OfframpSourceChainKey };
 
-export type OfframpSourceChainKey = "stellar" | EvmChainKey | "solana";
-
-/**
- * "Stellar" plus every non-Stellar chain turned on via
- * NEXT_PUBLIC_OFFRAMP_SOURCE_CHAINS_ENABLED. Until that var lists something
- * this is just `[{ stellar }]` and the dropdown is hidden — today's
- * single-source flow, unchanged. Computed once at module load.
- */
-const SOURCE_CHAIN_OPTIONS: { code: OfframpSourceChainKey; name: string }[] = [
-  { code: "stellar", name: "Stellar" },
-  ...Object.values(EVM_SOURCE_CHAINS)
-    .filter((c) => isChainEnabled(c.key))
-    .map((c) => ({ code: c.key as OfframpSourceChainKey, name: c.label })),
-  ...(isSolanaEnabled()
-    ? [{ code: "solana" as OfframpSourceChainKey, name: "Solana" }]
-    : []),
-];
+// Recomputed on every render (cheap — a handful of filter/map calls), unlike
+// the old module-level constant, so a runtime env change during dev doesn't
+// need a full reload to show up.
+const SOURCE_CHAIN_OPTIONS = sourceChainOptions();
 
 export interface FormCardProps {
   readonly isConnected: boolean;
@@ -45,6 +31,7 @@ export interface FormCardProps {
   readonly onInitiateOfframp?: (tradeData: {
     amount: string;
     rate: number;
+    destinationAmount: string;
     token: string;
     sourceChain: OfframpSourceChainKey;
     beneficiary: {
@@ -149,6 +136,10 @@ export function FormCard({
   const [accountNumber, setAccountNumber] = useState("");
   const [bank, setBank] = useState("");
   const [accountName, setAccountName] = useState("");
+  // True the instant Paycrest confirms the account exists, regardless of
+  // whether a display name came back — NGN always returns one, but KES
+  // (M-Pesa) and some other corridors return the literal "OK" instead.
+  const [accountVerified, setAccountVerified] = useState(false);
   const [currency, setCurrency] = useState("NGN");
   const [currencies, setCurrencies] = useState<Currency[]>([]);
   const [isLoadingCurrencies, setIsLoadingCurrencies] = useState(false);
@@ -378,18 +369,23 @@ export function FormCard({
           const data = await response.json();
           const resolvedAccountName =
             data?.data?.accountName || data?.data || data?.accountName || "";
-          // Some corridors (e.g. KES M-Pesa) return "OK" instead of a name.
-          // Leave the field empty so the user can type it rather than
-          // submitting the literal "OK" as the account holder.
-          const name =
-            typeof resolvedAccountName === "string" ? resolvedAccountName : "";
-          setAccountName(name.trim().toUpperCase() === "OK" ? "" : name);
+          const raw =
+            typeof resolvedAccountName === "string" ? resolvedAccountName.trim() : "";
+          // Paycrest confirmed the account exists either way — some corridors
+          // (e.g. KES M-Pesa) just return the literal "OK" instead of a real
+          // name. NGN always returns one, so canInitiateOfframp below still
+          // requires accountName specifically for NGN; every other currency
+          // only needs accountVerified.
+          setAccountVerified(!!raw);
+          setAccountName(raw.toUpperCase() === "OK" ? "" : raw);
         } catch (error) {
+          setAccountVerified(false);
           setAccountName("");
         } finally {
           setIsVerifyingAccount(false);
         }
       } else {
+        setAccountVerified(false);
         setAccountName("");
       }
     };
@@ -519,6 +515,12 @@ export function FormCard({
     return "INITIATE OFFRAMP →";
   };
 
+  // NGN's verify-account always returns a real name, so it's still required
+  // there; every other currency (e.g. KES, which returns the literal "OK")
+  // only needs Paycrest to have confirmed the account exists.
+  const accountNameSatisfied =
+    currency === "NGN" ? !!accountName : accountVerified;
+
   const canInitiateOfframp =
     isConnected &&
     !isConnecting &&
@@ -529,7 +531,7 @@ export function FormCard({
     !gasShort &&
     /^\+?\d{6,20}$/.test(accountNumber.trim()) &&
     !!bank &&
-    !!accountName;
+    accountNameSatisfied;
 
   const handlePrimaryAction = async () => {
     if (!isConnected) {
@@ -545,12 +547,15 @@ export function FormCard({
       // route echoes the input back, so this is correct for both.
       amount: quote.sourceAmount,
       rate: quote.rate,
+      destinationAmount: quote.destinationAmount,
       token: "USDC",
       sourceChain,
       beneficiary: {
         institution: bank,
         accountIdentifier: accountNumber,
-        accountName,
+        // Never sent empty — falls back to the account number when Paycrest
+        // confirmed the account but gave no name (see accountNameSatisfied).
+        accountName: accountName || accountNumber,
         currency,
         memo: "Settu offramp",
       },
@@ -772,8 +777,16 @@ export function FormCard({
         </div>
         <Field
           label="ACCOUNT NAME"
-          value={isVerifyingAccount ? "Verifying..." : accountName || "—"}
-          tone={accountName ? "accent" : "muted"}
+          value={
+            isVerifyingAccount
+              ? "Verifying..."
+              : accountName
+                ? accountName
+                : accountVerified
+                  ? "Verified (name unavailable)"
+                  : "—"
+          }
+          tone={accountName || accountVerified ? "accent" : "muted"}
         />
         {quote && (
           <div className="mt-2 p-3 bg-[#1a1a1a] border border-[var(--line)] rounded">
