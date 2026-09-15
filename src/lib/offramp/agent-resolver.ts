@@ -164,13 +164,21 @@ export async function resolveAgentOrder(
     };
   }
 
-  const accountName = await verifyAccount(institutionMatch.code, accountIdentifier);
-  if (!accountName) {
+  const verifyResult = await verifyAccount(institutionMatch.code, accountIdentifier);
+  // NGN's verify-account always returns a real name — a "verified, no name"
+  // result there would be unusual, so it's still treated as unverified. Every
+  // other currency (e.g. KES, which returns the literal "OK" instead of a
+  // name) only needs Paycrest to confirm the account exists.
+  const nameRequired = currencyMatch.code === "NGN";
+  if (!verifyResult.verified || (nameRequired && !verifyResult.accountName)) {
     return {
       status: "clarify",
       message: `I couldn't verify a ${institutionName} account at ${accountIdentifier} — please double check the account number.`,
     };
   }
+  // Beneficiary.accountName is never sent empty downstream — falls back to
+  // the account identifier when Paycrest confirmed the account but gave no name.
+  const accountName = verifyResult.accountName ?? accountIdentifier;
 
   return {
     status: "resolved",

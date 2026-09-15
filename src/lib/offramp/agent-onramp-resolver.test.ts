@@ -258,6 +258,63 @@ test("resolveOnrampOrder: 'connected' sentinel is case-insensitive and trims whi
   );
 });
 
+test("resolveOnrampOrder: a KES 'OK' refund verify-account response still resolves, falling back to the account number", async () => {
+  await withFetch(
+    async (url) => {
+      const u = String(url);
+      if (u.includes("/currencies")) {
+        return jsonResponse({
+          data: [{ code: "KES", name: "Kenyan Shilling", symbol: "KSh" }],
+        });
+      }
+      if (u.includes("/institutions/")) {
+        return jsonResponse({ data: [{ code: "MPESAKE", name: "M-Pesa" }] });
+      }
+      if (u.includes("/verify-account")) return jsonResponse({ data: "OK" });
+      throw new Error(`unexpected fetch: ${u}`);
+    },
+    async () => {
+      const result = await resolveOnrampOrder({
+        ...COMPLETE,
+        fiatCurrency: "KES",
+        refundInstitutionName: "M-Pesa",
+      });
+      assert.equal(result.status, "resolved");
+      if (result.status === "resolved") {
+        assert.equal(
+          result.order.refundAccount.accountName,
+          COMPLETE.refundAccountIdentifier,
+        );
+      }
+    },
+  );
+});
+
+test("resolveOnrampOrder: an 'OK' refund verify-account response for NGN is still treated as unverified", async () => {
+  await withFetch(
+    async (url) => {
+      const u = String(url);
+      if (u.includes("/currencies")) {
+        return jsonResponse({
+          data: [{ code: "NGN", name: "Nigerian Naira", symbol: "₦" }],
+        });
+      }
+      if (u.includes("/institutions/")) {
+        return jsonResponse({ data: [{ code: "OPAYNGPC", name: "OPay" }] });
+      }
+      if (u.includes("/verify-account")) return jsonResponse({ data: "OK" });
+      throw new Error(`unexpected fetch: ${u}`);
+    },
+    async () => {
+      const result = await resolveOnrampOrder(COMPLETE);
+      assert.equal(result.status, "clarify");
+      if (result.status === "clarify") {
+        assert.match(result.message, /account number/i);
+      }
+    },
+  );
+});
+
 test("resolveOnrampOrder: failed refund-account verification asks to double check the number", async () => {
   await withFetch(
     async (url) => {

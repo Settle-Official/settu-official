@@ -117,6 +117,38 @@ test("resolveAgentOrder: failed account verification asks to double check the nu
   });
 });
 
+test("resolveAgentOrder: a KES 'OK' verify-account response (no name) still resolves, falling back to the account number", async () => {
+  await withFetch(async (url) => {
+    const u = String(url);
+    if (u.includes("/currencies")) return jsonResponse({ data: [{ code: "KES", name: "Kenyan Shilling", symbol: "KSh" }] });
+    if (u.includes("/institutions/")) return jsonResponse({ data: [{ code: "MPESAKE", name: "M-Pesa" }] });
+    if (u.includes("/verify-account")) return jsonResponse({ data: "OK" });
+    throw new Error(`unexpected fetch: ${u}`);
+  }, async () => {
+    const result = await resolveAgentOrder({ ...COMPLETE, destinationCurrency: "KES", institutionName: "M-Pesa" });
+    assert.equal(result.status, "resolved");
+    if (result.status === "resolved") {
+      assert.equal(result.order.beneficiary.accountName, "0987654321");
+    }
+  });
+});
+
+test("resolveAgentOrder: an 'OK' verify-account response for NGN is still treated as unverified", async () => {
+  // NGN's verify-account always returns a real name in practice, so an "OK"
+  // response there is treated as if verification failed, not as a pass.
+  await withFetch(async (url) => {
+    const u = String(url);
+    if (u.includes("/currencies")) return jsonResponse({ data: [{ code: "NGN", name: "Nigerian Naira", symbol: "₦" }] });
+    if (u.includes("/institutions/")) return jsonResponse({ data: [{ code: "OPAYNGPC", name: "OPay" }] });
+    if (u.includes("/verify-account")) return jsonResponse({ data: "OK" });
+    throw new Error(`unexpected fetch: ${u}`);
+  }, async () => {
+    const result = await resolveAgentOrder(COMPLETE);
+    assert.equal(result.status, "clarify");
+    if (result.status === "clarify") assert.match(result.message, /account number/i);
+  });
+});
+
 test("resolveAgentOrder: 'GTBank' resolves against the real Paycrest name 'Guaranty Trust Bank'", async () => {
   await withFetch(async (url) => {
     const u = String(url);
