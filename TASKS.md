@@ -84,6 +84,11 @@ dashboard for *seeing*, Telegram for *doing*, rather than rebuilding actions.
 
 ## 3. Security / hygiene
 
+- [ ] **`/api/offramp/paycrest/order` has no caller identity check**, and there
+      is no rate limiting anywhere in the codebase. It creates a real Paycrest
+      order against our API key, so anyone reading the frontend's network tab
+      can call it directly, in a loop. Effectively an undocumented, unmetered
+      public API today. Fix regardless of whether we ever ship a partner API.
 - [ ] Rotate `BASE_PRIVATE_KEY` and audit that wallet — recommended after the
       unauthenticated `execute-payout` route was removed in #35.
 - [ ] `POST /api/stats` is unauthenticated and accepts an arbitrary `wallet`,
@@ -107,7 +112,106 @@ dashboard for *seeing*, Telegram for *doing*, rather than rebuilding actions.
 
 ---
 
-## 5. Known gaps (documented, not yet scheduled)
+## 5. API / partner access
+
+Several people have asked for offramp API access. Buildable, but two of the
+three blockers aren't engineering, so the order matters.
+
+### 5a. Answer these before building anything
+
+- [ ] **Ask Paycrest whether reselling is permitted.** Partner volume would flow
+      through our account and our key. Providers commonly forbid this outright or
+      require a different commercial tier. One email, and a "no" makes the rest
+      moot — so it goes first.
+- [ ] **Get a legal read on the change in position.** Today users move their own
+      funds and Paycrest KYCs the recipient. Via an API, partners move funds for
+      users we never see, which looks less like an app and more like payments
+      infrastructure — with NGN payouts and CBN's VASP rules in scope. Decide
+      this deliberately, not after launch.
+- [ ] **Confirm what askers actually want.** "Let my users offramp from inside my
+      product" is usually solved by an embeddable widget or hosted checkout link:
+      we keep the user relationship, KYC stays as it is, and there's no
+      idempotency/webhook surface to get right. Raw API keys are the heaviest
+      possible answer to that request.
+
+### 5b. Technical prerequisites
+
+- [ ] **Idempotency keys on order creation.** The biggest blocker. Nothing in the
+      codebase implements idempotency, and partners retry automatically — a
+      retried timeout today creates a *second* Paycrest order, potentially after
+      funds were already burned against the first.
+- [ ] Per-partner API keys: hashed at rest, scoped, revocable, individually rate
+      limited. The accounts backend is the natural home.
+- [ ] Outbound webhooks so partners learn about settlement without polling,
+      with signatures and retries.
+- [ ] Per-partner ledger and reconciliation — whose volume, whose failures.
+- [ ] Sandbox environment and versioned, documented endpoints.
+
+### 5c. Operational prerequisites
+
+These are already listed above; an API turns them from internal pain into
+partner-facing SLA breaches, since every manual recovery becomes a support
+ticket from a business rather than a test on our own phone.
+
+- [ ] Onramp auto-retry (§1a)
+- [ ] Postgres migration (§6) — 48h/7d retention means a partner disputing last
+      month's settlement has nothing to dispute against
+- [ ] Audit log (§1c)
+- [ ] Admin triage view (§1b)
+
+---
+
+## 6. Redis → Postgres
+
+**Decision: move the system of record, keep Redis as the coordination layer.**
+Neon is already provisioned.
+
+| Store | TTL today | |
+|---|---|---|
+| order-meta | 48h | → Postgres |
+| payout | 48h | → Postgres |
+| cctp-transfer | 7d | → Postgres |
+| onramp-order | 7d | → Postgres |
+| funds-ledger | none | → Postgres |
+| transaction-history | none | → Postgres |
+| stats | none | → Postgres |
+| `cctp:advance-lock`, `onramp:bridge-lock` | — | **stay on Redis** |
+
+**Why move:**
+
+- Money records evaporate. A stranded burn found 8 days later can't be
+  reconstructed from our own data — only from Horizon and Paycrest by hand.
+- Every diagnosis so far was a full keyspace SCAN plus a hand-join across order
+  meta, payout, Paycrest, CCTP record and the chain. One SQL query instead.
+  The triage view (§1b) is quietly blocked on this.
+- Cashback needs ACID for accrual, balances and withdrawals. The audit log
+  (§1c) isn't really implementable on Redis either.
+
+**Why the locks stay:** `cctp:advance-lock` is what prevents two workers
+advancing the same transfer concurrently — losing single-flight risks a double
+mint. Redis is better at this and there's no upside to moving it.
+
+**Tasks**
+
+- [ ] Use `@neondatabase/serverless` (HTTP) from Next.js, not `pg` with a pool —
+      Vercel's serverless functions will exhaust a normal pool.
+- [ ] Give Next.js its own schema. The Rust service already owns
+      `users`/`sessions`/`wallets` via sqlx; two migration owners on one database
+      is a footgun.
+- [ ] Watch cold starts — we already hit >10s on the Rust side, and the offramp
+      SSE stream polls every 3s.
+- [ ] Migrate dual-write → read Postgres → stop writing Redis. Never big-bang;
+      it's live money.
+- [ ] Backfill only the three permanent stores. Orders, payouts and CCTP records
+      expire within 7 days, so dual-write and wait them out.
+- [ ] Normalise addresses on day one: `offramp:tx:by-address` lowercases while
+      `stellaramp:known_wallets` doesn't, so one EVM wallet can appear as two.
+      Keep original casing separately for display — Stellar `G…` is
+      case-sensitive.
+
+---
+
+## 7. Known gaps (documented, not yet scheduled)
 
 - [ ] `transaction-history` misses every Stellar offramp: `recordTransaction`
       sits behind `if (connectedAddress)` and the Stellar client never sends it.
@@ -115,6 +219,5 @@ dashboard for *seeing*, Telegram for *doing*, rather than rebuilding actions.
 - [ ] `updateTransactionStatus` has no callers, so those records never leave
       `status: "pending"`.
 - [ ] `revive.ts` sets `delivered` directly, bypassing `markOnrampDelivered`.
-- [ ] Redis → Postgres migration for orders, payouts, ledger and stats.
 
 All five matter for cashback.
