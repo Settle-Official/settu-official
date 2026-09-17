@@ -7,7 +7,8 @@ import {
   getOrderMeta,
   type OrderMeta,
 } from "./order-meta-store";
-import { getPayoutStatus, isTerminal } from "./payout-store";
+import { getPayoutStatus } from "./payout-store";
+import type { PayoutStatus } from "./types";
 import { getCctpTransfer } from "../cctp/cctp-store";
 import { fetchBurnMessage } from "../cctp/iris-client";
 import { registerOfframpBurn } from "../cctp/register-burn";
@@ -258,7 +259,7 @@ async function findBurn(meta: OrderMeta): Promise<FoundBurn | null> {
   );
 }
 
-function orderRecoverable(meta: OrderMeta | null): meta is OrderMeta {
+export function orderRecoverable(meta: OrderMeta | null): meta is OrderMeta {
   if (!meta?.senderAddress || !meta.receiveAddress) return false;
   // Base transfers directly instead of burning, so it has nothing to recover.
   const chain = (meta.sourceChain || "stellar") as OfframpSourceChain;
@@ -268,6 +269,22 @@ function orderRecoverable(meta: OrderMeta | null): meta is OrderMeta {
   }
   const age = Date.now() - meta.createdAt;
   return age >= GRACE_MS && age <= MAX_AGE_MS;
+}
+
+/**
+ * Genuinely nothing left to do — the payout already completed or was
+ * refunded. Deliberately excludes "expired": that's the status Paycrest
+ * gives an order it never saw a deposit for, which is exactly what a
+ * stranded (unregistered) burn looks like from their side. Confirmed live:
+ * a burn stranded, its order expired ~1h later, and the old isTerminal()
+ * check (settled/refunded/expired) then skipped it on every subsequent
+ * sweep run, permanently orphaning the exact case this sweep exists for.
+ * findStellarBurn simply finds nothing for an order that expired because
+ * the user never sent funds at all, so there's no false-positive risk in
+ * still checking expired ones.
+ */
+export function isPayoutAlreadyResolved(status: PayoutStatus | undefined): boolean {
+  return status === "settled" || status === "refunded";
 }
 
 export interface BurnBackstopResult {
@@ -286,9 +303,8 @@ export async function reconcileUnregisteredBurns(): Promise<BurnBackstopResult> 
       const meta = await getOrderMeta(orderId);
       if (!orderRecoverable(meta)) continue;
 
-      // Already settled/expired/refunded — nothing to recover.
       const payout = await getPayoutStatus(orderId);
-      if (payout && isTerminal(payout.status)) continue;
+      if (isPayoutAlreadyResolved(payout?.status)) continue;
 
       const found = await findBurn(meta);
       if (!found) continue;

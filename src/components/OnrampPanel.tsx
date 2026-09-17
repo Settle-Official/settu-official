@@ -3,6 +3,9 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { cn } from "@/lib/cn";
 import { SelectField } from "@/components/SelectField";
+import { ONRAMP_STATUS_LABEL } from "@/lib/onramp/status-labels";
+import { createOnrampOrder } from "@/lib/onramp/client";
+import type { OnrampProviderAccount } from "@/lib/offramp/types";
 
 const PAYCREST_API_BASE = "https://api.paycrest.io/v1";
 
@@ -15,15 +18,6 @@ interface Currency {
   code: string;
   name: string;
   symbol: string;
-}
-
-interface ProviderAccount {
-  institution: string;
-  accountIdentifier: string;
-  accountName: string;
-  amountToTransfer: string;
-  currency: string;
-  validUntil: string;
 }
 
 type OnrampPhase =
@@ -48,21 +42,6 @@ export interface OnrampPanelProps {
 }
 
 // User-facing copy for each streamed onramp status.
-const STATUS_LABEL: Record<string, string> = {
-  pending: "Waiting for your bank transfer…",
-  deposited: "Fiat received — confirming…",
-  validated: "Payment confirmed by provider…",
-  settling: "Releasing USDC on Base…",
-  settled: "USDC received — bridging to Stellar…",
-  bridging: "Bridging to your Stellar wallet…",
-  delivered: "Delivered to your Stellar wallet ✓",
-  bridge_failed: "Delivery held for review — our team was alerted.",
-  refunding: "Refund in progress…",
-  refunded: "Order refunded.",
-  expired: "Order expired — no deposit received in time.",
-  unknown: "Processing…",
-};
-
 export function OnrampPanel({
   isConnected,
   isConnecting,
@@ -91,7 +70,7 @@ export function OnrampPanel({
   const [error, setError] = useState<string | null>(null);
   const [orderId, setOrderId] = useState<string | null>(null);
   const [providerAccount, setProviderAccount] =
-    useState<ProviderAccount | null>(null);
+    useState<OnrampProviderAccount | null>(null);
   const [status, setStatus] = useState<string>("pending");
   const [checkState, setCheckState] = useState<"idle" | "checking" | "waiting">(
     "idle",
@@ -298,27 +277,19 @@ export function OnrampPanel({
     setIsSubmitting(true);
     setError(null);
     try {
-      const res = await fetch("/api/onramp/order", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fiatAmount: amount,
-          currency,
-          userStellarAddress: destinationAddress,
-          refundAccount: {
-            institution: bank,
-            accountIdentifier: accountNumber,
-            accountName,
-          },
-        }),
+      const result = await createOnrampOrder({
+        fiatAmount: amount,
+        currency,
+        userStellarAddress: destinationAddress,
+        refundAccount: {
+          institution: bank,
+          accountIdentifier: accountNumber,
+          accountName,
+        },
       });
-      const payload = await res.json();
-      if (!res.ok) {
-        throw new Error(payload?.error || "Failed to create onramp order");
-      }
-      setOrderId(payload.data.id);
-      setProviderAccount(payload.data.providerAccount);
-      setStatus(payload.data.status || "pending");
+      setOrderId(result.id);
+      setProviderAccount(result.providerAccount);
+      setStatus(result.status || "pending");
       setPhase("awaiting-deposit");
     } catch (e: any) {
       setError(e?.message || "Something went wrong");
@@ -497,7 +468,7 @@ function VirtualAccountView({
   onCheckNow,
   checkState,
 }: {
-  account: ProviderAccount;
+  account: OnrampProviderAccount;
   status: string;
   onCancel: () => void;
   onCheckNow: () => void;
@@ -554,7 +525,7 @@ function VirtualAccountView({
       <div className="flex items-center gap-2 border border-[var(--line)] bg-[#111] px-3 py-2">
         <Spinner />
         <span className="text-[0.8rem] text-[var(--muted)]">
-          {STATUS_LABEL[status] ?? STATUS_LABEL.pending}
+          {ONRAMP_STATUS_LABEL[status] ?? ONRAMP_STATUS_LABEL.pending}
         </span>
       </div>
 
@@ -613,7 +584,7 @@ function StatusView({
         {isDone ? "USDC DELIVERED" : isError ? "NEEDS ATTENTION" : "PROCESSING"}
       </h2>
       <p className="m-0 max-w-[26rem] text-[0.9rem] text-[var(--muted)]">
-        {error ?? STATUS_LABEL[status] ?? STATUS_LABEL.unknown}
+        {error ?? ONRAMP_STATUS_LABEL[status] ?? ONRAMP_STATUS_LABEL.unknown}
       </p>
       {(isDone || isError) && (
         <button

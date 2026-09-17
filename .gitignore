@@ -45,3 +45,6 @@ Thumbs.db
 
 # Local dev certs from `next dev --experimental-https`.
 certificates/
+
+# Brainstorming visual-companion session files
+.superpowers/
