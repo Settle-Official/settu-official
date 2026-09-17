@@ -53,7 +53,16 @@ const extractionSchema = z.object({
     "Whether the user wants to convert fiat to crypto (onramp — they're paying money to receive USDC) or crypto to fiat (offramp — they're sending USDC to receive money in their bank). Null if genuinely ambiguous.",
   ),
   // Offramp fields.
-  amount: z.string().nullable().describe("The numeric USDC amount, as a plain string, e.g. \"1000\". Null if not stated. Offramp only."),
+  amount: z.string().nullable().describe("The numeric amount, as a plain string, e.g. \"1000\" — see amountUnit for whether this is USDC or fiat. Null if not stated. Offramp only."),
+  amountUnit: z.enum(["crypto", "fiat"]).nullable().describe(
+    "OFFRAMP ONLY: whether `amount` is the crypto amount to send (e.g. " +
+      "\"offramp 500 USDC\") or the fiat amount the recipient should " +
+      "receive (e.g. \"offramp 50000 naira to my GTBank account\", \"send " +
+      "my mom ₦20,000\"). Infer \"fiat\" whenever the amount is stated in " +
+      "the destination currency — a currency symbol or word (₦, naira, " +
+      "NGN, KES, shillings, cedis, etc.) rather than USDC/USDT or a token " +
+      "symbol. Null (treated as crypto, the existing default) when genuinely ambiguous.",
+  ),
   token: z.string().nullable().describe("The token symbol, e.g. \"USDC\". Null if not stated — default to USDC if the user clearly means a stablecoin offramp but didn't name one. Offramp only."),
   sourceChain: z.string().nullable().describe("The lowercase chain key the user is sending from, matching one of the allowed values. Null if not stated or unclear. Offramp only."),
   destinationCurrency: z.string().nullable().describe("The 3-letter fiat currency code the recipient should be paid in, inferred from context (e.g. a Nigerian bank implies NGN) if not stated explicitly. Null only if truly unclear. Offramp only."),
@@ -231,13 +240,18 @@ export async function POST(request: NextRequest) {
     // Pull the live quote now, before the user ever sees a confirmation
     // card — the card must show real numbers (rate, payout), and reusing
     // this exact fetch at confirm time means there's no second, unseen
-    // quote the user never agreed to.
+    // quote the user never agreed to. `resolved.order.amount` is still in
+    // whatever unit the user stated it in (amountUnit) — the quote route
+    // does the reverse solve for fiat mode and always hands back the real
+    // USDC figure in `sourceAmount`, exactly like FormCard's amountMode
+    // toggle relies on for "enter the naira amount you want to receive".
+    const amountIn = extraction.amountUnit ?? "crypto";
     const quoteRes = await fetch(new URL("/api/offramp/quote", request.nextUrl.origin), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         amount: resolved.order.amount,
-        amountIn: "crypto",
+        amountIn,
         token: resolved.order.token,
         currency: resolved.order.beneficiary.currency,
         network: "base",
@@ -255,6 +269,12 @@ export async function POST(request: NextRequest) {
       kind: "resolved",
       order: {
         ...resolved.order,
+        // Authoritative regardless of amountUnit — in crypto mode this is
+        // just resolved.order.amount reformatted; in fiat mode it's the
+        // actual USDC the reverse solve says needs to be burned, which is
+        // what confirmOrder/onInitiateOfframp must execute against, never
+        // the fiat figure the user typed.
+        amount: quotePayload.sourceAmount ?? resolved.order.amount,
         rate: quotePayload.rate,
         destinationAmount: quotePayload.destinationAmount,
         estimatedTimeMs: quotePayload.estimatedTime,

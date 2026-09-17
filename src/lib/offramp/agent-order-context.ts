@@ -49,7 +49,14 @@ export function summarizeOrder(o: PendingOrder | CompletedOrder): string {
 
 // The shape the parse route's extraction schema always has, regardless of
 // whichever extra fields (like "intent") the caller's own schema adds.
-type MergeableExtraction = AgentOrderExtraction & OnrampAgentExtraction & { direction: "onramp" | "offramp" | null };
+// amountUnit isn't part of AgentOrderExtraction itself (resolveAgentOrder
+// doesn't need to know whether `amount` is crypto or fiat — it just
+// validates and passes it through), but mergeRepeat below does need it.
+type MergeableExtraction = AgentOrderExtraction &
+  OnrampAgentExtraction & {
+    direction: "onramp" | "offramp" | null;
+    amountUnit?: "crypto" | "fiat" | null;
+  };
 
 /**
  * Backfills every field the model left null (because the user didn't
@@ -66,6 +73,12 @@ export function mergeRepeat<T extends MergeableExtraction>(extraction: T, comple
       ...extraction,
       direction: "offramp",
       amount: extraction.amount ?? completed.amount,
+      // completed.amount is always the real, already-resolved USDC figure
+      // (never fiat — see route.ts's authoritative `sourceAmount` override)
+      // — so backfilling it must also force amountUnit to "crypto", or a
+      // stale/absent amountUnit could get it fiat-solved a second time.
+      // Whatever the user DID explicitly restate keeps its own unit.
+      amountUnit: extraction.amount ? extraction.amountUnit ?? null : "crypto",
       token: extraction.token ?? completed.token,
       sourceChain: extraction.sourceChain ?? completed.sourceChain,
       destinationCurrency: extraction.destinationCurrency ?? completed.beneficiary.currency,

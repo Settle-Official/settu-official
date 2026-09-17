@@ -67,6 +67,23 @@ test("mergeRepeat: 'repeat but to my UBA account' overrides only the bank", () =
   assert.equal(merged.accountIdentifier, "0123456789");
 });
 
+test("mergeRepeat: an amount backfilled from the completed order is forced to amountUnit 'crypto'", () => {
+  // completed.amount is always the already-resolved USDC figure — a bare
+  // backfill must never get run back through the fiat reverse-solve.
+  const merged = mergeRepeat({ ...EMPTY_EXTRACTION, amountUnit: "fiat" }, COMPLETED_OFFRAMP);
+  assert.equal(merged.amount, "500");
+  assert.equal(merged.amountUnit, "crypto");
+});
+
+test("mergeRepeat: an explicitly restated amount keeps whatever unit the user stated it in", () => {
+  const merged = mergeRepeat(
+    { ...EMPTY_EXTRACTION, amount: "50000", amountUnit: "fiat" },
+    COMPLETED_OFFRAMP,
+  );
+  assert.equal(merged.amount, "50000");
+  assert.equal(merged.amountUnit, "fiat");
+});
+
 test("mergeRepeat: fills every field from a completed onramp order", () => {
   const merged = mergeRepeat(EMPTY_EXTRACTION, COMPLETED_ONRAMP);
   assert.equal(merged.direction, "onramp");
