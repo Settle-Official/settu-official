@@ -196,36 +196,3 @@ button {
   }
 }
 
-/* Marquee for mobile/tablet banner */
-@keyframes marquee {
-  from { transform: translateX(0); }
-  to { transform: translateX(-50%); }
-}
-
-.marquee-outer {
-  /* No explicit width: this relies on negative margins (-mx-*) elsewhere to
-     bleed past a padded parent. Pairing that with `width: 100%` over-
-     constrains the box — width is resolved against the parent's content box,
-     so the browser is forced to discard margin-right (per spec) while
-     honoring margin-left, leaving the right edge short by one padding unit.
-     Leaving width as the initial `auto` lets the box-model equation solve
-     for a width that fills exactly between both margins instead. */
-  position: relative;
-  overflow: hidden;
-}
-
-.marquee-inner {
-  display: flex;
-  width: max-content;
-  animation: marquee 18s linear infinite;
-}
-
-.marquee-inner span {
-  white-space: nowrap;
-  padding: 0.35rem 2rem;
-  font-size: 0.72rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: #0a0a0a;
-}

@@ -7,8 +7,8 @@ import {
   type OfframpSourceChainKey,
 } from "@/components/FormCard";
 import { AgentPanel } from "@/components/AgentPanel";
-import { SelectField, type SelectOption } from "@/components/SelectField";
 import { Header } from "@/components/Header";
+import { AnnouncementModal } from "@/components/AnnouncementModal";
 import { ProgressSteps } from "@/components/ProgressSteps";
 import { RecentTransactionsTable } from "@/components/RecentTransactionsTable";
 import { RightPanel, type PlatformStats } from "@/components/RightPanel";
@@ -34,12 +34,6 @@ import { createOnrampOrder } from "@/lib/onramp/client";
 import type { ResolvedOnrampOrder } from "@/lib/offramp/agent-onramp-resolver";
 import * as StellarSdk from "@stellar/stellar-sdk";
 import { closeSheet } from "@/lib/wallet/appkit";
-
-const MODE_OPTIONS: SelectOption[] = [
-  { code: "onramp", name: "On-ramp" },
-  { code: "offramp", name: "Off-ramp" },
-  { code: "agent", name: "Agent" },
-];
 
 /** Run a promise with a timeout. Rejects with a clear message on expiry. */
 function withTimeout<T>(
@@ -543,148 +537,159 @@ export function StellarampDashboard() {
     }
   }, [wallet?.publicKey]);
 
-  // Poll the connected non-Stellar wallet's balances (offramp only). EVM ->
-  // evm-balances, Solana -> solana-balances; both normalised to
-  // { usdc, native, nativeSymbol }.
+  // Poll the connected non-Stellar wallet's balances (any offramp surface —
+  // FormCard or Agent Mode). EVM -> evm-balances, Solana -> solana-balances;
+  // both normalised to { usdc, native, nativeSymbol }. Pulled out as a
+  // callback so a transaction's completion can force an immediate re-read
+  // instead of waiting up to 20s for the next poll tick.
   const externalWalletAddress = isSolanaSource
     ? solanaWallet.address
     : evmWallet.address;
+  const refreshExternalBalance = useCallback(async () => {
+    if (!isOfframpSurface || !isExternalSource || !externalWalletAddress) {
+      return;
+    }
+    try {
+      let normalised: {
+        usdc: string;
+        native: string;
+        nativeSymbol: string;
+      } | null = null;
+      if (isSolanaSource) {
+        const res = await fetch(
+          `/api/offramp/bridge/solana-balances?address=${externalWalletAddress}`,
+        );
+        if (!res.ok) return;
+        const d = await res.json();
+        normalised = { usdc: d.usdc, native: d.sol, nativeSymbol: "SOL" };
+      } else {
+        const params = new URLSearchParams({
+          address: externalWalletAddress,
+          chain: sourceChain,
+        });
+        const res = await fetch(
+          `/api/offramp/bridge/evm-balances?${params.toString()}`,
+        );
+        if (!res.ok) return;
+        const d = await res.json();
+        normalised = {
+          usdc: d.usdc,
+          native: d.native,
+          nativeSymbol: d.nativeSymbol,
+        };
+      }
+      setExternalBalances(normalised);
+    } catch {
+      // keep whatever we had
+    }
+  }, [isOfframpSurface, isExternalSource, isSolanaSource, sourceChain, externalWalletAddress]);
+
   useEffect(() => {
-    if (mode !== "offramp" || !isExternalSource || !externalWalletAddress) {
+    if (!isOfframpSurface || !isExternalSource || !externalWalletAddress) {
       setExternalBalances(null);
       return;
     }
-    let cancelled = false;
-    const load = async () => {
-      try {
-        let normalised: {
-          usdc: string;
-          native: string;
-          nativeSymbol: string;
-        } | null = null;
-        if (isSolanaSource) {
-          const res = await fetch(
-            `/api/offramp/bridge/solana-balances?address=${externalWalletAddress}`,
-          );
-          if (!res.ok || cancelled) return;
-          const d = await res.json();
-          normalised = { usdc: d.usdc, native: d.sol, nativeSymbol: "SOL" };
-        } else {
-          const params = new URLSearchParams({
-            address: externalWalletAddress,
-            chain: sourceChain,
-          });
-          const res = await fetch(
-            `/api/offramp/bridge/evm-balances?${params.toString()}`,
-          );
-          if (!res.ok || cancelled) return;
-          const d = await res.json();
-          normalised = {
-            usdc: d.usdc,
-            native: d.native,
-            nativeSymbol: d.nativeSymbol,
-          };
+    refreshExternalBalance();
+    const iv = setInterval(refreshExternalBalance, 20_000);
+    return () => clearInterval(iv);
+  }, [isOfframpSurface, isExternalSource, externalWalletAddress, refreshExternalBalance]);
+
+  // Load connected wallet USDC balance from Stellar Horizon — pulled out as
+  // a callback (not just effect-internal) so a transaction's completion can
+  // trigger an immediate re-read instead of waiting for the next wallet
+  // reconnect, which is the only other thing that used to refresh it.
+  const refreshStellarBalance = useCallback(async () => {
+    if (!wallet?.publicKey) {
+      setStellarUsdcBalance(null);
+      setStellarXlmBalance(null);
+      setStellarUsdcBalanceRaw(null);
+      setStellarXlmBalanceRaw(null);
+      setStellarSubentryCount(null);
+      return;
+    }
+
+    setIsLoadingBalance(true);
+    try {
+      const response = await fetch(
+        `https://horizon.stellar.org/accounts/${wallet.publicKey}`,
+      );
+      if (!response.ok) {
+        throw new Error(`Horizon account request failed: ${response.status}`);
+      }
+
+      const account = await response.json();
+      const balances = Array.isArray(account?.balances)
+        ? account.balances
+        : [];
+      const preferredIssuer = process.env.NEXT_PUBLIC_STELLAR_USDC_ISSUER;
+
+      // Find USDC balance
+      const usdcTrustline = balances.find((balance: any) => {
+        if (
+          balance?.asset_type !== "credit_alphanum4" &&
+          balance?.asset_type !== "credit_alphanum12"
+        ) {
+          return false;
         }
-        if (!cancelled) setExternalBalances(normalised);
-      } catch {
-        // keep whatever we had
-      }
-    };
-    load();
-    const iv = setInterval(load, 20_000);
-    return () => {
-      cancelled = true;
-      clearInterval(iv);
-    };
-  }, [
-    mode,
-    sourceChain,
-    isExternalSource,
-    isSolanaSource,
-    externalWalletAddress,
-  ]);
+        if (balance?.asset_code !== "USDC") return false;
+        if (preferredIssuer) return balance?.asset_issuer === preferredIssuer;
+        return true;
+      });
 
-  // Load connected wallet USDC balance from Stellar Horizon
-  useEffect(() => {
-    const loadUsdcBalance = async () => {
-      if (!wallet?.publicKey) {
-        setStellarUsdcBalance(null);
-        setStellarXlmBalance(null);
-        setStellarUsdcBalanceRaw(null);
-        setStellarXlmBalanceRaw(null);
-        setStellarSubentryCount(null);
-        return;
-      }
+      const parsed = Number.parseFloat(usdcTrustline?.balance ?? "0");
+      const displayValue = Number.isFinite(parsed)
+        ? parsed.toLocaleString("en-US", {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 6,
+          })
+        : "0.00";
+      setStellarUsdcBalance(displayValue);
+      setStellarUsdcBalanceRaw(Number.isFinite(parsed) ? parsed : 0);
 
-      setIsLoadingBalance(true);
-      try {
-        const response = await fetch(
-          `https://horizon.stellar.org/accounts/${wallet.publicKey}`,
-        );
-        if (!response.ok) {
-          throw new Error(`Horizon account request failed: ${response.status}`);
-        }
+      // Find XLM (native) balance
+      const nativeBalance = balances.find(
+        (balance: any) => balance?.asset_type === "native",
+      );
+      const xlmParsed = Number.parseFloat(nativeBalance?.balance ?? "0");
+      const xlmDisplay = Number.isFinite(xlmParsed)
+        ? xlmParsed.toLocaleString("en-US", {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 4,
+          })
+        : "0.00";
+      setStellarXlmBalance(xlmDisplay);
+      setStellarXlmBalanceRaw(Number.isFinite(xlmParsed) ? xlmParsed : 0);
 
-        const account = await response.json();
-        const balances = Array.isArray(account?.balances)
-          ? account.balances
-          : [];
-        const preferredIssuer = process.env.NEXT_PUBLIC_STELLAR_USDC_ISSUER;
-
-        // Find USDC balance
-        const usdcTrustline = balances.find((balance: any) => {
-          if (
-            balance?.asset_type !== "credit_alphanum4" &&
-            balance?.asset_type !== "credit_alphanum12"
-          ) {
-            return false;
-          }
-          if (balance?.asset_code !== "USDC") return false;
-          if (preferredIssuer) return balance?.asset_issuer === preferredIssuer;
-          return true;
-        });
-
-        const parsed = Number.parseFloat(usdcTrustline?.balance ?? "0");
-        const displayValue = Number.isFinite(parsed)
-          ? parsed.toLocaleString("en-US", {
-              minimumFractionDigits: 2,
-              maximumFractionDigits: 6,
-            })
-          : "0.00";
-        setStellarUsdcBalance(displayValue);
-        setStellarUsdcBalanceRaw(Number.isFinite(parsed) ? parsed : 0);
-
-        // Find XLM (native) balance
-        const nativeBalance = balances.find(
-          (balance: any) => balance?.asset_type === "native",
-        );
-        const xlmParsed = Number.parseFloat(nativeBalance?.balance ?? "0");
-        const xlmDisplay = Number.isFinite(xlmParsed)
-          ? xlmParsed.toLocaleString("en-US", {
-              minimumFractionDigits: 2,
-              maximumFractionDigits: 4,
-            })
-          : "0.00";
-        setStellarXlmBalance(xlmDisplay);
-        setStellarXlmBalanceRaw(Number.isFinite(xlmParsed) ? xlmParsed : 0);
-
-        const subentryCount = Number.parseInt(account?.subentry_count, 10);
-        setStellarSubentryCount(
-          Number.isFinite(subentryCount) ? subentryCount : null,
-        );
-      } catch (error) {
-        setStellarUsdcBalance("0.00");
-        setStellarXlmBalance("0.00");
-        setStellarUsdcBalanceRaw(null);
-        setStellarXlmBalanceRaw(null);
-        setStellarSubentryCount(null);
-      } finally {
-        setIsLoadingBalance(false);
-      }
-    };
-
-    loadUsdcBalance();
+      const subentryCount = Number.parseInt(account?.subentry_count, 10);
+      setStellarSubentryCount(
+        Number.isFinite(subentryCount) ? subentryCount : null,
+      );
+    } catch (error) {
+      setStellarUsdcBalance("0.00");
+      setStellarXlmBalance("0.00");
+      setStellarUsdcBalanceRaw(null);
+      setStellarXlmBalanceRaw(null);
+      setStellarSubentryCount(null);
+    } finally {
+      setIsLoadingBalance(false);
+    }
   }, [wallet?.publicKey]);
+
+  useEffect(() => {
+    refreshStellarBalance();
+  }, [refreshStellarBalance]);
+
+  // Whatever the outcome, the wallet's balance just changed (or the user
+  // needs to see that it didn't) — this fires for every offramp path
+  // (FormCard AND Agent Mode both funnel through handleExecuteTrade's same
+  // offrampStep) regardless of which of the three source-chain execution
+  // branches set it, so there's exactly one place to keep this in sync
+  // instead of six call sites that could drift.
+  useEffect(() => {
+    if (offrampStep !== "success" && offrampStep !== "error") return;
+    refreshStellarBalance();
+    refreshExternalBalance();
+  }, [offrampStep, refreshStellarBalance, refreshExternalBalance]);
 
   // One path for every platform — the kit's modal picks the wallet and handles
   // extension, in-app browser and mobile deep-link transports itself.
@@ -2008,6 +2013,7 @@ export function StellarampDashboard() {
 
   return (
     <main className="min-h-screen p-4">
+      <AnnouncementModal />
       <section className="min-h-[88vh] border border-[#1f1f1f] bg-[var(--bg)]">
         <div className="flex flex-col gap-6 px-[2.6rem] py-8 max-[720px]:p-4">
           <Header
@@ -2048,10 +2054,13 @@ export function StellarampDashboard() {
             onDisconnect={handleDisconnect}
           />
 
-          {/* Three fixed-width buttons overflow narrow mobile viewports (the
-              Agent tab used to run off-screen); below `sm` this collapses to
-              a single native select instead of shrinking the buttons. */}
-          <div className="hidden gap-2 sm:flex">
+          {/* Equal-width flex-1 tabs so all three always fit the viewport —
+              a dropdown here tested badly (users on mobile didn't notice
+              Agent Mode existed at all); shrinking the same tab buttons
+              down with smaller mobile padding/text/tracking is what
+              actually fits, not fixed 150px-min-width buttons that only
+              worked at sm and up. */}
+          <div className="flex gap-1 sm:gap-2">
             {(["onramp", "offramp", "agent"] as const).map((m) => {
               const isActive = mode === m;
               return (
@@ -2074,7 +2083,7 @@ export function StellarampDashboard() {
                     backgroundColor: isActive ? "#C9A962" : "#101010",
                     color: isActive ? "#0a0a0a" : "#f4e1ad",
                   }}
-                  className="min-w-[150px] px-4 py-[0.6rem] text-[0.75rem] font-semibold uppercase tracking-[0.08em] rounded-none transition-colors focus:outline-none focus:ring-2 focus:ring-[#C9A962]/70"
+                  className="min-w-0 flex-1 px-1.5 py-[0.5rem] text-[0.62rem] font-semibold uppercase tracking-[0.04em] rounded-none transition-colors focus:outline-none focus:ring-2 focus:ring-[#C9A962]/70 sm:flex-none sm:min-w-[150px] sm:px-4 sm:py-[0.6rem] sm:text-[0.75rem] sm:tracking-[0.08em]"
                 >
                   {m === "onramp"
                     ? "On-ramp"
@@ -2084,14 +2093,6 @@ export function StellarampDashboard() {
                 </button>
               );
             })}
-          </div>
-          <div className="sm:hidden text-[1rem]">
-            <SelectField
-              label="SELECT SETTUMENT TYPE"
-              value={mode}
-              onChange={(next) => setMode(next as typeof mode)}
-              options={MODE_OPTIONS}
-            />
           </div>
 
           {mode === "onramp" ? (
@@ -2103,6 +2104,7 @@ export function StellarampDashboard() {
                   walletAddress={wallet?.publicKey}
                   onConnect={handleConnect}
                   onDelivered={handleOnrampDelivered}
+                  onSettled={refreshStellarBalance}
                 />
               </div>
               <div className="col-start-2 max-[1100px]:order-2 max-[1100px]:col-auto">
@@ -2137,6 +2139,7 @@ export function StellarampDashboard() {
                       onInitiateOfframp={handleAgentInitiateOfframp}
                       onInitiateOnramp={handleAgentInitiateOnramp}
                       connectedStellarAddress={wallet?.publicKey ?? null}
+                      onOnrampSettled={refreshStellarBalance}
                     />
                   </div>
                   <div hidden={mode !== "offramp"}>

@@ -39,6 +39,10 @@ export interface OnrampPanelProps {
    * not a write trigger. The write itself happens server-side in
    * finalizeOnrampOrder, regardless of what detected the delivery. */
   readonly onDelivered?: () => void;
+  /** Fired on every terminal status (delivered, refunded, or expired) — the
+   * wallet's balance may have just changed (or the user needs to see that
+   * it didn't), regardless of which way the order ended. */
+  readonly onSettled?: () => void;
 }
 
 // User-facing copy for each streamed onramp status.
@@ -48,6 +52,7 @@ export function OnrampPanel({
   walletAddress,
   onConnect,
   onDelivered,
+  onSettled,
 }: Readonly<OnrampPanelProps>) {
   const [phase, setPhase] = useState<OnrampPhase>("form");
 
@@ -157,16 +162,18 @@ export function OnrampPanel({
       if (next === "delivered") {
         setPhase("done");
         onDelivered?.();
+        onSettled?.();
         return true;
       }
       if (next === "refunded" || next === "expired") {
         setPhase("error");
+        onSettled?.();
         return true;
       }
       if (next === "bridge_failed") setPhase("error");
       return false;
     },
-    [onDelivered],
+    [onDelivered, onSettled],
   );
 
   // Authoritative read, shared by the backstop poller and the manual check.

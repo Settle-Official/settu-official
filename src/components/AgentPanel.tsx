@@ -113,6 +113,10 @@ export interface AgentPanelProps {
   // this address server-side; null if no Stellar wallet is connected.
   readonly onInitiateOnramp: (order: ResolvedOnrampOrder) => Promise<CreateOnrampOrderResult>;
   readonly connectedStellarAddress: string | null;
+  /** Fired on every terminal onramp status (delivered, refunded, or
+   * expired) — the wallet's balance may have just changed (or the user
+   * needs to see that it didn't), regardless of which way the order ended. */
+  readonly onOnrampSettled?: () => void;
 }
 
 /**
@@ -135,6 +139,7 @@ export function AgentPanel({
   onInitiateOfframp,
   onInitiateOnramp,
   connectedStellarAddress,
+  onOnrampSettled,
 }: Readonly<AgentPanelProps>) {
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
@@ -533,6 +538,7 @@ export function AgentPanel({
         const terminal = status === "delivered" || status === "refunded" || status === "expired";
         if (terminal) {
           setOnrampPending(null);
+          onOnrampSettled?.();
           // Only an actual delivery is worth repeating — a refund/expiry
           // means nothing landed, so "do that again" shouldn't offer to
           // redo the same order that just failed to complete.
