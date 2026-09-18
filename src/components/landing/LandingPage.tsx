@@ -2,6 +2,7 @@ import { Fraunces, Sora, Inter } from "next/font/google";
 import { Nav } from "./Nav";
 import { Hero } from "./Hero";
 import { StatsStrip } from "./StatsStrip";
+import { HowItWorks } from "./HowItWorks";
 import "./landing.css";
 
 const fraunces = Fraunces({
@@ -31,7 +32,7 @@ export function LandingPage() {
       <Nav />
       <Hero />
       <StatsStrip />
-      {/* Sections added in later tasks: HowItWorks */}
+      <HowItWorks />
     </main>
   );
 }
