@@ -1,12 +1,5 @@
-// Envelope encryption for a Settu-held Stellar secret key.
-//
-// The secret is encrypted once with a random data key (DEK). The DEK is then
-// wrapped separately per unlock method, so adding a device or a recovery path
-// never re-encrypts the secret and never needs the other methods present.
-//
-// The server stores the sealed blob and nothing else: it holds no wrap key, so
-// it cannot decrypt. That property is the whole non-custodial claim — anything
-// that would let a server-side value unwrap a DEK breaks it.
+// The secret is encrypted once under a random data key; that key is wrapped
+// per unlock method. The server holds no wrap key, so it cannot decrypt.
 
 import { Keypair } from "@stellar/stellar-sdk";
 
@@ -32,12 +25,10 @@ export interface SealedWallet {
   wraps: DekWrap[];
 }
 
-// OWASP's floor for PBKDF2-HMAC-SHA256. WebCrypto has no Argon2id, and pulling
-// in wasm for it is a bigger change than the wrap format needs — `version`
-// exists so this can be upgraded without invalidating existing blobs.
+// OWASP's floor for PBKDF2-HMAC-SHA256. WebCrypto has no Argon2id; `version`
+// lets the KDF change later without invalidating stored blobs.
 const PASSWORD_ITERATIONS = 600_000;
-// A recovery code is already 160 bits of randomness, so stretching it guards
-// against nothing; the cost would be paid by the user, not an attacker.
+// Already 160 bits of randomness, so stretching it would only cost the user.
 const HIGH_ENTROPY_ITERATIONS = 10_000;
 
 const AES_IV_BYTES = 12;
@@ -145,10 +136,7 @@ async function unwrapDek(
   throw new Error("Could not unlock the wallet with that secret.");
 }
 
-/**
- * Crockford base32 minus look-alikes, so a code can be read aloud or copied
- * off a screen without I/O/1/0 confusion.
- */
+// Crockford base32 minus look-alikes, so a code survives being read aloud.
 const RECOVERY_ALPHABET = "ABCDEFGHJKMNPQRSTVWXYZ23456789";
 const RECOVERY_GROUPS = 4;
 const RECOVERY_GROUP_LEN = 5;
@@ -175,11 +163,7 @@ export interface CreatedWallet {
   recoveryCode: string;
 }
 
-/**
- * Generate a Stellar keypair and seal it. The secret exists only inside this
- * call; callers get the sealed blob, the public address and a recovery code to
- * show once.
- */
+/** The secret exists only inside this call; the recovery code is shown once. */
 export async function createSealedWallet(
   password: string,
 ): Promise<CreatedWallet> {
@@ -243,18 +227,14 @@ export async function unsealSecret(
   );
   const stellarSecret = new TextDecoder().decode(plaintext);
 
-  // The blob is server-stored, so a tampered publicKey must not silently point
-  // signing at the wrong account.
+  // Server-stored, so a tampered publicKey must not redirect signing.
   if (Keypair.fromSecret(stellarSecret).publicKey() !== sealed.publicKey) {
     throw new Error("Wallet data failed its integrity check.");
   }
   return stellarSecret;
 }
 
-/**
- * Add another unlock method, proving possession of an existing one first.
- * Returns a new blob; the secret is never re-encrypted.
- */
+/** Adds an unlock method, proving an existing one. The secret is untouched. */
 export async function addUnlockMethod(
   sealed: SealedWallet,
   existing: UnlockWith,

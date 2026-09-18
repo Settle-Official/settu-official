@@ -1,11 +1,5 @@
-// Sponsored account creation and trustlines for a Settu wallet.
-//
-// A new Stellar account needs a base reserve, and every asset it can hold needs
-// a trustline reserve on top. Settu sponsors both, so a user arrives with no
-// XLM and can still receive immediately.
-//
-// The builders are pure: they take a loaded sponsor Account and return an
-// unsigned transaction, so the operation shape can be tested without a network.
+// Settu sponsors the account reserve and every trustline reserve, so a user
+// arrives holding no XLM and can still receive. Builders are pure.
 
 import {
   Account,
@@ -17,13 +11,11 @@ import {
   TransactionBuilder,
 } from "@stellar/stellar-sdk";
 
-// From the SDK rather than the wallet adapter: these builders stay pure, and
-// importing the adapter would drag a browser module into them.
+// From the SDK, not the wallet adapter, which would pull in a browser module.
 const NETWORK_PASSPHRASE = Networks.PUBLIC;
 
-// Circle's USDC issuer, confirmed against Horizon: home_domain circle.com, and
-// ~2.4M holders against the next USDC issuer's ~3.5k. Assets are impersonated
-// on Stellar by code alone, so this is pinned rather than looked up by code.
+// Circle's issuer, confirmed against Horizon (home_domain circle.com). Pinned
+// because assets on Stellar are impersonated by code alone.
 export const STELLAR_USDC_ISSUER =
   "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN";
 
@@ -46,20 +38,13 @@ export interface SponsoredCreationParams {
   assets?: Asset[];
 }
 
-/**
- * Create the account and open its first trustlines, all sponsored.
- *
- * Everything between begin/end sponsoring has its reserve paid by the sponsor,
- * so the new account holds no XLM of its own. Both keys must sign: the sponsor
- * because it pays, the new account because it is the source of the operations
- * that consume the sponsorship.
- */
+// Both keys must sign: the sponsor pays, the new account sources the
+// operations that consume the sponsorship.
 export function buildSponsoredCreationTx(
   params: SponsoredCreationParams,
 ): Transaction {
   const { sponsor, newAccountPublicKey } = params;
   const assets = params.assets ?? [STELLAR_USDC];
-  const sponsorId = sponsor.accountId();
 
   const tx = builder(sponsor, assets.length + 3)
     .addOperation(
@@ -113,12 +98,8 @@ export function buildSponsoredTrustlineTx(
     .build();
 }
 
-/**
- * True when every operation only creates the named account or its trustlines.
- *
- * The sponsor signs these, so anything else reaching it — a payment, a signer
- * change, a merge — must be refused rather than co-signed.
- */
+// The sponsor co-signs these, so a payment, signer change or merge smuggled
+// alongside must be refused rather than signed.
 export function isSafeToSponsor(
   tx: Transaction,
   newAccountPublicKey: string,
