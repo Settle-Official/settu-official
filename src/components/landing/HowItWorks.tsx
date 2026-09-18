@@ -73,7 +73,32 @@ export function HowItWorks() {
             </span>
           </div>
         </StepCard>
-        {/* Task 9: Naira lands in bank card */}
+        <StepCard
+          icon="/landing/step1-caption-wallet-icon.svg"
+          iconAlt=""
+          title="Naira lands in your bank"
+          description={'You’ll see each stage, bridging, locking, sending, in plain language, and a clear "done" the moment it’s in your account.'}
+        >
+          <div className="flex flex-col gap-[12px]">
+            <div className="flex items-center justify-between rounded-[20px] border border-white/10 bg-[rgba(255,255,255,0.1)] p-[10px]">
+              <span className="font-[family-name:var(--font-sora)] text-[16px] text-white">
+                Payout currency
+              </span>
+              <span className="text-white">⌄</span>
+            </div>
+            <div className="flex gap-[10px]">
+              <div className="flex-1 rounded-[20px] border border-white/10 bg-[rgba(255,255,255,0.1)] p-[10px] text-center font-[family-name:var(--font-sora)] text-[16px] text-white">
+                account number
+              </div>
+              <div className="flex-1 rounded-[20px] border border-white/10 bg-[rgba(255,255,255,0.1)] p-[10px] text-center font-[family-name:var(--font-sora)] text-[16px] text-white">
+                Bank
+              </div>
+            </div>
+            <div className="rounded-[20px] border border-white/10 bg-[rgba(255,255,255,0.1)] p-[10px] font-[family-name:var(--font-sora)] text-[14px] text-white">
+              Sent to GTBank •••• 6789. It usually lands within minutes.
+            </div>
+          </div>
+        </StepCard>
       </div>
     </section>
   );
