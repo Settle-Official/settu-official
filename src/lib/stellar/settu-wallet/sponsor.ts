@@ -11,12 +11,13 @@ import {
   TransactionBuilder,
 } from "@stellar/stellar-sdk";
 
-const NETWORK = Networks.PUBLIC;
 import {
   buildSponsoredCreationTx,
   buildSponsoredTrustlineTx,
   isSafeToSponsor,
 } from "./account";
+
+const NETWORK = Networks.PUBLIC;
 
 export class SponsorUnavailableError extends Error {
   constructor(message: string) {
@@ -135,11 +136,8 @@ export class FeeBumpRejected extends Error {
   }
 }
 
-/**
- * Pays the fee for a transaction the user already signed.
- * Refuses anything not from one of our accounts — otherwise this is free
- * transaction submission for the whole network.
- */
+// Pays the fee for a user-signed transaction. Refuses anything not from one of
+// our accounts, which would make this free submission for the whole network.
 export async function feeBumpAndSubmit(innerXdr: string) {
   const sponsor = getSponsorKeypair();
   const server = horizon();

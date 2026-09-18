@@ -14,6 +14,10 @@ import {
 // From the SDK, not the wallet adapter, which would pull in a browser module.
 const NETWORK_PASSPHRASE = Networks.PUBLIC;
 
+// Public so the browser can submit a sponsor-signed creation directly.
+export const STELLAR_HORIZON_URL =
+  process.env.NEXT_PUBLIC_STELLAR_HORIZON_URL || "https://horizon.stellar.org";
+
 // Circle's issuer, confirmed against Horizon (home_domain circle.com). Pinned
 // because assets on Stellar are impersonated by code alone.
 export const STELLAR_USDC_ISSUER =
