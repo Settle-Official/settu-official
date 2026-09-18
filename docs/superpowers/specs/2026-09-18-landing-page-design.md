@@ -22,9 +22,18 @@ rather than reusing the product's design system.
   (`--bg`, `--accent`, etc.) — colors/fonts/spacing are pulled directly from
   the Figma file per section, scoped to the landing components only. The
   dashboard's theme system is untouched.
-- **CTA behavior**: every "Convert USDC Now" / "Connect Wallet" button is a
-  plain link to `/app` — no query params, no pre-selected mode. Lands on the
-  dashboard exactly as it works today.
+- **CTA behavior**: the hero's "Convert USDC Now" button is a plain link to
+  `/app` — no query params, no pre-selected mode. The **nav bar's "Connect
+  Wallet" button is a real wallet connection**, not a link — it wires
+  directly to `useStellarWallet()` (the same hook `StellarampDashboard`
+  uses for its own default Stellar path: `connect`/`disconnect`/
+  `isConnected`/`isConnecting`/`wallet.publicKey`), so the button behaves
+  exactly like the dashboard's header button (CONNECT WALLET → connecting…
+  → truncated address, click again to disconnect) but keeps the landing
+  page's own Figma styling. This is deliberately built ahead of everything
+  else visual — the dashboard itself gets a full redesign later once the
+  designer finishes it, so this wiring is the one piece of the landing page
+  that needs to be real and working now, not a placeholder.
 - **Responsive**: built from the actual Figma mobile frame (`636:1015`,
   390px), not improvised. Mobile mirrors desktop section-for-section, with
   the nav's inline links replaced by a hamburger menu (the mobile frame has
