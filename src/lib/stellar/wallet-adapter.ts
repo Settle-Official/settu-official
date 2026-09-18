@@ -13,7 +13,7 @@
 // so iOS evicting the backgrounded tab while the user approved in their wallet
 // dropped the connection on return.
 
-import type { ModuleInterface } from "@creit.tech/stellar-wallets-kit";
+import type { ModuleInterface, SwkAppTheme } from "@creit.tech/stellar-wallets-kit";
 import { isMobileBrowser } from "@/lib/platform";
 import { warmSharedAppKit } from "@/lib/wallet/appkit";
 import {
@@ -44,6 +44,34 @@ let walletConnectModuleRef: ModuleInterface | null = null;
 
 // Set when mobile paired through our own SignClient instead of the kit.
 let directSession: { address: string; topic: string } | null = null;
+
+/**
+ * The kit's picker modal, restyled to the app. The kit copies each value
+ * onto `--swk-*` custom properties, so pointing them at globals.css tokens
+ * (rather than literal colors) keeps the modal in step with the light/dark
+ * toggle for free. Square corners, 1px outlines and the mono face match the
+ * dashboard's own surfaces; the gold accent carries hover/active states.
+ */
+const KIT_THEME: SwkAppTheme = {
+  "background": "var(--surface)",
+  "background-secondary": "var(--bg)",
+  "foreground-strong": "var(--foreground)",
+  "foreground": "var(--foreground)",
+  "foreground-secondary": "var(--muted)",
+  "primary": "var(--accent)",
+  "primary-foreground": "var(--accent-contrast)",
+  "transparent": "rgba(0, 0, 0, 0)",
+  "lighter": "var(--surface-3)",
+  "light": "var(--bg-highlight)",
+  "light-gray": "var(--accent)",
+  "gray": "var(--accent-bright)",
+  "danger": "#e5484d",
+  "border": "var(--line)",
+  "shadow": "0 0 0 1px var(--line), 0 24px 48px rgba(0, 0, 0, 0.45)",
+  "border-radius": "0",
+  "font-family":
+    "var(--font-ibm-plex-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+};
 
 
 /**
@@ -156,7 +184,7 @@ async function initKit(): Promise<Kit> {
     if (walletConnectModule) modules.push(walletConnectModule);
   }
 
-  StellarWalletsKit.init({ modules, network: Networks.PUBLIC });
+  StellarWalletsKit.init({ modules, network: Networks.PUBLIC, theme: KIT_THEME });
   return StellarWalletsKit;
 }
 
@@ -303,6 +331,26 @@ export function hasStoredWalletSession(): boolean {
   } catch {
     // localStorage blocked (Safari private mode) — nothing to restore.
     return false;
+  }
+}
+
+/**
+ * The persisted session as the kit wrote it, read synchronously — no kit
+ * import, no wallet prompt. Lets the UI show the connected state the instant
+ * a page mounts (e.g. landing → /app) instead of after the kit's large
+ * dynamic import lands; restoreWallet() then confirms or clears it. Key names
+ * are the kit's LocalStorageKeys, spelled out because importing them would
+ * pull the whole kit in at module scope.
+ */
+export function peekStoredWallet(): StellarWallet | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const publicKey = window.localStorage.getItem("@StellarWalletsKit/activeAddress");
+    const type = window.localStorage.getItem("@StellarWalletsKit/selectedModuleId");
+    if (!publicKey || !type) return null;
+    return { type, publicKey, isConnected: true };
+  } catch {
+    return null;
   }
 }
 

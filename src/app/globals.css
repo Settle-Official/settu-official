@@ -74,6 +74,22 @@
   box-sizing: border-box;
 }
 
+/* Stellar Wallets Kit picker (colors/fonts come from the theme passed to
+   StellarWalletsKit.init in lib/stellar/wallet-adapter.ts). Its full-screen
+   overlay is the first child of the kit's fixed shell; blurring through it
+   frosts the page behind the modal without putting a `filter` on the page
+   root, which would re-anchor every position:fixed element inside it. */
+section.stellar-wallets-kit > div:first-child {
+  background: rgba(0, 0, 0, 0.55) !important;
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+/* The picker's scrolling card: keep wheel/touch scrolling inside it instead
+   of chaining to the page once the wallet list reaches its end. */
+section.stellar-wallets-kit > section {
+  overscroll-behavior: contain;
+}
+
 html,
 body {
   margin: 0;

@@ -1,8 +1,11 @@
 import { Fraunces, Sora, Inter } from "next/font/google";
-import { Nav } from "./Nav";
 import { Hero } from "./Hero";
 import { StatsStrip } from "./StatsStrip";
 import { HowItWorks } from "./HowItWorks";
+import { TrustSection } from "./TrustSection";
+import { Faq } from "./Faq";
+import { Footer } from "./Footer";
+import { LandingScale } from "./LandingScale";
 import "./landing.css";
 
 const fraunces = Fraunces({
@@ -19,7 +22,7 @@ const sora = Sora({
 });
 const inter = Inter({
   subsets: ["latin"],
-  weight: ["400", "600"],
+  weight: ["400", "500", "600"],
   variable: "--font-inter",
   display: "swap",
 });
@@ -27,12 +30,16 @@ const inter = Inter({
 export function LandingPage() {
   return (
     <main
+      id="landing-root"
       className={`${fraunces.variable} ${sora.variable} ${inter.variable} min-h-screen bg-[#131212] text-white font-[family-name:var(--font-sora)]`}
     >
-      <Nav />
+      <LandingScale targetId="landing-root" />
       <Hero />
       <StatsStrip />
       <HowItWorks />
+      <TrustSection />
+      <Faq />
+      <Footer />
     </main>
   );
 }

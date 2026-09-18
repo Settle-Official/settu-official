@@ -18,7 +18,7 @@ const LOGOS = [
 
 export function StatsStrip() {
   return (
-    <section className="relative overflow-hidden bg-[#121212] px-[100px] py-[100px] max-[1100px]:px-[24px]">
+    <section className="relative overflow-hidden bg-[#121212] px-[100px] pb-[100px] pt-[165px] mt-[50px] max-[720px]:mt-0 max-[720px]:px-[20px] max-[720px]:pb-[40px] max-[720px]:pt-[110px]">
       <Image
         src="/landing/stats-glow-left.svg"
         alt=""
@@ -34,28 +34,43 @@ export function StatsStrip() {
         className="pointer-events-none absolute right-[142px] top-[251px]"
       />
       <div className="relative mx-auto flex w-[1240px] max-w-full flex-col items-center gap-[50px]">
-        <div className="flex flex-wrap items-start justify-center gap-x-[136px] gap-y-[40px]">
+        <div className="flex flex-wrap items-start justify-center gap-x-[136px] gap-y-[40px] max-[720px]:flex-col max-[720px]:items-center max-[720px]:gap-y-[70px] max-[720px]:py-[40px]">
           {STATS.map((stat) => (
-            <div key={stat.caption} className="flex w-[219px] flex-col items-center gap-[9px] text-center">
-              <span className="landing-fraunces text-[50px] text-white">{stat.value}</span>
-              <span className="font-[family-name:var(--font-sora)] text-[18px] text-[#d0cccc]">
+            <div
+              key={stat.caption}
+              className="flex w-[219px] flex-col items-center gap-[9px] text-center"
+            >
+              <span className="landing-fraunces text-[50px] text-white max-[720px]:text-[40px] max-[720px]:leading-[49px]">
+                {stat.value}
+              </span>
+              <span className="font-[family-name:var(--font-sora)] text-[18px] text-[#d0cccc] max-[720px]:leading-[23px] max-[720px]:text-[#bbb9b9]">
                 {stat.caption}
               </span>
             </div>
           ))}
         </div>
-        <div className="flex flex-wrap items-center justify-center gap-[59px]">
-          {LOGOS.map((src, i) => {
-            const hasBackdrop = i > 0 && i < LOGOS.length - 1;
-            return (
+        <div className="landing-marquee-fade w-full overflow-hidden">
+          <div className="landing-marquee-track gap-[59px] max-[720px]:gap-[40px]">
+            {/* Four copies, not two — a single set (~750px) is narrower than
+                the visible track, so doubling it still left a gap of empty
+                space right before the loop reset. Four safely covers twice
+                the widest realistic viewport, which is what the "translate
+                by -50%" seamless-loop trick actually requires. */}
+            {[...LOGOS, ...LOGOS, ...LOGOS, ...LOGOS].map((src, i) => (
               <div
-                key={src}
-                className={`flex size-[56px] items-center justify-center rounded-full ${hasBackdrop ? "bg-[#f3f3f3]" : ""}`}
+                key={`${src}-${i}`}
+                className="flex size-[56px] shrink-0 items-center justify-center rounded-full bg-[#f3f3f3]"
               >
-                <Image src={src} alt="" width={30} height={30} className="size-[30px]" />
+                <Image
+                  src={src}
+                  alt=""
+                  width={34}
+                  height={34}
+                  className="size-[34px] object-contain"
+                />
               </div>
-            );
-          })}
+            ))}
+          </div>
         </div>
       </div>
     </section>

@@ -1,7 +1,9 @@
 import type { Metadata, Viewport } from "next";
 import { IBM_Plex_Mono, Space_Grotesk } from "next/font/google";
 import "./globals.css";
+import "lenis/dist/lenis.css";
 import { ThemeToggle, THEME_STORAGE_KEY } from "@/components/ThemeToggle";
+import { SmoothScroll } from "@/components/SmoothScroll";
 
 // Runs before first paint so a returning light-mode user never sees a
 // flash of the dark theme while React hydrates. Reads localStorage
@@ -60,6 +62,7 @@ export default function RootLayout({
         className={`${ibmPlexMono.className} ${ibmPlexMono.variable} ${spaceGrotesk.variable}`}
       >
         {children}
+        <SmoothScroll />
         <ThemeToggle />
         <script
           dangerouslySetInnerHTML={{
