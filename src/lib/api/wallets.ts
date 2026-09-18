@@ -9,6 +9,8 @@ export interface LinkedWallet {
   address: string;
   earns_cashback: boolean;
   linked_at: string;
+  /** Settu-created, so it has sealed key material and can be unlocked here. */
+  is_settu_wallet: boolean;
 }
 
 interface Challenge {

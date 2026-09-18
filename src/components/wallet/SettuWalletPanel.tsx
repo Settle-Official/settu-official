@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AuthButton, AuthField } from "@/components/auth/AuthField";
 import { useSettuWallet } from "@/hooks/useSettuWallet";
-import { shortAddress } from "@/lib/api/wallets";
+import { listWallets, shortAddress } from "@/lib/api/wallets";
 
 // Matches the account password rule, so the two don't disagree on screen.
 const MIN_PASSWORD_LENGTH = 12;
@@ -11,15 +11,31 @@ const MIN_PASSWORD_LENGTH = 12;
 type Phase = "create" | "recovery" | "unlock" | "ready";
 
 interface Props {
-  readonly walletId?: string;
   readonly onReady?: (address: string) => void;
 }
 
-export function SettuWalletPanel({ walletId, onReady }: Props) {
+export function SettuWalletPanel({ onReady }: Props) {
   const { address, isBusy, error, create, unlock, lock } = useSettuWallet();
-  const [phase, setPhase] = useState<Phase>(
-    address ? "ready" : walletId ? "unlock" : "create",
-  );
+  const [walletId, setWalletId] = useState<string | undefined>();
+  const [phase, setPhase] = useState<Phase>(address ? "ready" : "create");
+
+  // Resolve an existing Settu wallet so the panel offers unlock, not create.
+  useEffect(() => {
+    let cancelled = false;
+    listWallets()
+      .then((wallets) => {
+        const existing = wallets.find((w) => w.is_settu_wallet);
+        if (cancelled || !existing) return;
+        setWalletId(existing.id);
+        setPhase((current) => (current === "create" ? "unlock" : current));
+      })
+      .catch(() => {
+        // Not signed in, or the list failed — creating is still valid.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [phrase, setPhrase] = useState("");
@@ -38,6 +54,7 @@ export function SettuWalletPanel({ walletId, onReady }: Props) {
       setPhrase(result.mnemonic);
       setPassword("");
       setConfirm("");
+      setWalletId(result.walletId);
       setPhase("recovery");
     } catch {
       // The hook already surfaced it.
