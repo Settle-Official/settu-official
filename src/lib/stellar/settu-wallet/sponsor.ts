@@ -3,10 +3,15 @@
 
 import {
   Asset,
+  BASE_FEE,
   Horizon,
   Keypair,
+  Networks,
   Transaction,
+  TransactionBuilder,
 } from "@stellar/stellar-sdk";
+
+const NETWORK = Networks.PUBLIC;
 import {
   buildSponsoredCreationTx,
   buildSponsoredTrustlineTx,
@@ -112,4 +117,63 @@ function assertSafe(tx: Transaction, account: string): void {
   if (!isSafeToSponsor(tx, account)) {
     throw new Error("Refusing to sponsor a transaction with other operations");
   }
+}
+
+/** Only accounts whose reserves we sponsor — proven on-chain, not from a table. */
+export async function isSponsoredByUs(publicKey: string): Promise<boolean> {
+  const sponsor = getSponsorKeypair().publicKey();
+  const account = await horizon()
+    .loadAccount(publicKey)
+    .catch(() => null);
+  return (account as { sponsor?: string } | null)?.sponsor === sponsor;
+}
+
+export class FeeBumpRejected extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "FeeBumpRejected";
+  }
+}
+
+/**
+ * Pays the fee for a transaction the user already signed.
+ * Refuses anything not from one of our accounts — otherwise this is free
+ * transaction submission for the whole network.
+ */
+export async function feeBumpAndSubmit(innerXdr: string) {
+  const sponsor = getSponsorKeypair();
+  const server = horizon();
+
+  let inner: Transaction;
+  try {
+    const parsed = TransactionBuilder.fromXDR(innerXdr, NETWORK);
+    // A fee bump cannot wrap another fee bump, and we will not re-wrap ours.
+    if (!("operations" in parsed)) {
+      throw new FeeBumpRejected("Expected a plain transaction");
+    }
+    inner = parsed as Transaction;
+  } catch (error) {
+    throw error instanceof FeeBumpRejected
+      ? error
+      : new FeeBumpRejected("Could not parse that transaction");
+  }
+
+  // Unsigned means we would pay to submit something that cannot succeed.
+  if (inner.signatures.length === 0) {
+    throw new FeeBumpRejected("Transaction is not signed");
+  }
+  if (!(await isSponsoredByUs(inner.source))) {
+    throw new FeeBumpRejected("That account is not a Settu wallet");
+  }
+
+  await assertSponsorFunded(server, sponsor.publicKey());
+
+  const bumped = TransactionBuilder.buildFeeBumpTransaction(
+    sponsor,
+    String(Number(BASE_FEE) * 10),
+    inner,
+    NETWORK,
+  );
+  bumped.sign(sponsor);
+  return server.submitTransaction(bumped);
 }
