@@ -1,0 +1,27 @@
+/* Fraunces is used with its SOFT/WONK variable axes everywhere it appears
+   (headlines, stat numbers, card titles) — a static weight cut renders
+   the wrong letterforms, so every heading needs this exact class rather
+   than just `font-[family-name:var(--font-fraunces)]`. */
+.landing-fraunces {
+  font-family: var(--font-fraunces), serif;
+  font-variation-settings: "SOFT" 0, "WONK" 1;
+}
+
+/* Driven by an IntersectionObserver (added when each section is built) —
+   toggling `is-visible` on is what actually reveals the section. */
+.landing-reveal {
+  opacity: 0;
+  transform: translateY(16px);
+  transition: opacity 0.6s ease-out, transform 0.6s ease-out;
+}
+.landing-reveal.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+@media (prefers-reduced-motion: reduce) {
+  .landing-reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}
