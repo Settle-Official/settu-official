@@ -28,6 +28,12 @@ import {
   submitSignature,
 } from "@/lib/api/wallets";
 
+export interface PreparedWallet {
+  sealed: SealedWallet;
+  publicKey: string;
+  mnemonic: string;
+}
+
 interface CreateResult {
   address: string;
   walletId: string;
@@ -42,15 +48,31 @@ export function useSettuWallet() {
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const create = useCallback(
-    async (password: string): Promise<CreateResult> => {
+  // Local only: nothing exists on-chain yet, so a failure here costs nothing.
+  const prepare = useCallback(
+    async (password: string): Promise<PreparedWallet> => {
       setIsBusy(true);
       setError(null);
       try {
-        const { sealed, publicKey, mnemonic } =
-          await createSealedWallet(password);
+        return await createSealedWallet(password);
+      } catch (err: any) {
+        setError(err?.message ?? "Could not prepare your wallet");
+        throw err;
+      } finally {
+        setIsBusy(false);
+      }
+    },
+    [],
+  );
 
-        // Sponsor pays the reserves; we co-sign with the key we just made.
+  // Runs only after the user has the phrase, so anything that fails from here
+  // leaves an account they can still recover.
+  const finalize = useCallback(
+    async (prepared: PreparedWallet, password: string): Promise<CreateResult> => {
+      setIsBusy(true);
+      setError(null);
+      const { sealed, publicKey, mnemonic } = prepared;
+      try {
         const res = await fetch("/api/wallet/sponsor-account", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -64,8 +86,6 @@ export function useSettuWallet() {
         }
         const { xdr } = (await res.json()) as { xdr: string };
 
-        // Unseal rather than keep the secret in a local: the blob is the only
-        // copy from here on, so this also proves it opens.
         const secret = await unsealSecret(sealed, {
           type: "password",
           secret: password,
@@ -73,8 +93,7 @@ export function useSettuWallet() {
         const tx = TransactionBuilder.fromXDR(xdr, Networks.PUBLIC);
         tx.sign(Keypair.fromSecret(secret));
 
-        // The sponsor is this transaction's source, so it already pays the fee
-        // and no fee bump is involved.
+        // The sponsor is this transaction's source, so it already pays the fee.
         await submitToHorizon(tx.toXDR());
 
         const walletId = await linkToAccount(publicKey, secret);
@@ -176,7 +195,8 @@ export function useSettuWallet() {
     isUnlocked: isUnlocked(),
     isBusy,
     error,
-    create,
+    prepare,
+    finalize,
     unlock,
     unlockByPasskey,
     addPasskey,

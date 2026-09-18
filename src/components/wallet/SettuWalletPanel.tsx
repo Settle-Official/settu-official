@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { AuthButton, AuthField } from "@/components/auth/AuthField";
-import { useSettuWallet } from "@/hooks/useSettuWallet";
+import { useSettuWallet, type PreparedWallet } from "@/hooks/useSettuWallet";
 import { listWallets, shortAddress } from "@/lib/api/wallets";
 
 // Matches the account password rule, so the two don't disagree on screen.
@@ -15,7 +15,8 @@ interface Props {
 }
 
 export function SettuWalletPanel({ onReady }: Props) {
-  const { address, isBusy, error, create, unlock, lock } = useSettuWallet();
+  const { address, isBusy, error, prepare, finalize, unlock, lock } =
+    useSettuWallet();
   const [walletId, setWalletId] = useState<string | undefined>();
   const [phase, setPhase] = useState<Phase>(address ? "ready" : "create");
 
@@ -43,6 +44,8 @@ export function SettuWalletPanel({ onReady }: Props) {
   const [usePhrase, setUsePhrase] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [pending, setPending] = useState<PreparedWallet | null>(null);
+  const [pendingPassword, setPendingPassword] = useState("");
 
   const shown = localError ?? error;
 
@@ -50,14 +53,33 @@ export function SettuWalletPanel({ onReady }: Props) {
     event.preventDefault();
     setLocalError(null);
     try {
-      const result = await create(password);
-      setPhrase(result.mnemonic);
+      const prepared = await prepare(password);
+      setPending(prepared);
+      setPendingPassword(password);
+      setPhrase(prepared.mnemonic);
       setPassword("");
       setConfirm("");
-      setWalletId(result.walletId);
       setPhase("recovery");
     } catch {
       // The hook already surfaced it.
+    }
+  }
+
+  // Only now does anything reach the network, so a failure here still leaves a
+  // wallet recoverable from the phrase the user has just saved.
+  async function handleConfirmPhrase() {
+    if (!pending) return;
+    setLocalError(null);
+    try {
+      const result = await finalize(pending, pendingPassword);
+      setWalletId(result.walletId);
+      setPending(null);
+      setPendingPassword("");
+      setPhrase("");
+      setPhase("ready");
+      onReady?.(result.address);
+    } catch {
+      // Stay put: the phrase on screen is still the only copy.
     }
   }
 
@@ -132,16 +154,14 @@ export function SettuWalletPanel({ onReady }: Props) {
           I have written these words down somewhere safe.
         </label>
 
+        {shown && <p className="m-0 text-[0.75rem] text-[#ff6b6b]">{shown}</p>}
+
         <AuthButton
           type="button"
-          disabled={!savedPhrase}
-          onClick={() => {
-            setPhrase("");
-            setPhase("ready");
-            if (address) onReady?.(address);
-          }}
+          disabled={!savedPhrase || isBusy}
+          onClick={handleConfirmPhrase}
         >
-          Continue
+          {isBusy ? "Creating…" : "Continue"}
         </AuthButton>
       </section>
     );
