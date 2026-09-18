@@ -16,6 +16,13 @@ import {
   buildSponsoredTrustlineTx,
   isSafeToSponsor,
 } from "./account";
+import {
+  canCover,
+  creationReserveCost,
+  remainingCapacity,
+  trustlineReserveCost,
+  type SponsorState,
+} from "./reserves";
 
 const NETWORK = Networks.PUBLIC;
 
@@ -29,9 +36,9 @@ export class SponsorUnavailableError extends Error {
 const HORIZON_URL =
   process.env.STELLAR_HORIZON_URL || "https://horizon.stellar.org";
 
-// Refuse well before empty: a sponsor that runs dry mid-flight strands a
-// half-created account, which is worse than declining to start.
-const DEFAULT_MIN_XLM = 20;
+// Optional buffer *on top of* the derived requirement. Renamed from
+// SETTU_SPONSOR_MIN_XLM, which meant a floor and would now read as its inverse.
+const EXTRA_BUFFER_XLM = Number(process.env.SETTU_SPONSOR_BUFFER_XLM || 0);
 
 /** Separate from CCTP_STELLAR_HOT_WALLET_SECRET — this key is reachable from a
  *  public endpoint, so it must not be the one that mints onramp deliveries. */
@@ -57,16 +64,37 @@ export async function accountExists(publicKey: string): Promise<boolean> {
   }
 }
 
-async function assertSponsorFunded(server: Horizon.Server, sponsor: string) {
+// Derived from the sponsor's own ledger state, so it stays correct as the
+// number of sponsored wallets grows.
+function sponsorState(account: Horizon.AccountResponse): SponsorState {
+  const native = account.balances.find((b) => b.asset_type === "native");
+  const counts = account as unknown as {
+    num_sponsoring?: number;
+    num_sponsored?: number;
+  };
+  return {
+    balanceXlm: Number(native?.balance ?? "0"),
+    subentryCount: account.subentry_count,
+    numSponsoring: counts.num_sponsoring ?? 0,
+    numSponsored: counts.num_sponsored ?? 0,
+  };
+}
+
+async function loadFundedSponsor(
+  server: Horizon.Server,
+  sponsor: string,
+  reserveCostXlm: number,
+) {
   const account = await server.loadAccount(sponsor).catch(() => null);
   if (!account) {
     throw new SponsorUnavailableError("Sponsor account is not funded yet");
   }
-  const native = account.balances.find((b) => b.asset_type === "native");
-  const floor = Number(process.env.SETTU_SPONSOR_MIN_XLM || DEFAULT_MIN_XLM);
-  if (Number(native?.balance ?? "0") < floor) {
+
+  const state = sponsorState(account);
+  if (!canCover(state, reserveCostXlm, EXTRA_BUFFER_XLM)) {
     throw new SponsorUnavailableError(
-      "Sponsor balance is below its floor; refusing to sponsor",
+      `Sponsor cannot cover this reserve: ${state.balanceXlm} XLM held, ` +
+        `${remainingCapacity(state)} wallets of capacity left`,
     );
   }
   return account;
@@ -79,7 +107,11 @@ export async function signSponsoredCreation(
 ): Promise<string> {
   const sponsor = getSponsorKeypair();
   const server = horizon();
-  const sponsorAccount = await assertSponsorFunded(server, sponsor.publicKey());
+  const sponsorAccount = await loadFundedSponsor(
+    server,
+    sponsor.publicKey(),
+    creationReserveCost((assets ?? [null]).length),
+  );
 
   const tx = buildSponsoredCreationTx({
     sponsor: sponsorAccount,
@@ -99,7 +131,11 @@ export async function signSponsoredTrustline(
 ): Promise<string> {
   const sponsor = getSponsorKeypair();
   const server = horizon();
-  const sponsorAccount = await assertSponsorFunded(server, sponsor.publicKey());
+  const sponsorAccount = await loadFundedSponsor(
+    server,
+    sponsor.publicKey(),
+    trustlineReserveCost(),
+  );
 
   const tx = buildSponsoredTrustlineTx({
     sponsor: sponsorAccount,
@@ -164,7 +200,8 @@ export async function feeBumpAndSubmit(innerXdr: string) {
     throw new FeeBumpRejected("That account is not a Settu wallet");
   }
 
-  await assertSponsorFunded(server, sponsor.publicKey());
+  // A fee bump consumes no reserve, only the fee itself.
+  await loadFundedSponsor(server, sponsor.publicKey(), 0);
 
   const bumped = TransactionBuilder.buildFeeBumpTransaction(
     sponsor,
