@@ -18,6 +18,8 @@ export interface DekWrap {
   iv: string;
   wrappedDek: string;
   label?: string;
+  /** Which passkey to prompt for. Public by design, not a secret. */
+  credentialId?: string;
 }
 
 export interface SealedWallet {
@@ -94,7 +96,7 @@ async function wrapDek(
   dek: Uint8Array,
   type: WrapType,
   secret: string,
-  label?: string,
+  meta: { label?: string; credentialId?: string } = {},
 ): Promise<DekWrap> {
   const salt = randomBytes(SALT_BYTES);
   const iv = randomBytes(AES_IV_BYTES);
@@ -113,7 +115,8 @@ async function wrapDek(
     salt: toB64(salt),
     iv: toB64(iv),
     wrappedDek: toB64(new Uint8Array(wrapped)),
-    ...(label ? { label } : {}),
+    ...(meta.label ? { label: meta.label } : {}),
+    ...(meta.credentialId ? { credentialId: meta.credentialId } : {}),
   };
 }
 
@@ -231,10 +234,18 @@ export async function unsealSecret(
 export async function addUnlockMethod(
   sealed: SealedWallet,
   existing: { type: WrapType; secret: string },
-  addition: { type: WrapType; secret: string; label?: string },
+  addition: {
+    type: WrapType;
+    secret: string;
+    label?: string;
+    credentialId?: string;
+  },
 ): Promise<SealedWallet> {
   const dek = await unwrapDek(sealed, existing.type, existing.secret);
-  const wrap = await wrapDek(dek, addition.type, addition.secret, addition.label);
+  const wrap = await wrapDek(dek, addition.type, addition.secret, {
+    label: addition.label,
+    credentialId: addition.credentialId,
+  });
   return { ...sealed, wraps: [...sealed.wraps, wrap] };
 }
 

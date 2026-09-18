@@ -117,7 +117,17 @@ test("the blob carries no key material that could unwrap a DEK server-side", asy
     assert.deepEqual(
       Object.keys(wrap).filter(
         (k) =>
-          !["type", "version", "kdf", "iterations", "salt", "iv", "wrappedDek", "label"].includes(k),
+          ![
+            "type",
+            "version",
+            "kdf",
+            "iterations",
+            "salt",
+            "iv",
+            "wrappedDek",
+            "label",
+            "credentialId",
+          ].includes(k),
       ),
       [],
     );

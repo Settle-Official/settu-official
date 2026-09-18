@@ -3,11 +3,17 @@
 import { useCallback, useState } from "react";
 import { Keypair, Networks, TransactionBuilder } from "@stellar/stellar-sdk";
 import {
+  addUnlockMethod,
   createSealedWallet,
   unsealSecret,
   type SealedWallet,
   type UnlockWith,
 } from "@/lib/stellar/settu-wallet/keys";
+import {
+  isPasskeySupported,
+  registerPasskey,
+  unlockWithPasskey,
+} from "@/lib/stellar/settu-wallet/passkey";
 import { STELLAR_HORIZON_URL } from "@/lib/stellar/settu-wallet/account";
 import {
   isUnlocked,
@@ -106,6 +112,60 @@ export function useSettuWallet() {
     [],
   );
 
+  // Adds a passkey to an unlocked wallet, proving the password first.
+  const addPasskey = useCallback(
+    async (walletId: string, password: string, label: string) => {
+      setIsBusy(true);
+      setError(null);
+      try {
+        const { sealed } = await getKeyBlob(walletId);
+        const { credentialId, secret } = await registerPasskey(walletId, label);
+        const updated = await addUnlockMethod(
+          sealed as SealedWallet,
+          { type: "password", secret: password },
+          { type: "passkey", secret, credentialId, label },
+        );
+        await putKeyBlob(walletId, updated);
+      } catch (err: any) {
+        setError(err?.message ?? "Could not add a passkey");
+        throw err;
+      } finally {
+        setIsBusy(false);
+      }
+    },
+    [],
+  );
+
+  // Finds the wrap this device registered, then unlocks with its PRF secret.
+  const unlockByPasskey = useCallback(
+    async (walletId: string): Promise<string> => {
+      setIsBusy(true);
+      setError(null);
+      try {
+        const { sealed } = await getKeyBlob(walletId);
+        const wrap = (sealed as SealedWallet).wraps.find(
+          (candidate) => candidate.type === "passkey" && candidate.credentialId,
+        );
+        if (!wrap?.credentialId) {
+          throw new Error("No passkey is registered for this wallet");
+        }
+        const secret = await unlockWithPasskey(wrap.credentialId);
+        const opened = await unlockWallet(sealed as SealedWallet, {
+          type: "passkey",
+          secret,
+        });
+        setAddress(opened);
+        return opened;
+      } catch (err: any) {
+        setError(err?.message ?? "Could not unlock with your passkey");
+        throw err;
+      } finally {
+        setIsBusy(false);
+      }
+    },
+    [],
+  );
+
   const lock = useCallback(() => {
     lockWallet();
     setAddress(null);
@@ -118,6 +178,9 @@ export function useSettuWallet() {
     error,
     create,
     unlock,
+    unlockByPasskey,
+    addPasskey,
+    canUsePasskey: isPasskeySupported(),
     lock,
   };
 }
