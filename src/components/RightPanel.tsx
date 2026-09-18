@@ -96,8 +96,8 @@ export function RightPanel({
         <section
           className={
             isConnecting
-              ? "bg-[var(--accent)] p-[1.3rem] text-[#0a0a0a] [animation:pulse_1.2s_ease-in-out_infinite]"
-              : "bg-[var(--accent)] p-[1.3rem] text-[#0a0a0a]"
+              ? "bg-[var(--accent)] p-[1.3rem] text-[var(--accent-contrast)] [animation:pulse_1.2s_ease-in-out_infinite]"
+              : "bg-[var(--accent)] p-[1.3rem] text-[var(--accent-contrast)]"
           }
         >
           <p className="m-0 text-[0.75rem] tracking-[0.08em]">
@@ -109,33 +109,33 @@ export function RightPanel({
           <p className="m-0 text-[0.75rem]">{getHeroMeta()}</p>
         </section>
       ) : (
-        <section className="bg-[var(--accent)] p-[1.3rem] text-[#0a0a0a]">
+        <section className="bg-[var(--accent)] p-[1.3rem] text-[var(--accent-contrast)]">
           <button
             type="button"
             onClick={onConnect}
             disabled={isConnecting}
-            className="w-full border border-[#0a0a0a] px-4 py-3 text-[0.72rem] font-bold uppercase tracking-[0.08em] hover:bg-[#0a0a0a] hover:text-[var(--accent)] disabled:opacity-60 disabled:cursor-not-allowed"
+            className="w-full border border-[var(--accent-contrast)] px-4 py-3 text-[0.72rem] font-bold uppercase tracking-[0.08em] hover:bg-[var(--accent-contrast)] hover:text-[var(--accent)] disabled:opacity-60 disabled:cursor-not-allowed"
           >
             {isConnecting ? "CONNECTING..." : "CONNECT WALLET"}
           </button>
         </section>
       )}
 
-      <section className="border border-[var(--line)] bg-[#0a0a0a] p-4">
+      <section className="border border-[var(--line)] bg-[var(--bg)] p-4">
         <h3 className="mt-0 mb-[0.65rem] font-bold font-space-grotesk text-[1.13rem]">
           SETTUMENT BREAKDOWN
         </h3>
         {/* <div className="flex items-center justify-between py-[0.35rem] text-[0.72rem] text-[var(--muted)]">
           <span>FX Rate</span>
-          <span className="text-white">{getFxRateValue()}</span>
+          <span className="text-[var(--foreground)]">{getFxRateValue()}</span>
         </div> */}
         <div className="flex items-center justify-between py-[0.35rem] text-[0.72rem] text-[var(--muted)]">
           <span>Network fee</span>
-          <span className="text-white">-</span>
+          <span className="text-[var(--foreground)]">-</span>
         </div>
         <div className="flex items-center justify-between py-[0.35rem] text-[0.72rem] text-[var(--muted)]">
           <span>Platform fee</span>
-          <span className="text-white">-</span>
+          <span className="text-[var(--foreground)]">-</span>
         </div>
         <div className="my-[0.45rem] h-px bg-[var(--line)]" />
         <div className="flex items-center justify-between py-[0.35rem] text-[0.72rem] font-bold text-[var(--accent)]">

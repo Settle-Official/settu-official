@@ -18,7 +18,9 @@ interface StepConfig {
 }
 
 // Brand palette (globals.css :root) — gold, its light highlight, and white.
-const CONFETTI_COLORS = ["#c9a962", "#f4e1ad", "#ffffff"];
+// The third color is the neutral one (white on dark, black on light) so a
+// piece is never invisible against the page background in either theme.
+const CONFETTI_COLORS = ["#c9a962", "#f4e1ad", "var(--foreground)"];
 
 /**
  * Pre-computed so the burst is scattered but identical on server and client —
@@ -133,7 +135,7 @@ export function TransactionProgressModal({
 
       {/* Modal with racing border */}
       <div className="racing-border-wrapper relative z-10">
-        <div className="racing-border-content min-w-[380px] max-w-[440px] max-[500px]:min-w-[90vw] bg-[#0c0c0c] p-6">
+        <div className="racing-border-content min-w-[380px] max-w-[440px] max-[500px]:min-w-[90vw] bg-[var(--surface-2)] p-6">
           {/* Header */}
           <div className="mb-5 flex items-center justify-between">
             <h3 className="m-0 font-space-grotesk text-[1.1rem] font-bold tracking-[-0.02em]">
@@ -147,7 +149,7 @@ export function TransactionProgressModal({
               <button
                 type="button"
                 onClick={onClose}
-                className="text-[var(--muted)] hover:text-white transition-colors text-[1.2rem] leading-none"
+                className="text-[var(--muted)] hover:text-[var(--foreground)] transition-colors text-[1.2rem] leading-none"
               >
                 ✕
               </button>
@@ -166,7 +168,7 @@ export function TransactionProgressModal({
                   key={step.key}
                   className={`flex items-center gap-3 py-[0.45rem] px-3 transition-all duration-300 ${
                     isCurrent
-                      ? "bg-[#1a1a1a] text-white"
+                      ? "bg-[var(--bg-highlight)] text-[var(--foreground)]"
                       : isPast
                         ? "text-[var(--accent)]"
                         : "text-[var(--muted)] opacity-40"
@@ -259,7 +261,7 @@ export function TransactionProgressModal({
             <button
               type="button"
               onClick={onClose}
-              className="mt-4 w-full py-3 text-[0.8rem] font-bold uppercase tracking-[0.08em] transition-colors bg-[var(--accent)] text-[#0a0a0a] hover:brightness-110"
+              className="mt-4 w-full py-3 text-[0.8rem] font-bold uppercase tracking-[0.08em] transition-colors bg-[var(--accent)] text-[var(--accent-contrast)] hover:brightness-110"
             >
               {isSuccess ? "DONE" : "CLOSE"}
             </button>
@@ -270,7 +272,7 @@ export function TransactionProgressModal({
             <button
               type="button"
               onClick={onCancel}
-              className="mt-4 w-full py-2.5 text-[0.72rem] font-bold uppercase tracking-[0.08em] text-[var(--muted)] transition-colors hover:text-white"
+              className="mt-4 w-full py-2.5 text-[0.72rem] font-bold uppercase tracking-[0.08em] text-[var(--muted)] transition-colors hover:text-[var(--foreground)]"
             >
               Cancel
             </button>

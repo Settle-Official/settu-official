@@ -1,12 +1,52 @@
 @import "tailwindcss";
 
+/*
+ * Theme tokens. Dark is the default/original look (unchanged values below).
+ * Light mode ([data-theme="light"]) is a literal black<->white inversion of
+ * every neutral (background/border/text) token, computed channel-wise
+ * (255 - value) so relative lightness ordering between surfaces is
+ * preserved. --accent/--accent-bright/--accent-contrast are deliberately
+ * NOT part of that inversion — the gold accent stays the exact same color
+ * in both themes, and --accent-contrast (the near-black text drawn on top
+ * of accent-filled buttons) stays fixed too, since the accent's own
+ * lightness never changes.
+ */
 :root {
   --bg: #0a0a0a;
-  --panel: #111111;
+  --bg-highlight: #1a1a1a;
+  --surface: #101010;
+  --surface-2: #0c0c0c;
+  --surface-3: #141414;
   --line: #333333;
+  --line-soft: #1f1f1f;
+  --line-dashed: #222222;
+  --line-strong: #2a2a2a;
   --muted: #777777;
+  --muted-strong: #666666;
+  --muted-soft: #555555;
+  --foreground: #ffffff;
   --accent: #c9a962;
-  --text: #ffffff;
+  --accent-bright: #f4e1ad;
+  --accent-contrast: #0a0a0a;
+}
+
+[data-theme="light"] {
+  --bg: #ffffff;
+  --bg-highlight: #f2f2f2;
+  --surface: #efefef;
+  --surface-2: #f3f3f3;
+  --surface-3: #ebebeb;
+  --line: #cccccc;
+  --line-soft: #e0e0e0;
+  --line-dashed: #dddddd;
+  --line-strong: #d5d5d5;
+  /* Darker than a literal invert (#888/#999/#aaa) — gray text that reads
+     fine on black is noticeably harder to read on white, so these lean
+     toward near-black instead for actual legibility in light mode. */
+  --muted: #444444;
+  --muted-strong: #555555;
+  --muted-soft: #6b6b6b;
+  --foreground: #000000;
 }
 
 /* Custom scrollbar — every scrollable area in the app. Black track, gold
@@ -39,8 +79,8 @@ body {
   margin: 0;
   padding: 0;
   overflow-x: hidden;
-  background: radial-gradient(circle at top right, #1a1a1a 0%, var(--bg) 45%);
-  color: var(--text);
+  background: radial-gradient(circle at top right, var(--bg-highlight) 0%, var(--bg) 45%);
+  color: var(--foreground);
   font-family:
     var(--font-ibm-plex-mono), ui-monospace, SFMono-Regular, Menlo, Monaco,
     Consolas, "Liberation Mono", "Courier New", monospace;
@@ -102,7 +142,7 @@ button {
 }
 
 .racing-border-content {
-  background: #0c0c0c;
+  background: var(--surface-2);
 }
 
 /* Dot bounce animation for active step */
@@ -196,36 +236,3 @@ button {
   }
 }
 
-/* Marquee for mobile/tablet banner */
-@keyframes marquee {
-  from { transform: translateX(0); }
-  to { transform: translateX(-50%); }
-}
-
-.marquee-outer {
-  /* No explicit width: this relies on negative margins (-mx-*) elsewhere to
-     bleed past a padded parent. Pairing that with `width: 100%` over-
-     constrains the box — width is resolved against the parent's content box,
-     so the browser is forced to discard margin-right (per spec) while
-     honoring margin-left, leaving the right edge short by one padding unit.
-     Leaving width as the initial `auto` lets the box-model equation solve
-     for a width that fills exactly between both margins instead. */
-  position: relative;
-  overflow: hidden;
-}
-
-.marquee-inner {
-  display: flex;
-  width: max-content;
-  animation: marquee 18s linear infinite;
-}
-
-.marquee-inner span {
-  white-space: nowrap;
-  padding: 0.35rem 2rem;
-  font-size: 0.72rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: #0a0a0a;
-}

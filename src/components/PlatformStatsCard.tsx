@@ -10,13 +10,13 @@ export interface PlatformStatsCardProps {
  */
 export function PlatformStatsCard({ stats }: Readonly<PlatformStatsCardProps>) {
   return (
-    <section className="border border-[var(--line)] bg-[#0a0a0a] p-4">
+    <section className="border border-[var(--line)] bg-[var(--bg)] p-4">
       <h3 className="mt-0 mb-[0.65rem] font-bold font-space-grotesk text-[1.13rem]">
         PLATFORM STATS
       </h3>
       <div className="flex items-center justify-between py-[0.35rem] text-[0.72rem] text-[var(--muted)]">
         <span>Total Users</span>
-        <span className="font-space-grotesk text-white text-[1.1rem] font-bold">
+        <span className="font-space-grotesk text-[var(--foreground)] text-[1.1rem] font-bold">
           {stats ? stats.totalUsers.toLocaleString() : "--"}
         </span>
       </div>

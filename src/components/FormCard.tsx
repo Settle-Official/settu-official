@@ -563,7 +563,7 @@ export function FormCard({
   };
 
   return (
-    <section className="flex flex-col gap-[1.1rem] border border-[var(--line)] bg-[#0a0a0a] p-[1.2rem]">
+    <section className="flex flex-col gap-[1.1rem] border border-[var(--line)] bg-[var(--bg)] p-[1.2rem]">
       <div>
         <h2 className="m-0 font-space-grotesk font-bold text-[1.50rem]">
           {isConnected
@@ -637,9 +637,9 @@ export function FormCard({
                 // regardless of source order, so a class-based fill/border
                 // here would silently drop just like that one did.
                 style={{
-                  border: `2px solid ${isActive ? "#C9A962" : "#3a3a3a"}`,
-                  backgroundColor: isActive ? "#C9A962" : "#101010",
-                  color: isActive ? "#0a0a0a" : "#f4e1ad",
+                  border: `2px solid ${isActive ? "var(--accent)" : "var(--line)"}`,
+                  backgroundColor: isActive ? "var(--accent)" : "var(--surface)",
+                  color: isActive ? "var(--accent-contrast)" : "var(--accent)",
                 }}
                 className="px-[0.6rem] py-[0.25rem] text-[0.62rem] font-bold uppercase tracking-[0.08em] transition-colors rounded-none"
               >
@@ -789,7 +789,7 @@ export function FormCard({
           tone={accountName || accountVerified ? "accent" : "muted"}
         />
         {quote && (
-          <div className="mt-2 p-3 bg-[#1a1a1a] border border-[var(--line)] rounded">
+          <div className="mt-2 p-3 bg-[var(--bg-highlight)] border border-[var(--line)] rounded">
             <div className="text-[0.75rem] text-[var(--muted)] mb-1">
               ESTIMATED PAYOUT
             </div>
@@ -827,10 +827,10 @@ export function FormCard({
           "h-12 font-bold uppercase tracking-[0.08em] transition-colors",
           !isConnected &&
             !isConnecting &&
-            "bg-[var(--accent)] text-[#0a0a0a] hover:brightness-110",
+            "bg-[var(--accent)] text-[var(--accent-contrast)] hover:brightness-110",
           (isConnecting || isExecutingOfframp) &&
-            "bg-[#2f2f2f] text-[var(--muted)] cursor-not-allowed",
-          isConnected && "bg-[#efefef] text-[#0a0a0a] hover:brightness-95",
+            "bg-[var(--line-strong)] text-[var(--muted)] cursor-not-allowed",
+          isConnected && "bg-[var(--foreground)] text-[var(--bg)] hover:brightness-95",
         )}
       >
         {getButtonText()}
@@ -874,6 +874,10 @@ function InputField({
           type={type}
           value={value}
           onChange={(e) => onChange(e.target.value)}
+          // A focused number input still eats scroll-wheel ticks to bump its
+          // value even with the spinner arrows hidden below — blurring on
+          // wheel hands that scroll back to the page instead.
+          onWheel={(e) => e.currentTarget.blur()}
           placeholder={placeholder}
           disabled={disabled}
           maxLength={maxLength}

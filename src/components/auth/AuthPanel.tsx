@@ -53,7 +53,7 @@ export function AuthPanel({ onAuthenticated }: { readonly onAuthenticated?: () =
   // confirmation is deliberately neutral.
   if (sent) {
     return (
-      <section className="border border-[var(--line)] bg-[#0a0a0a] p-4">
+      <section className="border border-[var(--line)] bg-[var(--bg)] p-4">
         <h2 className="mt-0 mb-[0.65rem] font-space-grotesk text-[1.13rem] font-bold">
           CHECK YOUR EMAIL
         </h2>
@@ -73,7 +73,7 @@ export function AuthPanel({ onAuthenticated }: { readonly onAuthenticated?: () =
   }
 
   return (
-    <section className="flex flex-col gap-[1.1rem] border border-[var(--line)] bg-[#0a0a0a] p-[1.2rem]">
+    <section className="flex flex-col gap-[1.1rem] border border-[var(--line)] bg-[var(--bg)] p-[1.2rem]">
       <div>
         <h2 className="m-0 font-space-grotesk text-[1.5rem] font-bold">
           {isSignup ? "CREATE ACCOUNT" : "SIGN IN"}

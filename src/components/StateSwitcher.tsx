@@ -14,7 +14,7 @@ const OPTIONS: ReadonlyArray<{ key: WalletFlowState; label: string }> = [
 
 export function StateSwitcher({ value, onChange }: Readonly<StateSwitcherProps>) {
   return (
-    <div className="inline-flex gap-1 border border-[var(--line)] bg-[#0f0f0f] p-1" role="tablist" aria-label="Wallet state">
+    <div className="inline-flex gap-1 border border-[var(--line)] bg-[var(--surface)] p-1" role="tablist" aria-label="Wallet state">
       {OPTIONS.map((option) => (
         <button
           key={option.key}
@@ -24,7 +24,7 @@ export function StateSwitcher({ value, onChange }: Readonly<StateSwitcherProps>)
           onClick={() => onChange(option.key)}
           className={cn(
             "px-[0.8rem] py-[0.45rem] text-[0.75rem] uppercase text-[var(--muted)]",
-            value === option.key && "bg-[var(--accent)] text-[#0a0a0a]",
+            value === option.key && "bg-[var(--accent)] text-[var(--accent-contrast)]",
           )}
         >
           {option.label}
