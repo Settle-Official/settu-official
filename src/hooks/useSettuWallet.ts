@@ -25,8 +25,8 @@ import {
 interface CreateResult {
   address: string;
   walletId: string;
-  /** Shown once. Losing every unlock method loses the funds. */
-  recoveryCode: string;
+  /** Shown once. The only way back in without the password, and the only way out. */
+  mnemonic: string;
 }
 
 // Created, sealed and signed in the browser. Anything that crosses the
@@ -41,7 +41,7 @@ export function useSettuWallet() {
       setIsBusy(true);
       setError(null);
       try {
-        const { sealed, publicKey, recoveryCode } =
+        const { sealed, publicKey, mnemonic } =
           await createSealedWallet(password);
 
         // Sponsor pays the reserves; we co-sign with the key we just made.
@@ -76,7 +76,7 @@ export function useSettuWallet() {
 
         await unlockWallet(sealed, { type: "password", secret: password });
         setAddress(publicKey);
-        return { address: publicKey, walletId, recoveryCode };
+        return { address: publicKey, walletId, mnemonic };
       } catch (err: any) {
         setError(err?.message ?? "Could not create your wallet");
         throw err;

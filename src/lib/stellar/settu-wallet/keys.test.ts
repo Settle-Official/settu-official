@@ -4,10 +4,10 @@ import { Keypair } from "@stellar/stellar-sdk";
 import {
   addUnlockMethod,
   createSealedWallet,
-  generateRecoveryCode,
-  normalizeRecoveryCode,
+  resealFromMnemonic,
   unsealSecret,
 } from "./keys";
+import { isValidMnemonic, keypairFromMnemonic } from "./mnemonic";
 
 const PASSWORD = "correct horse battery staple";
 
@@ -20,32 +20,81 @@ test("the password unlocks the secret, and it matches the public key", async () 
   assert.equal(Keypair.fromSecret(secret).publicKey(), publicKey);
 });
 
-test("the recovery code unlocks the same secret independently", async () => {
-  const { sealed, recoveryCode } = await createSealedWallet(PASSWORD);
+test("the phrase unlocks the same secret independently", async () => {
+  const { sealed, mnemonic } = await createSealedWallet(PASSWORD);
   const viaPassword = await unsealSecret(sealed, {
     type: "password",
     secret: PASSWORD,
   });
-  const viaRecovery = await unsealSecret(sealed, {
-    type: "recovery",
-    secret: recoveryCode,
+  const viaPhrase = await unsealSecret(sealed, {
+    type: "mnemonic",
+    secret: mnemonic,
   });
-  assert.equal(viaRecovery, viaPassword);
+  assert.equal(viaPhrase, viaPassword);
+});
+
+test("the phrase is 24 valid BIP-39 words", async () => {
+  const { mnemonic } = await createSealedWallet(PASSWORD);
+  assert.equal(mnemonic.split(" ").length, 24);
+  assert.equal(isValidMnemonic(mnemonic), true);
+});
+
+test("the phrase recovers the account with the blob deleted entirely", async () => {
+  // The point of a phrase over a recovery code: it does not need Settu.
+  const { mnemonic, publicKey } = await createSealedWallet(PASSWORD);
+  assert.equal(keypairFromMnemonic(mnemonic).publicKey(), publicKey);
+});
+
+test("the phrase is accepted despite messy casing and spacing", async () => {
+  const { sealed, mnemonic } = await createSealedWallet(PASSWORD);
+  const messy = `  ${mnemonic.toUpperCase().replace(/ /g, "   ")}  `;
+  const secret = await unsealSecret(sealed, { type: "mnemonic", secret: messy });
+  assert.equal(Keypair.fromSecret(secret).publicKey(), sealed.publicKey);
+});
+
+test("another wallet's phrase is refused", async () => {
+  const a = await createSealedWallet(PASSWORD);
+  const b = await createSealedWallet(PASSWORD);
+  await assert.rejects(
+    () => unsealSecret(a.sealed, { type: "mnemonic", secret: b.mnemonic }),
+    /different wallet/i,
+  );
+});
+
+test("a mistyped phrase is rejected rather than deriving another key", async () => {
+  const { sealed } = await createSealedWallet(PASSWORD);
+  await assert.rejects(
+    () =>
+      unsealSecret(sealed, {
+        type: "mnemonic",
+        secret: "abandon ".repeat(23) + "abandon",
+      }),
+    /valid|different wallet/i,
+  );
+});
+
+test("the phrase sets a new password without changing the Stellar key", async () => {
+  const { sealed, mnemonic, publicKey } = await createSealedWallet(PASSWORD);
+  const resealed = await resealFromMnemonic(mnemonic, "a brand new password!!");
+
+  assert.equal(resealed.publicKey, publicKey);
+  const secret = await unsealSecret(resealed, {
+    type: "password",
+    secret: "a brand new password!!",
+  });
+  assert.equal(Keypair.fromSecret(secret).publicKey(), publicKey);
+
+  // The old password must not open the new envelope.
+  await assert.rejects(() =>
+    unsealSecret(resealed, { type: "password", secret: PASSWORD }),
+  );
+  void sealed;
 });
 
 test("a wrong password fails closed rather than returning anything", async () => {
   const { sealed } = await createSealedWallet(PASSWORD);
   await assert.rejects(
     () => unsealSecret(sealed, { type: "password", secret: "not it" }),
-    /could not unlock/i,
-  );
-});
-
-test("a wrong recovery code fails closed", async () => {
-  const { sealed } = await createSealedWallet(PASSWORD);
-  await assert.rejects(
-    () =>
-      unsealSecret(sealed, { type: "recovery", secret: "AAAAA-BBBBB-CCCCC-DDDDD" }),
     /could not unlock/i,
   );
 });
@@ -75,13 +124,6 @@ test("the blob carries no key material that could unwrap a DEK server-side", asy
   }
 });
 
-test("recovery codes are case- and separator-insensitive", async () => {
-  const { sealed, recoveryCode } = await createSealedWallet(PASSWORD);
-  const messy = recoveryCode.toLowerCase().replace(/-/g, " ");
-  const secret = await unsealSecret(sealed, { type: "recovery", secret: messy });
-  assert.equal(Keypair.fromSecret(secret).publicKey(), sealed.publicKey);
-});
-
 test("adding a passkey wrap leaves the existing ones working", async () => {
   const created = await createSealedWallet(PASSWORD);
   const updated = await addUnlockMethod(
@@ -98,14 +140,8 @@ test("adding a passkey wrap leaves the existing ones working", async () => {
     type: "password",
     secret: PASSWORD,
   });
-  const viaRecovery = await unsealSecret(updated, {
-    type: "recovery",
-    secret: created.recoveryCode,
-  });
-
   assert.equal(viaPasskey, viaPassword);
-  assert.equal(viaRecovery, viaPassword);
-  assert.equal(updated.wraps.length, 3);
+  assert.equal(updated.wraps.length, 2);
 });
 
 test("a second wrap of the same type does not shadow the first", async () => {
@@ -157,15 +193,6 @@ test("tampered ciphertext is rejected by AES-GCM rather than decoded", async () 
   await assert.rejects(() =>
     unsealSecret(corrupted, { type: "password", secret: PASSWORD }),
   );
-});
-
-test("recovery codes are unique and use the unambiguous alphabet", () => {
-  const codes = new Set(Array.from({ length: 50 }, generateRecoveryCode));
-  assert.equal(codes.size, 50);
-  for (const code of codes) {
-    assert.match(code, /^[ABCDEFGHJKMNPQRSTVWXYZ23456789-]+$/);
-    assert.equal(normalizeRecoveryCode(code).length, 20);
-  }
 });
 
 test("each wallet gets a distinct keypair", async () => {

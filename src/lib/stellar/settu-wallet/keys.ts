@@ -2,8 +2,11 @@
 // per unlock method. The server holds no wrap key, so it cannot decrypt.
 
 import { Keypair } from "@stellar/stellar-sdk";
+import { createMnemonic, keypairFromMnemonic } from "./mnemonic";
 
-export type WrapType = "password" | "recovery" | "passkey";
+// The mnemonic is not a wrap: holding it yields the key directly, with nothing
+// to unwrap and no dependence on the stored blob.
+export type WrapType = "password" | "passkey";
 
 /** One way to unwrap the DEK. Versioned so the KDF can change later. */
 export interface DekWrap {
@@ -136,86 +139,76 @@ async function unwrapDek(
   throw new Error("Could not unlock the wallet with that secret.");
 }
 
-// Crockford base32 minus look-alikes, so a code survives being read aloud.
-const RECOVERY_ALPHABET = "ABCDEFGHJKMNPQRSTVWXYZ23456789";
-const RECOVERY_GROUPS = 4;
-const RECOVERY_GROUP_LEN = 5;
-
-export function generateRecoveryCode(): string {
-  const total = RECOVERY_GROUPS * RECOVERY_GROUP_LEN;
-  const bytes = randomBytes(total);
-  let out = "";
-  for (let i = 0; i < total; i++) {
-    if (i > 0 && i % RECOVERY_GROUP_LEN === 0) out += "-";
-    out += RECOVERY_ALPHABET[bytes[i] % RECOVERY_ALPHABET.length];
-  }
-  return out;
-}
-
-/** Codes are compared case- and separator-insensitively. */
-export function normalizeRecoveryCode(code: string): string {
-  return code.toUpperCase().replace(/[^A-Z0-9]/g, "");
-}
-
 export interface CreatedWallet {
   sealed: SealedWallet;
   publicKey: string;
-  recoveryCode: string;
+  /** Shown once. The only way back in without the password, and the only way out. */
+  mnemonic: string;
 }
 
-/** The secret exists only inside this call; the recovery code is shown once. */
-export async function createSealedWallet(
+/** Builds a fresh envelope around an existing keypair. */
+async function sealSecret(
+  keypair: Keypair,
   password: string,
-): Promise<CreatedWallet> {
-  const keypair = Keypair.random();
-  const secret = keypair.secret();
-  const recoveryCode = generateRecoveryCode();
-
+): Promise<SealedWallet> {
   const dek = randomBytes(DEK_BYTES);
   const iv = randomBytes(AES_IV_BYTES);
-  const dekKey = await subtle().importKey("raw", dek as BufferSource, "AES-GCM", false, [
-    "encrypt",
-    "decrypt",
-  ]);
+  const dekKey = await subtle().importKey(
+    "raw",
+    dek as BufferSource,
+    "AES-GCM",
+    false,
+    ["encrypt", "decrypt"],
+  );
   const ciphertext = await subtle().encrypt(
     { name: "AES-GCM", iv: iv as BufferSource },
     dekKey,
-    new TextEncoder().encode(secret) as BufferSource,
+    new TextEncoder().encode(keypair.secret()) as BufferSource,
   );
 
-  const wraps = await Promise.all([
-    wrapDek(dek, "password", password),
-    wrapDek(dek, "recovery", normalizeRecoveryCode(recoveryCode)),
-  ]);
+  return {
+    version: 1,
+    publicKey: keypair.publicKey(),
+    iv: toB64(iv),
+    ciphertext: toB64(new Uint8Array(ciphertext)),
+    wraps: [await wrapDek(dek, "password", password)],
+  };
+}
 
+/** The secret exists only inside this call; the phrase is shown once. */
+export async function createSealedWallet(
+  password: string,
+): Promise<CreatedWallet> {
+  const mnemonic = createMnemonic();
+  const keypair = keypairFromMnemonic(mnemonic);
   return {
     publicKey: keypair.publicKey(),
-    recoveryCode,
-    sealed: {
-      version: 1,
-      publicKey: keypair.publicKey(),
-      iv: toB64(iv),
-      ciphertext: toB64(new Uint8Array(ciphertext)),
-      wraps,
-    },
+    mnemonic,
+    sealed: await sealSecret(keypair, password),
   };
 }
 
 export type UnlockWith =
   | { type: "password"; secret: string }
-  | { type: "recovery"; secret: string }
-  | { type: "passkey"; secret: string };
+  | { type: "passkey"; secret: string }
+  | { type: "mnemonic"; secret: string };
 
 /** Decrypt the Stellar secret. Throws rather than returning a partial result. */
 export async function unsealSecret(
   sealed: SealedWallet,
   unlock: UnlockWith,
 ): Promise<string> {
-  const secret =
-    unlock.type === "recovery"
-      ? normalizeRecoveryCode(unlock.secret)
-      : unlock.secret;
-  const dek = await unwrapDek(sealed, unlock.type, secret);
+  // The phrase is the key, so this path never touches the stored blob and
+  // still works if the blob is gone.
+  if (unlock.type === "mnemonic") {
+    const keypair = keypairFromMnemonic(unlock.secret);
+    if (keypair.publicKey() !== sealed.publicKey) {
+      throw new Error("That phrase belongs to a different wallet.");
+    }
+    return keypair.secret();
+  }
+
+  const dek = await unwrapDek(sealed, unlock.type, unlock.secret);
 
   const dekKey = await subtle().importKey("raw", dek as BufferSource, "AES-GCM", false, [
     "decrypt",
@@ -237,20 +230,20 @@ export async function unsealSecret(
 /** Adds an unlock method, proving an existing one. The secret is untouched. */
 export async function addUnlockMethod(
   sealed: SealedWallet,
-  existing: UnlockWith,
-  addition: UnlockWith & { label?: string },
+  existing: { type: WrapType; secret: string },
+  addition: { type: WrapType; secret: string; label?: string },
 ): Promise<SealedWallet> {
-  const currentSecret =
-    existing.type === "recovery"
-      ? normalizeRecoveryCode(existing.secret)
-      : existing.secret;
-  const dek = await unwrapDek(sealed, existing.type, currentSecret);
-
-  const nextSecret =
-    addition.type === "recovery"
-      ? normalizeRecoveryCode(addition.secret)
-      : addition.secret;
-  const wrap = await wrapDek(dek, addition.type, nextSecret, addition.label);
-
+  const dek = await unwrapDek(sealed, existing.type, existing.secret);
+  const wrap = await wrapDek(dek, addition.type, addition.secret, addition.label);
   return { ...sealed, wraps: [...sealed.wraps, wrap] };
+}
+
+// Forgot-password recovery. A phrase yields the key but not the DEK, so the
+// envelope is rebuilt rather than rewrapped; the Stellar key is unchanged.
+export async function resealFromMnemonic(
+  phrase: string,
+  password: string,
+): Promise<SealedWallet> {
+  const keypair = keypairFromMnemonic(phrase);
+  return sealSecret(keypair, password);
 }

@@ -22,9 +22,9 @@ export function SettuWalletPanel({ walletId, onReady }: Props) {
   );
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
-  const [recoveryCode, setRecoveryCode] = useState("");
-  const [savedCode, setSavedCode] = useState(false);
-  const [useRecovery, setUseRecovery] = useState(false);
+  const [phrase, setPhrase] = useState("");
+  const [savedPhrase, setSavedPhrase] = useState(false);
+  const [usePhrase, setUsePhrase] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -35,7 +35,7 @@ export function SettuWalletPanel({ walletId, onReady }: Props) {
     setLocalError(null);
     try {
       const result = await create(password);
-      setRecoveryCode(result.recoveryCode);
+      setPhrase(result.mnemonic);
       setPassword("");
       setConfirm("");
       setPhase("recovery");
@@ -51,12 +51,12 @@ export function SettuWalletPanel({ walletId, onReady }: Props) {
     try {
       const opened = await unlock(
         walletId,
-        useRecovery
-          ? { type: "recovery", secret: recoveryCode }
+        usePhrase
+          ? { type: "mnemonic", secret: phrase }
           : { type: "password", secret: password },
       );
       setPassword("");
-      setRecoveryCode("");
+      setPhrase("");
       setPhase("ready");
       onReady?.(opened);
     } catch {
@@ -69,48 +69,57 @@ export function SettuWalletPanel({ walletId, onReady }: Props) {
       <section className="flex flex-col gap-[1rem] border border-[var(--line)] bg-[#0a0a0a] p-[1.2rem]">
         <div>
           <h2 className="m-0 font-space-grotesk text-[1.1rem] font-bold">
-            SAVE YOUR RECOVERY CODE
+            SAVE YOUR RECOVERY PHRASE
           </h2>
           <p className="mt-[0.4rem] mb-0 text-[0.78rem] text-[var(--muted)]">
-            This is the only way back in if you forget your password. We cannot
-            recover it for you, and without it the funds are gone for good.
+            These 24 words are your wallet. They restore it if you forget your
+            password, and they work in Freighter or LOBSTR even if Settu is
+            gone. Anyone who has them can spend your funds, and we cannot
+            recover them for you.
           </p>
         </div>
 
-        <div
-          className="select-all border px-3 py-4 text-center font-mono text-[1.05rem] tracking-[0.15em]"
-          style={{ borderColor: "#C9A962", color: "#C9A962" }}
-        >
-          {recoveryCode}
-        </div>
+        <ol className="m-0 grid list-none grid-cols-2 gap-x-3 gap-y-1 p-0 sm:grid-cols-3">
+          {phrase.split(" ").map((word, index) => (
+            <li
+              key={`${index}-${word}`}
+              className="flex gap-2 font-mono text-[0.8rem]"
+            >
+              <span className="w-5 text-right text-[var(--muted)]">
+                {index + 1}
+              </span>
+              <span style={{ color: "#C9A962" }}>{word}</span>
+            </li>
+          ))}
+        </ol>
 
         <button
           type="button"
           onClick={() => {
-            navigator.clipboard?.writeText(recoveryCode);
+            navigator.clipboard?.writeText(phrase);
             setCopied(true);
             setTimeout(() => setCopied(false), 1500);
           }}
           className="h-10 border border-[var(--line)] text-[0.72rem] uppercase tracking-[0.08em] text-[var(--muted)]"
         >
-          {copied ? "Copied" : "Copy code"}
+          {copied ? "Copied" : "Copy phrase"}
         </button>
 
         <label className="flex items-start gap-2 text-[0.75rem] text-[var(--muted)]">
           <input
             type="checkbox"
-            checked={savedCode}
-            onChange={(event) => setSavedCode(event.target.checked)}
+            checked={savedPhrase}
+            onChange={(event) => setSavedPhrase(event.target.checked)}
             className="mt-[0.15rem]"
           />
-          I have saved this code somewhere safe.
+          I have written these words down somewhere safe.
         </label>
 
         <AuthButton
           type="button"
-          disabled={!savedCode}
+          disabled={!savedPhrase}
           onClick={() => {
-            setRecoveryCode("");
+            setPhrase("");
             setPhase("ready");
             if (address) onReady?.(address);
           }}
@@ -159,16 +168,20 @@ export function SettuWalletPanel({ walletId, onReady }: Props) {
           UNLOCK YOUR WALLET
         </h2>
 
-        {useRecovery ? (
-          <AuthField
-            label="RECOVERY CODE"
-            type="password"
-            value={recoveryCode}
-            onChange={setRecoveryCode}
-            autoComplete="one-time-code"
-            placeholder="XXXXX-XXXXX-XXXXX-XXXXX"
-            disabled={isBusy}
-          />
+        {usePhrase ? (
+          <div className="flex flex-col gap-[0.4rem]">
+            <label className="text-[0.69rem] tracking-[0.08em] text-[var(--muted)]">
+              RECOVERY PHRASE
+            </label>
+            <textarea
+              value={phrase}
+              onChange={(event) => setPhrase(event.target.value)}
+              rows={3}
+              placeholder="Your 24 words, separated by spaces"
+              disabled={isBusy}
+              className="border border-[var(--line)] bg-transparent p-[0.8rem] font-mono text-[0.85rem] outline-none placeholder:text-[var(--muted)] disabled:opacity-50"
+            />
+          </div>
         ) : (
           <AuthField
             label="PASSWORD"
@@ -189,12 +202,12 @@ export function SettuWalletPanel({ walletId, onReady }: Props) {
         <button
           type="button"
           onClick={() => {
-            setUseRecovery((value) => !value);
+            setUsePhrase((value) => !value);
             setLocalError(null);
           }}
           className="text-[0.72rem] text-[var(--muted)] underline"
         >
-          {useRecovery ? "Use my password" : "Use my recovery code instead"}
+          {usePhrase ? "Use my password" : "Use my recovery phrase instead"}
         </button>
       </form>
     );
