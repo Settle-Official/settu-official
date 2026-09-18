@@ -67,7 +67,7 @@ export function AnnouncementModal() {
               type="button"
               onClick={close}
               aria-label="Close"
-              className="text-[1.1rem] leading-none text-[var(--muted)] hover:text-white"
+              className="text-[1.1rem] leading-none text-[var(--muted)] hover:text-[var(--foreground)]"
             >
               ✕
             </button>

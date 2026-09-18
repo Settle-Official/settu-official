@@ -40,7 +40,7 @@ function VerifyEmail() {
 
   return (
     <main className="min-h-screen p-4">
-      <section className="mx-auto mt-[12vh] max-w-[440px] border border-[var(--line)] bg-[#0a0a0a] p-[1.2rem]">
+      <section className="mx-auto mt-[12vh] max-w-[440px] border border-[var(--line)] bg-[var(--bg)] p-[1.2rem]">
         <h1 className="m-0 font-space-grotesk text-[1.5rem] font-bold">
           {state === "working" ? "VERIFYING..." : state === "done" ? "VERIFIED ✓" : "LINK EXPIRED"}
         </h1>

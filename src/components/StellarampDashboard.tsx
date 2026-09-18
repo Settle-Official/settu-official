@@ -2014,7 +2014,7 @@ export function StellarampDashboard() {
   return (
     <main className="min-h-screen p-4">
       <AnnouncementModal />
-      <section className="min-h-[88vh] border border-[#1f1f1f] bg-[var(--bg)]">
+      <section className="min-h-[88vh] border border-[var(--line-soft)] bg-[var(--bg)]">
         <div className="flex flex-col gap-6 px-[2.6rem] py-8 max-[720px]:p-4">
           <Header
             subtitle={getSubtitle()}
@@ -2079,11 +2079,11 @@ export function StellarampDashboard() {
                   // touch that global reset and risk changing every other
                   // button's look.
                   style={{
-                    border: "4px solid #C9A962",
-                    backgroundColor: isActive ? "#C9A962" : "#101010",
-                    color: isActive ? "#0a0a0a" : "#f4e1ad",
+                    border: "2px solid var(--accent)",
+                    backgroundColor: isActive ? "var(--accent)" : "var(--surface)",
+                    color: isActive ? "var(--accent-contrast)" : "var(--accent)",
                   }}
-                  className="min-w-0 flex-1 px-1.5 py-[0.5rem] text-[0.62rem] font-semibold uppercase tracking-[0.04em] rounded-none transition-colors focus:outline-none focus:ring-2 focus:ring-[#C9A962]/70 sm:flex-none sm:min-w-[150px] sm:px-4 sm:py-[0.6rem] sm:text-[0.75rem] sm:tracking-[0.08em]"
+                  className="min-w-0 flex-1 px-1.5 py-[0.5rem] text-[0.62rem] font-semibold uppercase tracking-[0.04em] rounded-none transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/70 sm:flex-none sm:min-w-[150px] sm:px-4 sm:py-[0.6rem] sm:text-[0.75rem] sm:tracking-[0.08em]"
                 >
                   {m === "onramp"
                     ? "On-ramp"

@@ -155,8 +155,8 @@ export function LinkedWallets({ emailVerified }: { readonly emailVerified: boole
               // Inline style: the global unlayered `button` reset beats
               // Tailwind's layered utilities, as the mode switcher documents.
               style={{
-                border: "1px solid #C9A962",
-                color: busy === chain ? "#777777" : "#C9A962",
+                border: "1px solid var(--accent)",
+                color: busy === chain ? "var(--muted)" : "var(--accent)",
               }}
               className="px-3 py-2 text-[0.68rem] uppercase tracking-[0.06em] disabled:cursor-not-allowed"
             >

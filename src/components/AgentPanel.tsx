@@ -681,7 +681,7 @@ export function AgentPanel({
               const o = m.order;
               return (
                 <div key={m.id} className="flex justify-start">
-                  <div className="max-w-[92%] border border-[var(--line)] bg-[#101010] p-[0.8rem]">
+                  <div className="max-w-[92%] border border-[var(--line)] bg-[var(--surface)] p-[0.8rem]">
                     <div className="mb-[0.55rem] text-[0.62rem] uppercase tracking-[0.1em] text-[var(--muted)]">
                       Offramp Summary
                     </div>
@@ -693,19 +693,19 @@ export function AgentPanel({
                     ].map(([label, value]) => (
                       <div
                         key={label}
-                        className="flex justify-between gap-[0.6rem] border-b border-dashed border-[#222] py-[0.22rem] text-[0.78rem]"
+                        className="flex justify-between gap-[0.6rem] border-b border-dashed border-[var(--line-dashed)] py-[0.22rem] text-[0.78rem]"
                       >
                         <span className="text-[var(--muted)]">{label}</span>
                         <span className="text-right">{value}</span>
                       </div>
                     ))}
-                    <div className="flex justify-between gap-[0.6rem] border-b border-dashed border-[#222] py-[0.22rem] text-[0.78rem]">
+                    <div className="flex justify-between gap-[0.6rem] border-b border-dashed border-[var(--line-dashed)] py-[0.22rem] text-[0.78rem]">
                       <span className="shrink-0 text-[var(--muted)]">Account name</span>
                       <span className="text-right text-[var(--accent)]">
                         {o.beneficiary.accountName} ✓ verified
                       </span>
                     </div>
-                    <div className="flex justify-between gap-[0.6rem] border-b border-dashed border-[#222] py-[0.22rem] text-[0.78rem]">
+                    <div className="flex justify-between gap-[0.6rem] border-b border-dashed border-[var(--line-dashed)] py-[0.22rem] text-[0.78rem]">
                       <span className="text-[var(--muted)]">Rate</span>
                       <span className="text-right">
                         {fiatSymbol(o.beneficiary.currency)}
@@ -725,7 +725,7 @@ export function AgentPanel({
                           type="button"
                           disabled={confirming}
                           onClick={() => confirmOrder(o)}
-                          className="flex-1 bg-[var(--accent)] py-[0.55rem] text-[0.72rem] font-bold uppercase tracking-[0.08em] text-[#0a0a0a] disabled:opacity-50"
+                          className="flex-1 bg-[var(--accent)] py-[0.55rem] text-[0.72rem] font-bold uppercase tracking-[0.08em] text-[var(--accent-contrast)] disabled:opacity-50"
                         >
                           {confirming
                             ? "Working…"
@@ -766,7 +766,7 @@ export function AgentPanel({
               const o = m.onrampOrder;
               return (
                 <div key={m.id} className="flex justify-start">
-                  <div className="max-w-[92%] border border-[var(--line)] bg-[#101010] p-[0.8rem]">
+                  <div className="max-w-[92%] border border-[var(--line)] bg-[var(--surface)] p-[0.8rem]">
                     <div className="mb-[0.55rem] text-[0.62rem] uppercase tracking-[0.1em] text-[var(--muted)]">
                       Onramp Summary
                     </div>
@@ -778,7 +778,7 @@ export function AgentPanel({
                     ].map(([label, value]) => (
                       <div
                         key={label}
-                        className="flex justify-between gap-[0.6rem] border-b border-dashed border-[#222] py-[0.22rem] text-[0.78rem]"
+                        className="flex justify-between gap-[0.6rem] border-b border-dashed border-[var(--line-dashed)] py-[0.22rem] text-[0.78rem]"
                       >
                         <span className="text-[var(--muted)]">{label}</span>
                         <span className="text-right">{value}</span>
@@ -795,7 +795,7 @@ export function AgentPanel({
                         <button
                           type="button"
                           onClick={() => confirmOnrampOrder(o)}
-                          className="flex-1 bg-[var(--accent)] py-[0.55rem] text-[0.72rem] font-bold uppercase tracking-[0.08em] text-[#0a0a0a] disabled:opacity-50"
+                          className="flex-1 bg-[var(--accent)] py-[0.55rem] text-[0.72rem] font-bold uppercase tracking-[0.08em] text-[var(--accent-contrast)] disabled:opacity-50"
                         >
                           Confirm
                         </button>
@@ -826,7 +826,7 @@ export function AgentPanel({
               const { account } = m.virtualAccount;
               return (
                 <div key={m.id} className="flex justify-start">
-                  <div className="max-w-[92%] border border-[var(--line)] bg-[#101010] p-[0.8rem]">
+                  <div className="max-w-[92%] border border-[var(--line)] bg-[var(--surface)] p-[0.8rem]">
                     <div className="mb-[0.55rem] text-[0.62rem] uppercase tracking-[0.1em] text-[var(--muted)]">
                       Pay Into This Account
                     </div>
@@ -838,7 +838,7 @@ export function AgentPanel({
                     ].map(([label, value]) => (
                       <div
                         key={label}
-                        className="flex justify-between gap-[0.6rem] border-b border-dashed border-[#222] py-[0.22rem] text-[0.78rem]"
+                        className="flex justify-between gap-[0.6rem] border-b border-dashed border-[var(--line-dashed)] py-[0.22rem] text-[0.78rem]"
                       >
                         <span className="text-[var(--muted)]">{label}</span>
                         <span className="text-right font-bold text-[var(--accent)]">{value}</span>
@@ -860,8 +860,8 @@ export function AgentPanel({
                 <div
                   className={
                     m.role === "user"
-                      ? "max-w-[82%] bg-[var(--accent)] px-[0.75rem] py-[0.55rem] text-[0.82rem] font-medium text-[#0a0a0a]"
-                      : `max-w-[82%] border border-[var(--line)] bg-[#141414] px-[0.75rem] py-[0.55rem] text-[0.82rem] ${
+                      ? "max-w-[82%] bg-[var(--accent)] px-[0.75rem] py-[0.55rem] text-[0.82rem] font-medium text-[var(--accent-contrast)]"
+                      : `max-w-[82%] border border-[var(--line)] bg-[var(--surface-3)] px-[0.75rem] py-[0.55rem] text-[0.82rem] ${
                           m.stepKind === "error"
                             ? "text-red-400"
                             : m.stepKind === "success"
@@ -877,7 +877,7 @@ export function AgentPanel({
           })}
           {(isSending || isExecuting) && (
             <div className="flex justify-start">
-              <div className="flex items-center gap-[3px] border border-[var(--line)] bg-[#141414] px-[0.75rem] py-[0.65rem]">
+              <div className="flex items-center gap-[3px] border border-[var(--line)] bg-[var(--surface-3)] px-[0.75rem] py-[0.65rem]">
                 <span
                   className="dot-bounce inline-block h-[5px] w-[5px] rounded-full bg-[var(--muted)]"
                   style={{ animationDelay: "0ms" }}
@@ -899,7 +899,7 @@ export function AgentPanel({
           <button
             type="button"
             onClick={cancelFlowAndOrder}
-            className="w-full py-[0.5rem] text-[0.7rem] font-bold uppercase tracking-[0.08em] text-[var(--muted)] hover:text-white"
+            className="w-full py-[0.5rem] text-[0.7rem] font-bold uppercase tracking-[0.08em] text-[var(--muted)] hover:text-[var(--foreground)]"
           >
             Cancel
           </button>
@@ -917,13 +917,13 @@ export function AgentPanel({
             }}
             disabled={isSending}
             placeholder="e.g. Offramp 500 USDC on Solana… or Buy 50000 NGN of USDC…"
-            className="h-[42px] flex-1 border border-[var(--line)] bg-[#0a0a0a] px-[0.7rem] text-[0.8rem] text-[var(--foreground)] outline-none placeholder:text-[#555]"
+            className="h-[42px] flex-1 border border-[var(--line)] bg-[var(--bg)] px-[0.7rem] text-[0.8rem] text-[var(--foreground)] outline-none placeholder:text-[var(--muted-soft)]"
           />
           <button
             type="button"
             onClick={send}
             disabled={isSending || !input.trim()}
-            className="bg-[var(--accent)] px-[1rem] text-[0.75rem] font-bold uppercase tracking-[0.05em] text-[#0a0a0a] disabled:opacity-50"
+            className="bg-[var(--accent)] px-[1rem] text-[0.75rem] font-bold uppercase tracking-[0.05em] text-[var(--accent-contrast)] disabled:opacity-50"
           >
             Send
           </button>

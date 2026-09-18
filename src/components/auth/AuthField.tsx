@@ -61,8 +61,8 @@ export function AuthButton({
       disabled={disabled}
       onClick={onClick}
       style={{
-        backgroundColor: disabled ? "#2f2f2f" : "#C9A962",
-        color: disabled ? "#777777" : "#0a0a0a",
+        backgroundColor: disabled ? "var(--line-strong)" : "var(--accent)",
+        color: disabled ? "var(--muted)" : "var(--accent-contrast)",
       }}
       className="h-12 w-full font-bold uppercase tracking-[0.08em] text-[0.8rem] transition-colors disabled:cursor-not-allowed"
     >

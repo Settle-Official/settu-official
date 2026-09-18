@@ -56,7 +56,7 @@ export function Header({
           type="button"
           onClick={isConnected ? onDisconnect : onConnect}
           disabled={isConnecting}
-          className="min-w-[210px] border-4 border-[#C9A962] bg-[#101010] px-4 py-[0.7rem] text-[0.75rem] font-semibold uppercase tracking-[0.08em] text-[#f4e1ad] rounded-none shadow-[0_0_0_1px_rgba(201,169,98,0.35)] transition-colors hover:bg-[#C9A962] hover:text-[#0a0a0a] focus:outline-none focus:ring-2 focus:ring-[#C9A962]/70 disabled:opacity-60 disabled:cursor-not-allowed"
+          className="min-w-[210px] border-4 border-[var(--accent)] bg-[var(--surface)] px-4 py-[0.7rem] text-[0.75rem] font-semibold uppercase tracking-[0.08em] text-[var(--accent)] rounded-none shadow-[0_0_0_1px_rgba(201,169,98,0.35)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--accent-contrast)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/70 disabled:opacity-60 disabled:cursor-not-allowed"
         >
           {buttonText}
         </button>
