@@ -2,7 +2,7 @@
   "name": "Settu",
   "short_name": "Settu",
   "description": "Stellar USDC to Naira offramp and Naira to Stellar USDC onramp",
-  "start_url": "/",
+  "start_url": "/app",
   "display": "standalone",
   "background_color": "#0a0a0a",
   "theme_color": "#C9A962",

@@ -1,5 +1,5 @@
-import { StellarampDashboard } from "@/components/StellarampDashboard";
+import { LandingPage } from "@/components/landing/LandingPage";
 
 export default function Page() {
-  return <StellarampDashboard />;
+  return <LandingPage />;
 }
