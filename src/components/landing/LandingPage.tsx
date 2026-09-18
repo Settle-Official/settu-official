@@ -1,4 +1,5 @@
 import { Fraunces, Sora, Inter } from "next/font/google";
+import { Nav } from "./Nav";
 import "./landing.css";
 
 const fraunces = Fraunces({
@@ -25,7 +26,8 @@ export function LandingPage() {
     <main
       className={`${fraunces.variable} ${sora.variable} ${inter.variable} min-h-screen bg-[#131212] text-white font-[family-name:var(--font-sora)]`}
     >
-      {/* Sections added in later tasks: Nav, Hero, StatsStrip, HowItWorks */}
+      <Nav />
+      {/* Sections added in later tasks: Hero, StatsStrip, HowItWorks */}
     </main>
   );
 }
