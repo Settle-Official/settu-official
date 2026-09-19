@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getOrderMeta } from "@/lib/offramp/order-meta-store";
 import { getPayoutStatus } from "@/lib/offramp/payout-store";
 import { reconcilePayoutOrder } from "@/lib/offramp/settlement";
 import {
@@ -60,6 +61,9 @@ export async function POST(request: NextRequest) {
   let skippedNoOrder = 0;
   let skippedInFlight = 0;
   let alreadyCorrect = 0;
+  // Records left with destinationAmount "0" because their order meta had
+  // already expired — History can never show an amount for these.
+  let amountUnrecoverable = 0;
 
   for (const record of records) {
     const orderId = record.paycrestOrderId;
@@ -96,6 +100,10 @@ export async function POST(request: NextRequest) {
       alreadyCorrect++;
       continue;
     }
+    if (!record.destinationAmount || Number(record.destinationAmount) === 0) {
+      const meta = await getOrderMeta(orderId);
+      if (!meta?.payoutValue) amountUnrecoverable++;
+    }
 
     changes.push({
       id: record.id,
@@ -106,8 +114,20 @@ export async function POST(request: NextRequest) {
     });
 
     if (!dryRun) {
+      // Fill in the payout figure too, not just the status. register-burn
+      // writes destinationAmount "0" because the payout isn't known at burn
+      // time, and nothing else backfills it — which leaves History with a
+      // completed transfer showing no amount received and no rate. Order
+      // meta holds the real figure but expires after 48h, so this is only
+      // recoverable while it's still there; past that the record keeps "0".
+      const meta = await getOrderMeta(orderId);
+      const needsAmount =
+        !record.destinationAmount || Number(record.destinationAmount) === 0;
       await updateTransactionByOrderId(orderId, target, {
         ...(payout?.txHash ? { mintTxHash: payout.txHash } : {}),
+        ...(needsAmount && meta?.payoutValue
+          ? { destinationAmount: String(meta.payoutValue) }
+          : {}),
       });
     }
   }
@@ -124,6 +144,7 @@ export async function POST(request: NextRequest) {
     alreadyCorrect,
     skippedNoOrder,
     skippedInFlight,
+    amountUnrecoverable,
     changes,
   });
 }

@@ -71,7 +71,21 @@ export async function reconcilePayoutOrder(
   orderId: string,
 ): Promise<PayoutStatus> {
   const cached = await getPayoutStatus(orderId);
-  if (cached && isTerminal(cached.status)) return cached.status;
+  if (cached && isTerminal(cached.status)) {
+    // Don't re-poll Paycrest for an order that's already finished — but do
+    // still reconcile, because the permanent transaction record is written
+    // at burn time and only this path brings it to a terminal state. The old
+    // bare `return` skipped that, so any order whose payout was already
+    // cached as terminal kept a "pending" record forever: the user saw a
+    // stuck transfer in History and got no completion notification, even
+    // though the money had landed. recordOfframpPayoutConfirmed is
+    // idempotent (the stats push is claimed once via Redis SET NX), so
+    // running it again here is safe.
+    if (cached.status === "settled") {
+      await recordOfframpPayoutConfirmed(orderId, { txHash: cached.txHash });
+    }
+    return cached.status;
+  }
 
   const apiKey = process.env.PAYCREST_API_KEY;
   if (!apiKey) return cached?.status ?? "unknown";

@@ -167,12 +167,12 @@ function formatSorobanError(payload: any): string {
  * but with nothing to ever mint it.)
  */
 // Generous on purpose. Aborting this request does NOT cancel anything: the
-// signed burn may already be at the RPC, and once it lands it is
-// irreversible and its mint recipient can never be redirected. A tight
-// deadline here doesn't protect the user, it just makes the client give up
-// on a transaction that is still going through — which is how a burn ends up
-// with nothing recorded against it. 15s was too close to a slow-but-fine
-// submit under RPC load.
+// signed burn may already be at the RPC, and once it lands it is irreversible
+// and its mint recipient can never be redirected. A tight deadline here
+// doesn't protect the user, it just makes the client give up on a transfer
+// that is still going through — which is how a burn ends up with nothing
+// recorded against it. 15s sat too close to a slow-but-fine submit under RPC
+// load, and the failure it produced was the expensive kind.
 const SUBMIT_TIMEOUT_MS = 60_000;
 
 async function submitSoroban(signedXdr: string): Promise<string> {
@@ -190,9 +190,10 @@ async function submitSoroban(signedXdr: string): Promise<string> {
     if (fetchErr?.name === "AbortError") {
       // Deliberately does not say "try again". By this point the wallet has
       // signed and the transaction may well have broadcast; retrying burns a
-      // second time. The daily burn backstop re-registers anything that
-      // landed without being recorded, so the honest instruction is to wait
-      // and check, not to repeat the transfer.
+      // second time. Recovery re-registers anything that landed without
+      // being recorded — from this order's own status poll within seconds,
+      // and from the sweep as a backstop — so the honest instruction is to
+      // wait and check, not to repeat the transfer.
       throw new Error(
         "We lost contact while submitting your transfer. It may still have gone through, " +
           "so do NOT retry — that could send your USDC twice. Check History in a few minutes; " +
