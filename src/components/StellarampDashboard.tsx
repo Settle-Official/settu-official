@@ -161,9 +161,18 @@ function formatSorobanError(payload: any): string {
  * out, the flow threw before registering, and ~10 USDC was stuck — burned
  * but with nothing to ever mint it.)
  */
+// Generous on purpose. Aborting this request does NOT cancel anything: the
+// signed burn may already be at the RPC, and once it lands it is irreversible
+// and its mint recipient can never be redirected. A tight deadline here
+// doesn't protect the user, it just makes the client give up on a transfer
+// that is still going through — which is how a burn ends up with nothing
+// recorded against it. 15s sat too close to a slow-but-fine submit under RPC
+// load, and the failure it produced was the expensive kind.
+const SUBMIT_TIMEOUT_MS = 60_000;
+
 async function submitSoroban(signedXdr: string): Promise<string> {
   const submitAbort = new AbortController();
-  const submitTimer = setTimeout(() => submitAbort.abort(), 15_000);
+  const submitTimer = setTimeout(() => submitAbort.abort(), SUBMIT_TIMEOUT_MS);
   let submitResponse: Response;
   try {
     submitResponse = await fetch("/api/offramp/bridge/submit-soroban", {
@@ -174,7 +183,17 @@ async function submitSoroban(signedXdr: string): Promise<string> {
     });
   } catch (fetchErr: any) {
     if (fetchErr?.name === "AbortError") {
-      throw new Error("Submit transaction timed out (15s). Please try again.");
+      // Deliberately does not say "try again". By this point the wallet has
+      // signed and the transaction may well have broadcast; retrying burns a
+      // second time. The burn backstop re-registers anything that landed
+      // without being recorded, so the honest instruction is to wait and
+      // check, not to repeat the transfer.
+      throw new Error(
+        "We lost contact while submitting your transfer. It may still have gone through, " +
+          "so do NOT retry — that could send your USDC twice. Check your history in a few " +
+          "minutes; if it hasn't appeared, contact support with your wallet address and " +
+          "we'll recover it.",
+      );
     }
     throw new Error(`Submit transaction network error: ${fetchErr.message}`);
   } finally {
