@@ -25,7 +25,10 @@ export function Nav() {
       type="button"
       onClick={isConnected ? disconnect : connect}
       disabled={isConnecting}
-      className="flex h-[52px] w-[158px] items-center justify-center gap-[10px] rounded-[40px] border border-white/15 bg-[#C9A96233] px-[16px] py-[16px] font-[family-name:var(--font-sora)] text-[16px] text-white shadow-[inset_0_1px_0_0_rgba(255,255,255,0.25)] backdrop-blur-xl transition-colors hover:bg-[#C9A96255] disabled:cursor-not-allowed disabled:opacity-60 max-[720px]:w-full"
+      // Inline: globals.css's unlayered `button { background: none }` reset
+      // beats layered bg-* utilities.
+      style={{ backgroundColor: "rgba(201,169,98,0.2)" }}
+      className="flex h-[52px] w-[158px] items-center justify-center gap-[10px] rounded-[40px] border border-white/15 px-[16px] py-[16px] font-[family-name:var(--font-sora)] text-[16px] text-white shadow-[inset_0_1px_0_0_rgba(255,255,255,0.25)] backdrop-blur-xl transition-[filter] hover:brightness-150 disabled:cursor-not-allowed disabled:opacity-60 max-[720px]:w-full"
     >
       {buttonLabel}
     </button>

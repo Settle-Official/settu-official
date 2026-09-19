@@ -11,7 +11,8 @@ import { handleOnrampSettled } from "@/lib/onramp/handle-settlement";
 import { notify, alertOfframpEvent, alertRampEvent } from "@/lib/notify/telegram";
 import { PLATFORM_FEE_RATE } from "@/lib/offramp/fiat-conversion";
 import { getOrderMeta } from "@/lib/offramp/order-meta-store";
-import { pushRecentTransaction, addVolume } from "@/lib/stats-store";
+import { updateTransactionByOrderId } from "@/lib/offramp/transaction-history";
+import { pushRecentTransaction, addVolume, recordSettledTransaction } from "@/lib/stats-store";
 import { formatFiat } from "@/lib/format/currency";
 
 // Needs Node's crypto and the raw request body; keep off the edge runtime.
@@ -201,6 +202,9 @@ export async function POST(request: NextRequest) {
           type: "offramp",
         });
         void addVolume(usdcAmount);
+        // Same claim guard as the stats push above, so a redelivered
+        // webhook can't inflate the count or the fiat total.
+        void recordSettledTransaction(payoutValue);
       }
     }
 
@@ -217,6 +221,26 @@ export async function POST(request: NextRequest) {
       sourceChain: meta?.sourceChain,
       reference: meta?.reference ?? data?.reference,
     });
+
+    // Keep the permanent transaction record in step with reality. It is
+    // written at burn time, when neither the outcome nor the payout figure
+    // is known yet, and nothing updated it afterwards — so a bridged offramp
+    // read "pending" forever and a Base-direct one read "completed" from the
+    // moment it was registered. Only terminal states are written; the
+    // in-flight ones (deposited/settling/…) are already covered by the payout
+    // store the status route reads.
+    const settled =
+      status === "validated" || status === "fulfilled" || status === "settled";
+    const lost = status === "refunded" || status === "expired";
+    if (settled || lost) {
+      // Fire-and-forget, like the other post-payout writes here: this is a
+      // bookkeeping update, and failing it must not make Paycrest retry a
+      // delivery whose funds already moved.
+      void updateTransactionByOrderId(orderId, settled ? "completed" : "failed", {
+        ...(payoutValue !== undefined ? { destinationAmount: String(payoutValue) } : {}),
+        ...(payoutRecord.txHash ? { mintTxHash: payoutRecord.txHash } : {}),
+      });
+    }
 
     // 2xx quickly so Paycrest marks the delivery successful.
     return NextResponse.json({ success: true });

@@ -7,8 +7,15 @@ export interface Transaction {
   id: string;
   timestamp: number;
   userAddress: string;
+  /** USDC amount. */
   amount: string;
   currency: string;
+  /** Absent on rows written before this field existed — those are offramps. */
+  kind?: "offramp" | "onramp";
+  /** Which surface started it: the form/panel, or Agent Mode. */
+  initiator?: "form" | "agent";
+  /** Onramp only: the fiat the user paid in (`currency` names its unit). */
+  fiatAmount?: string;
   stellarTxHash?: string;
   bridgeStatus?: string;
   payoutOrderId?: string;
@@ -55,6 +62,12 @@ export class TransactionStorage {
       transactions[index] = { ...transactions[index], ...updates };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(transactions));
     }
+  }
+
+  /** Update the row that tracks a provider order (onramp/offramp order id). */
+  static updateByOrderId(orderId: string, updates: Partial<Transaction>): void {
+    const match = this.getAll().find((tx) => tx.payoutOrderId === orderId);
+    if (match) this.update(match.id, updates);
   }
 
   /**

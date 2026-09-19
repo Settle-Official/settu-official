@@ -202,7 +202,12 @@ export function SelectField({
                 />
               </div>
             ) : null}
-            <ul role="listbox" className="max-h-[220px] overflow-y-auto">
+            {/* See AppSelect: Lenis would scroll the page instead of the list. */}
+            <ul
+              role="listbox"
+              data-lenis-prevent
+              className="max-h-[220px] overflow-y-auto overscroll-contain"
+            >
               {filtered.length === 0 ? (
                 <li className="px-[0.8rem] py-[0.55rem] text-[0.85rem] text-[var(--muted)]">
                   {options.length === 0

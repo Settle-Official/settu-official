@@ -47,7 +47,9 @@ function PlusIcon({ open }: { readonly open: boolean }) {
 }
 
 export function Faq() {
-  const [openIndex, setOpenIndex] = useState<number | null>(0);
+  // Everything closed to start: an answer already expanded pushes the rest
+  // of the list down and reads as the odd one out.
+  const [openIndex, setOpenIndex] = useState<number | null>(null);
 
   return (
     <section
@@ -68,16 +70,32 @@ export function Faq() {
           const open = openIndex === i;
           const panelId = `faq-panel-${i}`;
           return (
+            // The whole card toggles, not just the question row — the
+            // padding around it and the answer itself used to be dead space.
+            // The button below keeps its own handler (and stops the event
+            // there) rather than relying on the click bubbling up to here:
+            // bubbling alone left Enter and Space on the focused button doing
+            // nothing, which would have traded a mouse dead-zone for a
+            // keyboard one.
             <li
               key={item.q}
-              className="landing-faq-item w-[648px] max-w-full rounded-[20px] px-[20px] py-[30px] max-[720px]:py-[16px]"
+              onClick={() => {
+                // Don't collapse the answer out from under someone who was
+                // selecting its text.
+                if (window.getSelection()?.toString()) return;
+                setOpenIndex(open ? null : i);
+              }}
+              className="landing-faq-item w-[648px] max-w-full cursor-pointer rounded-[20px] px-[20px] py-[30px] max-[720px]:py-[16px]"
             >
               <h3>
                 <button
                   type="button"
                   aria-expanded={open}
                   aria-controls={panelId}
-                  onClick={() => setOpenIndex(open ? null : i)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setOpenIndex(open ? null : i);
+                  }}
                   className={`landing-faq-trigger flex w-full items-center justify-between gap-[10px] text-left ${
                     open ? "is-open" : ""
                   }`}

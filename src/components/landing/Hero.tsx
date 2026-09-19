@@ -58,11 +58,11 @@ export function Hero() {
           <HeroCoins />
           <div className="flex flex-col items-center gap-[19px]">
             <h1 className="landing-fraunces text-[50px] uppercase leading-tight text-[#c9a962] max-[720px]:text-[30px] max-[720px]:leading-[37px]">
-              Convert USDC to your bank account
+              Settu stablecoins and fiat, seamlessly
             </h1>
             <p className="landing-fraunces text-[20px] leading-[26px] text-[#fdf8f8] max-[720px]:text-[18px] max-[720px]:leading-[24px] max-[720px]:text-[#b9b5b5]">
-              Move USDC across chains and land it directly in your account. No
-              P2P traders. No waiting. Just simple transfers.
+              Stablecoins in, cash out, in minutes. No P2P traders. No
+              middlemen.
             </p>
           </div>
           <a

@@ -18,7 +18,8 @@ export function HowItWorks() {
           </h2>
         </div>
         <p className="font-[family-name:var(--font-sora)] text-[16px] text-[#a9a5a5] max-[720px]:leading-[20px] max-[720px]:text-[#beb9b9]">
-          Three steps, and we tell you where things stand at each one, not just at the end.
+          Three steps, and we tell you where things stand at each one, not just
+          at the end.
         </p>
       </div>
 
@@ -76,7 +77,7 @@ export function HowItWorks() {
           icon="/landing/step1-caption-wallet-icon.svg"
           iconAlt=""
           title="Connect wallet"
-          description="Any EVM wallet or a Stellar wallet works. If you're not on Stellar, we bridge your USDC there automatically, you don't manage that step yourself."
+          description="Any EVM wallet, Solana Wallet or a Stellar wallet works. If you're not on Stellar, we bridge your USDC there automatically, you don't manage that step yourself."
           align="center"
         >
           <div className="flex flex-col gap-[40px]">
@@ -89,8 +90,12 @@ export function HowItWorks() {
                 className="rounded-full max-[720px]:size-[43px]"
               />
               <div className="flex flex-col gap-[6px]">
-                <span className="landing-fraunces text-[20px] text-white max-[720px]:text-[18px] max-[720px]:leading-[22px]">Stellar</span>
-                <span className="font-[family-name:var(--font-sora)] text-[16px] text-white max-[720px]:leading-[20px]">wallet</span>
+                <span className="landing-fraunces text-[20px] text-white max-[720px]:text-[18px] max-[720px]:leading-[22px]">
+                  Stellar
+                </span>
+                <span className="font-[family-name:var(--font-sora)] text-[16px] text-white max-[720px]:leading-[20px]">
+                  wallet
+                </span>
               </div>
               <span className="ml-auto font-[family-name:var(--font-inter)] text-[20px] font-semibold text-white max-[720px]:text-[14px]">
                 connect
@@ -98,11 +103,21 @@ export function HowItWorks() {
             </div>
             <div className="flex h-[76px] items-center gap-[18px] rounded-[20px] border border-white/10 bg-[rgba(255,255,255,0.1)] p-[10px] max-[720px]:h-[68px]">
               <div className="flex size-[56px] shrink-0 items-center justify-center rounded-full bg-white max-[720px]:size-[43px]">
-                <Image src="/landing/step1-metamask-icon.png" alt="" width={36} height={36} className="max-[720px]:size-[23px]" />
+                <Image
+                  src="/landing/step1-metamask-icon.png"
+                  alt=""
+                  width={36}
+                  height={36}
+                  className="max-[720px]:size-[23px]"
+                />
               </div>
               <div className="flex flex-col gap-[6px]">
-                <span className="landing-fraunces text-[20px] text-white max-[720px]:text-[18px] max-[720px]:leading-[22px]">Metamask</span>
-                <span className="font-[family-name:var(--font-sora)] text-[16px] text-white max-[720px]:leading-[20px]">wallet</span>
+                <span className="landing-fraunces text-[20px] text-white max-[720px]:text-[18px] max-[720px]:leading-[22px]">
+                  Metamask
+                </span>
+                <span className="font-[family-name:var(--font-sora)] text-[16px] text-white max-[720px]:leading-[20px]">
+                  wallet
+                </span>
               </div>
               <span className="ml-auto font-[family-name:var(--font-inter)] text-[20px] font-semibold text-white max-[720px]:text-[14px]">
                 connect
@@ -119,8 +134,15 @@ export function HowItWorks() {
         >
           <div className="flex h-[53px] items-center justify-between rounded-[20px] border border-white/10 bg-[rgba(255,255,255,0.1)] p-[10px]">
             <div className="flex items-center gap-[10px]">
-              <Image src="/landing/step2-fx-lock-icon.svg" alt="" width={33} height={33} />
-              <span className="landing-fraunces text-[20px] text-white">FX lock</span>
+              <Image
+                src="/landing/step2-fx-lock-icon.svg"
+                alt=""
+                width={33}
+                height={33}
+              />
+              <span className="landing-fraunces text-[20px] text-white">
+                FX lock
+              </span>
             </div>
             <span className="font-[family-name:var(--font-sora)] text-[14px] font-semibold text-white">
               1380/USDC
@@ -132,7 +154,9 @@ export function HowItWorks() {
           icon="/landing/step1-caption-wallet-icon.svg"
           iconAlt=""
           title="Naira lands in your bank"
-          description={'You’ll see each stage, bridging, locking, sending, in plain language, and a clear "done" the moment it’s in your account.'}
+          description={
+            'You’ll see each stage, bridging, locking, sending, in plain language, and a clear "done" the moment it’s in your account.'
+          }
         >
           <div className="flex flex-col gap-[20px]">
             <div className="flex h-[58px] items-center justify-between rounded-[20px] border border-white/10 bg-[rgba(255,255,255,0.1)] p-[20px]">
@@ -148,7 +172,9 @@ export function HowItWorks() {
                 </span>
               </div>
               <div className="flex h-[57px] flex-1 items-center justify-center rounded-[20px] border border-white/10 bg-[rgba(255,255,255,0.1)] p-[20px]">
-                <span className="font-[family-name:var(--font-inter)] text-[14px] text-white">Bank</span>
+                <span className="font-[family-name:var(--font-inter)] text-[14px] text-white">
+                  Bank
+                </span>
               </div>
             </div>
             <div className="flex h-[54px] items-center rounded-[20px] border border-white/10 bg-[rgba(255,255,255,0.1)] p-[10px]">

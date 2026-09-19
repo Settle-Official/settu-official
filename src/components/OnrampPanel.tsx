@@ -5,6 +5,7 @@ import { cn } from "@/lib/cn";
 import { SelectField } from "@/components/SelectField";
 import { ONRAMP_STATUS_LABEL } from "@/lib/onramp/status-labels";
 import { createOnrampOrder } from "@/lib/onramp/client";
+import { TransactionStorage } from "@/lib/transaction-storage";
 import type { OnrampProviderAccount } from "@/lib/offramp/types";
 
 const PAYCREST_API_BASE = "https://api.paycrest.io/v1";
@@ -161,19 +162,21 @@ export function OnrampPanel({
       }
       if (next === "delivered") {
         setPhase("done");
+        if (orderId) TransactionStorage.updateByOrderId(orderId, { status: "completed" });
         onDelivered?.();
         onSettled?.();
         return true;
       }
       if (next === "refunded" || next === "expired") {
         setPhase("error");
+        if (orderId) TransactionStorage.updateByOrderId(orderId, { status: "failed", error: next });
         onSettled?.();
         return true;
       }
       if (next === "bridge_failed") setPhase("error");
       return false;
     },
-    [onDelivered, onSettled],
+    [onDelivered, onSettled, orderId],
   );
 
   // Authoritative read, shared by the backstop poller and the manual check.

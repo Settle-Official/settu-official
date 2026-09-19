@@ -1,15 +1,8 @@
 @import "tailwindcss";
 
 /*
- * Theme tokens. Dark is the default/original look (unchanged values below).
- * Light mode ([data-theme="light"]) is a literal black<->white inversion of
- * every neutral (background/border/text) token, computed channel-wise
- * (255 - value) so relative lightness ordering between surfaces is
- * preserved. --accent/--accent-bright/--accent-contrast are deliberately
- * NOT part of that inversion — the gold accent stays the exact same color
- * in both themes, and --accent-contrast (the near-black text drawn on top
- * of accent-filled buttons) stays fixed too, since the accent's own
- * lightness never changes.
+ * Theme tokens. The product is dark-only — the light theme and its toggle
+ * were removed with the app redesign.
  */
 :root {
   --bg: #0a0a0a;
@@ -28,25 +21,6 @@
   --accent: #c9a962;
   --accent-bright: #f4e1ad;
   --accent-contrast: #0a0a0a;
-}
-
-[data-theme="light"] {
-  --bg: #ffffff;
-  --bg-highlight: #f2f2f2;
-  --surface: #efefef;
-  --surface-2: #f3f3f3;
-  --surface-3: #ebebeb;
-  --line: #cccccc;
-  --line-soft: #e0e0e0;
-  --line-dashed: #dddddd;
-  --line-strong: #d5d5d5;
-  /* Darker than a literal invert (#888/#999/#aaa) — gray text that reads
-     fine on black is noticeably harder to read on white, so these lean
-     toward near-black instead for actual legibility in light mode. */
-  --muted: #444444;
-  --muted-strong: #555555;
-  --muted-soft: #6b6b6b;
-  --foreground: #000000;
 }
 
 /* Custom scrollbar — every scrollable area in the app. Black track, gold
@@ -108,6 +82,28 @@ button {
   background: none;
   border: 0;
   cursor: pointer;
+}
+
+/* Offramp status panel: the in-progress step's dashed ring turns. */
+@keyframes landing-offramp-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.landing-offramp-spin {
+  animation: landing-offramp-spin 1.6s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .landing-offramp-spin {
+    animation: none;
+  }
+}
+
+/* Product UI headings — Fraunces with the same optical axes the landing
+   page uses (a static cut renders the wrong letterforms). */
+.font-fraunces {
+  font-family: var(--font-fraunces), serif;
+  font-variation-settings: "SOFT" 0, "WONK" 1;
 }
 
 .font-space-grotesk {

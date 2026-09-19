@@ -18,16 +18,31 @@ import {
   normalizePayoutStatus,
 } from "./adapters/paycrest-adapter";
 import type { PayoutStatus } from "./types";
-import { pushRecentTransaction, addVolume } from "@/lib/stats-store";
+import { pushRecentTransaction, addVolume, recordSettledTransaction } from "@/lib/stats-store";
 import { formatFiat } from "@/lib/format/currency";
+import { updateTransactionByOrderId } from "./transaction-history";
 
 export async function recordOfframpPayoutConfirmed(
   orderId: string,
   opts: { txHash?: string } = {},
 ): Promise<void> {
+  const meta = await getOrderMeta(orderId);
+  // Ahead of the claim guard on purpose. The guard exists to make the stats
+  // push happen exactly once, but this is a state reconciliation, not a
+  // counter — it must still run on the poll path when the webhook already
+  // took the claim, and it is safe to repeat (same terminal value, and
+  // updateTransactionByOrderId refuses to regress a completed record).
+  // Without this, an offramp that finishes at `fulfilled` — which Paycrest
+  // never sends a webhook for — would sit at "pending" in history forever.
+  void updateTransactionByOrderId(orderId, "completed", {
+    ...(meta?.payoutValue !== undefined
+      ? { destinationAmount: String(meta.payoutValue) }
+      : {}),
+    ...(opts.txHash ? { mintTxHash: opts.txHash } : {}),
+  });
+
   if (!(await claimSettlementRecording(orderId))) return;
 
-  const meta = await getOrderMeta(orderId);
   const usdc = meta?.amountUsdc;
   if (usdc === undefined || !Number.isFinite(usdc)) return;
 
@@ -40,6 +55,9 @@ export async function recordOfframpPayoutConfirmed(
     type: "offramp",
   });
   void addVolume(usdc);
+  // Counts the transaction and the fiat that actually landed, which is what
+  // the landing page's headline figures read.
+  void recordSettledTransaction(meta?.payoutValue);
 }
 
 /**

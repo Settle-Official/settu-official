@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { ArrowRightIcon, CheckIcon, CloseIcon } from "@/components/app/icons";
+import { useAgentUnread } from "@/components/app/AgentUnread";
 import {
   stepToAgentEvent,
   type AgentStepEvent,
@@ -13,6 +15,7 @@ import type { AgentOrderWithQuote } from "@/lib/offramp/agent-resolver";
 import type { ResolvedOnrampOrder } from "@/lib/offramp/agent-onramp-resolver";
 import { onrampStatusToAgentEvent } from "@/lib/offramp/agent-onramp-step-bridge";
 import type { CreateOnrampOrderResult } from "@/lib/onramp/client";
+import { TransactionStorage } from "@/lib/transaction-storage";
 import type { OfframpStep } from "@/components/TransactionProgressModal";
 import { fiatSymbol } from "@/lib/format/currency";
 import { sourceChainOptions } from "@/lib/offramp/source-chain-options";
@@ -164,6 +167,18 @@ export function AgentPanel({
   const [onrampPending, setOnrampPending] = useState<ResolvedOnrampOrder | null>(null);
   const lastRenderedStepId = useRef<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  // How many messages the user has actually scrolled down to see. Anything
+  // beyond this index is "unread" — divided off in the render below, and
+  // rolled up into the sidebar's Agent badge via AgentUnread.
+  const [readCount, setReadCount] = useState(messages.length);
+  // Whether the list was scrolled to (near) its bottom *before* the render
+  // that's about to run — read inside the scroll-follow effect below to
+  // decide whether new content should pull the view down with it. Only a
+  // real scroll (the handler below) ever changes this; appending messages
+  // does not, so it still holds the pre-update position when that effect
+  // runs.
+  const wasAtBottomRef = useRef(true);
+  const { publish: publishAgentUnread } = useAgentUnread();
   // Lets `send()` force an immediate status re-check (instead of waiting up
   // to 12s for the backstop poll) the moment the user says something like
   // "I've sent the money" while an onramp order is pending. Set by
@@ -215,9 +230,45 @@ export function AgentPanel({
     offrampStep !== "success" &&
     offrampStep !== "error";
 
+  // Sticky-scroll: only follow new content down if the user was already at
+  // the bottom (i.e. actually watching it arrive, tab in the foreground).
+  // Someone scrolled up reading earlier history — or away in another tab —
+  // keeps their place, and whatever arrived while they weren't looking
+  // stays behind the "Unread" divider until they scroll down to it.
   useEffect(() => {
-    listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
+    if (wasAtBottomRef.current && document.visibilityState === "visible") {
+      listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
+      setReadCount(messages.length);
+    }
   }, [messages, isSending, isExecuting]);
+
+  const onListScroll = () => {
+    const el = listRef.current;
+    if (!el) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 32;
+    wasAtBottomRef.current = atBottom;
+    if (atBottom) setReadCount(messages.length);
+  };
+
+  // Returning to the tab counts as "looking" the same way scrolling to the
+  // bottom does — but only if the list is already scrolled there; coming
+  // back to a chat scrolled up shouldn't silently mark unseen messages read.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible" && wasAtBottomRef.current) {
+        setReadCount(messages.length);
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [messages.length]);
+
+  // The sidebar's Agent badge — see AgentUnread.tsx for why this is
+  // published rather than owned locally: it needs to outlive this
+  // component's unmount when the user navigates to another screen.
+  useEffect(() => {
+    publishAgentUnread(Math.max(0, messages.length - readCount));
+  }, [messages.length, readCount, publishAgentUnread]);
 
   // Narrate execution: every offrampStep change, while this panel owns the
   // current run, becomes one more chat message. Resets when a fresh run
@@ -537,6 +588,10 @@ export function AgentPanel({
         }
         const terminal = status === "delivered" || status === "refunded" || status === "expired";
         if (terminal) {
+          TransactionStorage.updateByOrderId(
+            result.id,
+            status === "delivered" ? { status: "completed" } : { status: "failed", error: status },
+          );
           setOnrampPending(null);
           onOnrampSettled?.();
           // Only an actual delivery is worth repeating — a refund/expiry
@@ -661,274 +716,411 @@ export function AgentPanel({
   };
 
   return (
-    <div className="racing-border-wrapper">
-      <section className="racing-border-content flex flex-col gap-[1.1rem] p-[1.2rem]">
-        <div className="flex items-center justify-between border-b border-[var(--line)] pb-[0.6rem]">
-          <h2 className="m-0 font-space-grotesk text-[1.1rem] font-bold">
-            AGENT MODE
-          </h2>
-          <span className="text-[0.62rem] uppercase tracking-[0.1em] text-[var(--muted)]">
-            Offramp
-          </span>
-        </div>
+    // flex-1 (not h-full): the parent <section> is itself sized by flex-grow
+    // rather than an explicit height, and CSS height:100% doesn't reliably
+    // resolve against that — flex-grow does, since it's the same layout
+    // algorithm all the way down. min-h-0 lets this item shrink below its
+    // content's natural size so it can actually be *smaller* than the
+    // message list wants, which is what makes flex-1 fill exactly the
+    // remaining space instead of overflowing it.
+    <div className="flex min-h-0 flex-1 flex-col gap-[24px]">
+      <div
+        ref={listRef}
+        data-lenis-prevent
+        onScroll={onListScroll}
+        // min-h-0: without it a flex child refuses to shrink below its
+        // content's natural height, so this never actually overflowed
+        // itself — the *page* did instead, and since data-lenis-prevent
+        // tells Lenis to leave wheel events here alone (expecting this
+        // element to handle its own scrolling), wheel did nothing at all;
+        // only dragging the real scrollbar thumb (a direct scrollTop write,
+        // not a wheel event) still worked. With min-h-0 this element is
+        // genuinely the thing that overflows and scrolls.
+        // px-[16px]: the bubble tails hang 14px off their bubble, so without
+        // this gutter they'd reach past the list and either raise a
+        // horizontal scrollbar or get clipped by overflow-x-hidden below.
+        className="flex min-h-0 flex-1 flex-col gap-[28px] overflow-x-hidden overflow-y-auto overscroll-contain px-[16px]"
+      >
+        {messages.map((m, i) => {
+          // The divider sits right before the first message the user hasn't
+          // scrolled down to yet — not tied to any particular message type,
+          // so it marks a plain new reply the same as a resolved order.
+          const isFirstUnread = readCount < messages.length && i === readCount;
 
-        <div
-          ref={listRef}
-          className="flex max-h-[420px] min-h-[300px] flex-col gap-[0.65rem] overflow-y-auto"
-        >
-          {messages.map((m) => {
-            if (m.order) {
-              const o = m.order;
-              return (
-                <div key={m.id} className="flex justify-start">
-                  <div className="max-w-[92%] border border-[var(--line)] bg-[var(--surface)] p-[0.8rem]">
-                    <div className="mb-[0.55rem] text-[0.62rem] uppercase tracking-[0.1em] text-[var(--muted)]">
-                      Offramp Summary
-                    </div>
-                    {[
-                      ["Amount", `${o.amount} ${o.token}`],
-                      ["Source", o.sourceChain],
-                      ["Bank", o.beneficiary.institution],
-                      ["Account", o.beneficiary.accountIdentifier],
-                    ].map(([label, value]) => (
-                      <div
-                        key={label}
-                        className="flex justify-between gap-[0.6rem] border-b border-dashed border-[var(--line-dashed)] py-[0.22rem] text-[0.78rem]"
-                      >
-                        <span className="text-[var(--muted)]">{label}</span>
-                        <span className="text-right">{value}</span>
-                      </div>
-                    ))}
-                    <div className="flex justify-between gap-[0.6rem] border-b border-dashed border-[var(--line-dashed)] py-[0.22rem] text-[0.78rem]">
-                      <span className="shrink-0 text-[var(--muted)]">Account name</span>
-                      <span className="text-right text-[var(--accent)]">
-                        {o.beneficiary.accountName} ✓ verified
-                      </span>
-                    </div>
-                    <div className="flex justify-between gap-[0.6rem] border-b border-dashed border-[var(--line-dashed)] py-[0.22rem] text-[0.78rem]">
-                      <span className="text-[var(--muted)]">Rate</span>
-                      <span className="text-right">
-                        {fiatSymbol(o.beneficiary.currency)}
-                        {o.rate.toLocaleString()} / {o.token}
-                      </span>
-                    </div>
-                    <div className="flex justify-between gap-[0.6rem] py-[0.22rem] text-[0.78rem]">
-                      <span className="text-[var(--muted)]">You receive</span>
-                      <span className="text-right font-bold text-[var(--accent)]">
-                        {fiatSymbol(o.beneficiary.currency)}
-                        {o.destinationAmount}
-                      </span>
-                    </div>
-                    {!m.orderStatus && (
-                      <div className="mt-[0.7rem] flex gap-[0.5rem]">
-                        <button
-                          type="button"
-                          disabled={confirming}
-                          onClick={() => confirmOrder(o)}
-                          className="flex-1 bg-[var(--accent)] py-[0.55rem] text-[0.72rem] font-bold uppercase tracking-[0.08em] text-[var(--accent-contrast)] disabled:opacity-50"
-                        >
-                          {confirming
-                            ? "Working…"
-                            : isConnected
-                              ? "Confirm"
-                              : "Connect Wallet"}
-                        </button>
-                        <button
-                          type="button"
-                          disabled={confirming}
-                          onClick={() => cancelOrder(o)}
-                          className="flex-1 border border-[var(--line)] py-[0.55rem] text-[0.72rem] font-bold uppercase tracking-[0.08em] text-[var(--muted)] disabled:opacity-50"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    )}
-                    {m.orderStatus === "success" && (
-                      <div className="mt-[0.7rem] py-[0.4rem] text-center text-[0.72rem] font-bold uppercase tracking-[0.08em] text-[var(--accent)]">
-                        ✓ Successful
-                      </div>
-                    )}
-                    {m.orderStatus === "failed" && (
-                      <div className="mt-[0.7rem] py-[0.4rem] text-center text-[0.72rem] font-bold uppercase tracking-[0.08em] text-red-400">
-                        ✗ Failed
-                      </div>
-                    )}
-                    {m.orderStatus === "superseded" && (
-                      <div className="mt-[0.7rem] py-[0.4rem] text-center text-[0.72rem] uppercase tracking-[0.08em] text-[var(--muted)]">
-                        ↻ Updated — see below
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            }
-            if (m.onrampOrder) {
-              const o = m.onrampOrder;
-              return (
-                <div key={m.id} className="flex justify-start">
-                  <div className="max-w-[92%] border border-[var(--line)] bg-[var(--surface)] p-[0.8rem]">
-                    <div className="mb-[0.55rem] text-[0.62rem] uppercase tracking-[0.1em] text-[var(--muted)]">
-                      Onramp Summary
-                    </div>
-                    {[
-                      ["Amount", `${o.fiatAmount} ${o.currency}`],
-                      ["Destination", `${o.destinationAddress.slice(0, 6)}…${o.destinationAddress.slice(-6)}`],
-                      ["Refund bank", o.refundAccount.institution],
-                      ["Refund account", o.refundAccount.accountIdentifier],
-                    ].map(([label, value]) => (
-                      <div
-                        key={label}
-                        className="flex justify-between gap-[0.6rem] border-b border-dashed border-[var(--line-dashed)] py-[0.22rem] text-[0.78rem]"
-                      >
-                        <span className="text-[var(--muted)]">{label}</span>
-                        <span className="text-right">{value}</span>
-                      </div>
-                    ))}
-                    <div className="flex justify-between gap-[0.6rem] py-[0.22rem] text-[0.78rem]">
-                      <span className="shrink-0 text-[var(--muted)]">Refund account name</span>
-                      <span className="text-right text-[var(--accent)]">
-                        {o.refundAccount.accountName} ✓ verified
-                      </span>
-                    </div>
-                    {!m.onrampOrderStatus && (
-                      <div className="mt-[0.7rem] flex gap-[0.5rem]">
-                        <button
-                          type="button"
-                          onClick={() => confirmOnrampOrder(o)}
-                          className="flex-1 bg-[var(--accent)] py-[0.55rem] text-[0.72rem] font-bold uppercase tracking-[0.08em] text-[var(--accent-contrast)] disabled:opacity-50"
-                        >
-                          Confirm
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => cancelOnrampOrder(o)}
-                          className="flex-1 border border-[var(--line)] py-[0.55rem] text-[0.72rem] font-bold uppercase tracking-[0.08em] text-[var(--muted)] disabled:opacity-50"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    )}
-                    {m.onrampOrderStatus === "success" && (
-                      <div className="mt-[0.7rem] py-[0.4rem] text-center text-[0.72rem] font-bold uppercase tracking-[0.08em] text-[var(--accent)]">
-                        ✓ Order created
-                      </div>
-                    )}
-                    {m.onrampOrderStatus === "superseded" && (
-                      <div className="mt-[0.7rem] py-[0.4rem] text-center text-[0.72rem] uppercase tracking-[0.08em] text-[var(--muted)]">
-                        ↻ Updated — see below
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            }
-            if (m.virtualAccount) {
-              const { account } = m.virtualAccount;
-              return (
-                <div key={m.id} className="flex justify-start">
-                  <div className="max-w-[92%] border border-[var(--line)] bg-[var(--surface)] p-[0.8rem]">
-                    <div className="mb-[0.55rem] text-[0.62rem] uppercase tracking-[0.1em] text-[var(--muted)]">
-                      Pay Into This Account
-                    </div>
-                    {[
-                      ["Bank", account.institution],
-                      ["Account number", account.accountIdentifier],
-                      ["Account name", account.accountName],
-                      ["Amount", `${account.amountToTransfer} ${account.currency}`],
-                    ].map(([label, value]) => (
-                      <div
-                        key={label}
-                        className="flex justify-between gap-[0.6rem] border-b border-dashed border-[var(--line-dashed)] py-[0.22rem] text-[0.78rem]"
-                      >
-                        <span className="text-[var(--muted)]">{label}</span>
-                        <span className="text-right font-bold text-[var(--accent)]">{value}</span>
-                      </div>
-                    ))}
-                    <div className="flex justify-between gap-[0.6rem] py-[0.22rem] text-[0.78rem]">
-                      <span className="text-[var(--muted)]">Valid until</span>
-                      <span className="text-right">{account.validUntil}</span>
-                    </div>
-                  </div>
-                </div>
-              );
-            }
-            return (
-              <div
-                key={m.id}
-                className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
-              >
-                <div
-                  className={
-                    m.role === "user"
-                      ? "max-w-[82%] bg-[var(--accent)] px-[0.75rem] py-[0.55rem] text-[0.82rem] font-medium text-[var(--accent-contrast)]"
-                      : `max-w-[82%] border border-[var(--line)] bg-[var(--surface-3)] px-[0.75rem] py-[0.55rem] text-[0.82rem] ${
-                          m.stepKind === "error"
-                            ? "text-red-400"
-                            : m.stepKind === "success"
-                              ? "text-[var(--accent)]"
-                              : ""
-                        }`
-                  }
-                >
-                  {m.text}
-                </div>
-              </div>
-            );
-          })}
-          {(isSending || isExecuting) && (
-            <div className="flex justify-start">
-              <div className="flex items-center gap-[3px] border border-[var(--line)] bg-[var(--surface-3)] px-[0.75rem] py-[0.65rem]">
-                <span
-                  className="dot-bounce inline-block h-[5px] w-[5px] rounded-full bg-[var(--muted)]"
-                  style={{ animationDelay: "0ms" }}
-                />
-                <span
-                  className="dot-bounce inline-block h-[5px] w-[5px] rounded-full bg-[var(--muted)]"
-                  style={{ animationDelay: "150ms" }}
-                />
-                <span
-                  className="dot-bounce inline-block h-[5px] w-[5px] rounded-full bg-[var(--muted)]"
-                  style={{ animationDelay: "300ms" }}
-                />
-              </div>
+          return (
+            <div key={m.id} className="flex flex-col gap-[28px]">
+              {isFirstUnread && <UnreadDivider />}
+              <AgentMessage message={m} />
             </div>
-          )}
-        </div>
+          );
+        })}
+        {(isSending || isExecuting) && (
+          <ChatBubble side="left" tone="narration">
+            <span className="flex items-center gap-[4px] py-[2px]">
+              <span
+                className="dot-bounce inline-block size-[5px] rounded-full bg-[#8b8686]"
+                style={{ animationDelay: "0ms" }}
+              />
+              <span
+                className="dot-bounce inline-block size-[5px] rounded-full bg-[#8b8686]"
+                style={{ animationDelay: "150ms" }}
+              />
+              <span
+                className="dot-bounce inline-block size-[5px] rounded-full bg-[#8b8686]"
+                style={{ animationDelay: "300ms" }}
+              />
+            </span>
+          </ChatBubble>
+        )}
+      </div>
 
-        {canCancel && (
-          <button
-            type="button"
-            onClick={cancelFlowAndOrder}
-            className="w-full py-[0.5rem] text-[0.7rem] font-bold uppercase tracking-[0.08em] text-[var(--muted)] hover:text-[var(--foreground)]"
-          >
-            Cancel
-          </button>
+      {canCancel && (
+        <button
+          type="button"
+          onClick={cancelFlowAndOrder}
+          style={{ border: "1px solid rgba(255,255,255,0.6)" }}
+          className="mx-auto flex h-[48px] items-center gap-[8px] rounded-[40px] px-[24px] font-[family-name:var(--font-sora)] text-[15px] text-[#e07a7e] transition-[filter] hover:brightness-125"
+        >
+          Cancel
+          <CloseIcon size={14} />
+        </button>
+      )}
+
+      <div
+        style={{ border: "1px solid rgba(255,255,255,0.12)" }}
+        className="flex items-center gap-[12px] rounded-[40px] bg-white/5 py-[8px] pl-[24px] pr-[8px]"
+      >
+        <input
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              send();
+            }
+          }}
+          disabled={isSending}
+          placeholder="e.g. Offramp 500 USDC on Solana… or Buy 50000 NGN of USDC…"
+          className="h-[40px] min-w-0 flex-1 bg-transparent font-[family-name:var(--font-sora)] text-[16px] text-white outline-none placeholder:text-[#8d8c8c]"
+        />
+        <button
+          type="button"
+          onClick={send}
+          disabled={isSending || !input.trim()}
+          aria-label="Send"
+          style={{ backgroundColor: "#c9a962" }}
+          className="flex size-[48px] shrink-0 items-center justify-center rounded-full text-[#1a1a1a] transition-[filter] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <ArrowRightIcon size={20} />
+        </button>
+      </div>
+    </div>
+  );
+
+  function AgentMessage({ message: m }: { readonly message: ChatMessage }) {
+    if (m.order) {
+      const o = m.order;
+      return (
+        <SummaryCard
+          title="Offramp Summary"
+          rows={[
+            ["Amount", `${o.amount} ${o.token}`],
+            ["Source", o.sourceChain],
+            ["Bank", o.beneficiary.institution],
+            ["Account", o.beneficiary.accountIdentifier],
+            ["Account Name", `${o.beneficiary.accountName} ✓`, "accent"],
+            ["Rate", `${fiatSymbol(o.beneficiary.currency)}${o.rate.toLocaleString()}/${o.token}`],
+            ["You Receive", `${fiatSymbol(o.beneficiary.currency)}${o.destinationAmount}`, "accent-lg"],
+          ]}
+          status={m.orderStatus}
+          onConfirm={() => confirmOrder(o)}
+          onCancel={() => cancelOrder(o)}
+          confirmLabel={confirming ? "Working…" : isConnected ? "Confirm" : "Connect Wallet"}
+          confirmDisabled={confirming}
+          successText="Sent — it usually lands within minutes."
+          failedText={offrampError || "That offramp didn't go through."}
+        />
+      );
+    }
+    if (m.onrampOrder) {
+      const o = m.onrampOrder;
+      return (
+        <SummaryCard
+          title="Onramp Summary"
+          rows={[
+            ["Amount", `${o.fiatAmount} ${o.currency}`],
+            [
+              "Destination",
+              `${o.destinationAddress.slice(0, 6)}…${o.destinationAddress.slice(-6)}`,
+            ],
+            ["Refund bank", o.refundAccount.institution],
+            ["Refund account", o.refundAccount.accountIdentifier],
+            ["Refund Account Name", `${o.refundAccount.accountName} ✓`, "accent"],
+          ]}
+          status={m.onrampOrderStatus}
+          onConfirm={() => confirmOnrampOrder(o)}
+          onCancel={() => cancelOnrampOrder(o)}
+          confirmLabel="Confirm"
+          successText="Order created — pay into the account below."
+        />
+      );
+    }
+    if (m.virtualAccount) {
+      const { account } = m.virtualAccount;
+      return (
+        <SummaryCard
+          title="Pay Into This Account"
+          rows={[
+            ["Bank", account.institution],
+            ["Account number", account.accountIdentifier],
+            ["Account name", account.accountName, "accent"],
+            ["Amount", `${account.amountToTransfer} ${account.currency}`, "accent"],
+            ["Valid until", account.validUntil],
+          ]}
+        />
+      );
+    }
+
+    const isUser = m.role === "user";
+    const isNarration = !isUser && !!m.stepKind;
+    return (
+      <ChatBubble
+        side={isUser ? "right" : "left"}
+        tone={isNarration ? "narration" : "default"}
+        stepKind={m.stepKind}
+      >
+        {m.text}
+      </ChatBubble>
+    );
+  }
+}
+
+/** A boundary between what came before and what's new since — shown right
+ * where a confirmed run resolves, since that's the one moment guaranteed to
+ * be new even if the user switched away while it was processing. */
+function UnreadDivider() {
+  return (
+    <div className="flex items-center gap-[16px]" role="separator">
+      <span className="h-px flex-1 bg-white/10" />
+      <span className="shrink-0 font-[family-name:var(--font-sora)] text-[13px] text-[#8d8c8c]">
+        Unread
+      </span>
+      <span className="h-px flex-1 bg-white/10" />
+    </div>
+  );
+}
+
+interface ChatBubbleProps {
+  readonly side: "left" | "right";
+  readonly tone: "default" | "narration";
+  readonly stepKind?: AgentStepEvent["kind"];
+  readonly children: ReactNode;
+}
+
+/**
+ * A conversational turn gets the warm, bright bubble; a step-narration
+ * update ("Starting your offramp…") gets a dimmer, muted one — the same
+ * distinction the design draws between what you said and what the system
+ * is quietly reporting in the background.
+ */
+function ChatBubble({ side, tone, stepKind, children }: ChatBubbleProps) {
+  // Opaque, not translucent. These are the exact colours the old
+  // rgba(66,58,45,0.15) and rgba(79,72,60,0.3) flattened to over the panel's
+  // #191818 — so nothing changes visually — but the tail is a separate shape
+  // that has to overlap the bubble to avoid a hairline gap, and with a
+  // translucent fill that overlap double-darkens into a visible band.
+  const bg = tone === "narration" ? "#1f1d1b" : "#292623";
+  const textColor =
+    tone === "narration"
+      ? stepKind === "error"
+        ? "#e07a7e"
+        : stepKind === "success"
+          ? "#c9a962"
+          : "#8b8686"
+      : "#ffffff";
+  const left = side === "left";
+  return (
+    <div className={`flex ${left ? "justify-start" : "justify-end"}`}>
+      <div
+        style={{ backgroundColor: bg, color: textColor }}
+        // The tail's corner is squared off completely so the tail meets a
+        // straight edge — any radius there curves away from the tail and
+        // opens a visible sliver between the two.
+        className={`relative max-w-[70%] break-words rounded-[20px] px-[24px] py-[16px] font-[family-name:var(--font-sora)] leading-[26px] ${
+          left ? "rounded-bl-none" : "rounded-br-none"
+        } ${tone === "narration" ? "text-[15px]" : "text-[18px]"}`}
+      >
+        {children}
+        <BubbleTail side={side} color={bg} />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The iMessage-style tail: a crescent that hangs off the bubble's bottom
+ * corner, concave on top where the bubble's own curve cuts into it, and
+ * tapering to a point away from the bubble.
+ *
+ * An SVG rather than a rotated square — a square reads as a stray diamond
+ * stuck to the corner, which is what this used to look like.
+ */
+function BubbleTail({ side, color }: { readonly side: "left" | "right"; readonly color: string }) {
+  const left = side === "left";
+  return (
+    <svg
+      aria-hidden="true"
+      width="14"
+      height="22"
+      viewBox="0 0 14 22"
+      fill="none"
+      style={{
+        // Overlaps the bubble by 2px. The path's fill is antialiased away to
+        // nothing in its own rightmost column, so a 1px overlap cancels out
+        // and leaves the hairline it was meant to close; 2px guarantees a
+        // solid column of contact, and is still narrow enough that the
+        // translucent fill doubling up there doesn't read as a seam.
+        [left ? "left" : "right"]: "-12px",
+        // Mirrored for the outgoing side so the point faces away from the
+        // bubble on both sides.
+        transform: left ? undefined : "scaleX(-1)",
+      }}
+      className="absolute bottom-0"
+    >
+      <path d="M14 22V6c0 8.2-5.6 15.2-14 16h14Z" fill={color} />
+    </svg>
+  );
+}
+
+type SummaryRow = [label: string, value: string, tone?: "accent" | "accent-lg"];
+
+interface SummaryCardProps {
+  readonly title: string;
+  readonly rows: readonly SummaryRow[];
+  readonly status?: "confirmed" | "success" | "failed" | "cancelled" | "superseded";
+  readonly onConfirm?: () => void;
+  readonly onCancel?: () => void;
+  readonly confirmLabel?: string;
+  readonly confirmDisabled?: boolean;
+  readonly successText?: string;
+  readonly failedText?: string;
+}
+
+/** The confirmation/receipt cards the agent drops into the chat — offramp
+ * and onramp summaries, the onramp deposit account, and (via `status`) the
+ * live Confirm/Cancel state through to the done/failed outcome. */
+function SummaryCard({
+  title,
+  rows,
+  status,
+  onConfirm,
+  onCancel,
+  confirmLabel = "Confirm",
+  confirmDisabled,
+  successText,
+  failedText,
+}: SummaryCardProps) {
+  const isTerminal = status === "success" || status === "failed";
+  return (
+    <div className="flex justify-start">
+      <div className="flex w-[400px] max-w-full flex-col gap-[16px] rounded-[20px] bg-[#232222] p-[24px]">
+        {!isTerminal && (
+          <>
+            <h3 className="font-[family-name:var(--font-inter)] text-[13px] font-semibold uppercase tracking-[0.06em] text-[#8d8c8c]">
+              {title}
+            </h3>
+            <dl className="flex flex-col">
+              {rows.map(([label, value, tone]) => (
+                <div
+                  key={label}
+                  className="flex items-baseline justify-between gap-[16px] border-b border-dashed border-white/10 py-[10px] last:border-b-0"
+                >
+                  <dt className="font-[family-name:var(--font-sora)] text-[15px] text-[#bdbcbc]">
+                    {label}
+                  </dt>
+                  <dd
+                    className={`text-right font-[family-name:var(--font-inter)] ${
+                      tone === "accent-lg"
+                        ? "text-[20px] font-semibold text-[#c9a962]"
+                        : tone === "accent"
+                          ? "text-[14px] text-[#c9a962]"
+                          : "text-[15px] text-white"
+                    }`}
+                  >
+                    {value}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </>
         )}
 
-        <div className="flex gap-[0.5rem] border-t border-[var(--line)] pt-[0.8rem]">
-          <input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                send();
-              }
-            }}
-            disabled={isSending}
-            placeholder="e.g. Offramp 500 USDC on Solana… or Buy 50000 NGN of USDC…"
-            className="h-[42px] flex-1 border border-[var(--line)] bg-[var(--bg)] px-[0.7rem] text-[0.8rem] text-[var(--foreground)] outline-none placeholder:text-[var(--muted-soft)]"
-          />
-          <button
-            type="button"
-            onClick={send}
-            disabled={isSending || !input.trim()}
-            className="bg-[var(--accent)] px-[1rem] text-[0.75rem] font-bold uppercase tracking-[0.05em] text-[var(--accent-contrast)] disabled:opacity-50"
-          >
-            Send
-          </button>
-        </div>
-      </section>
+        {!status && onConfirm && onCancel && (
+          <div className="flex gap-[12px]">
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={confirmDisabled}
+              style={{ border: "1px solid rgba(255,255,255,0.3)" }}
+              className="h-[48px] flex-1 rounded-[16px] font-[family-name:var(--font-sora)] text-[15px] text-white transition-[filter] hover:brightness-125 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={onConfirm}
+              disabled={confirmDisabled}
+              style={{ backgroundColor: "#c9a962" }}
+              className="h-[48px] flex-1 rounded-[16px] font-[family-name:var(--font-sora)] text-[15px] font-semibold text-[#1a1a1a] transition-[filter] hover:brightness-110 disabled:opacity-50"
+            >
+              {confirmLabel}
+            </button>
+          </div>
+        )}
+
+        {status === "confirmed" && (
+          <p className="font-[family-name:var(--font-sora)] text-[14px] text-[#8d8c8c]">
+            Working on it…
+          </p>
+        )}
+
+        {status === "success" && (
+          <div className="flex flex-col items-center gap-[16px] py-[8px] text-center">
+            <span
+              style={{ backgroundColor: "#2fb457" }}
+              className="flex size-[56px] items-center justify-center rounded-full"
+            >
+              <CheckIcon size={28} strokeWidth={2.4} className="text-white" />
+            </span>
+            <p className="font-[family-name:var(--font-sora)] text-[16px] leading-[24px] text-white">
+              {successText}
+            </p>
+          </div>
+        )}
+
+        {status === "failed" && (
+          <div className="flex flex-col items-center gap-[16px] py-[8px] text-center">
+            <span
+              style={{ backgroundColor: "#b23a3e" }}
+              className="flex size-[56px] items-center justify-center rounded-full"
+            >
+              <CloseIcon size={24} strokeWidth={2.4} className="text-white" />
+            </span>
+            <p className="font-[family-name:var(--font-sora)] text-[16px] leading-[24px] text-white">
+              {failedText}
+            </p>
+          </div>
+        )}
+
+        {status === "cancelled" && (
+          <p className="font-[family-name:var(--font-sora)] text-[14px] text-[#8d8c8c]">Cancelled.</p>
+        )}
+        {status === "superseded" && (
+          <p className="font-[family-name:var(--font-sora)] text-[14px] text-[#8d8c8c]">
+            Updated — see below.
+          </p>
+        )}
+      </div>
     </div>
   );
 }

@@ -1,10 +1,18 @@
 import Image from "next/image";
+import { getStats } from "@/lib/stats-store";
 
-const STATS = [
-  { value: "₦480M+", caption: "Settled to Nigerian banks" },
-  { value: "6,200+", caption: "Transfer completed" },
-  { value: "< 90 sec", caption: "Typical time to payout" },
-];
+/** ₦16,926,377 -> "₦16.9M+". Rounded down, so the claim is never overstated. */
+function compactNaira(amount: number): string {
+  if (amount >= 1_000_000_000)
+    return `₦${Math.floor(amount / 100_000_000) / 10}B+`;
+  if (amount >= 1_000_000) return `₦${Math.floor(amount / 100_000) / 10}M+`;
+  if (amount >= 1_000) return `₦${Math.floor(amount / 1_000)}K+`;
+  return `₦${Math.floor(amount)}`;
+}
+
+function compactCount(n: number): string {
+  return n >= 1000 ? `${Math.floor(n / 100) / 10}K+` : `${n}+`;
+}
 
 const LOGOS = [
   "/landing/chain-logo-1-stellar.png",
@@ -16,7 +24,26 @@ const LOGOS = [
   "/landing/chain-logo-7-polygon.png",
 ];
 
-export function StatsStrip() {
+/**
+ * Server component: the figures are read at request time from the same
+ * counters the settlement path writes, rather than hardcoded. Previously
+ * this claimed ₦480M and 6,200 transfers, which the Paycrest export puts at
+ * ₦16.9M and 296 — a live read is the only way that stays honest.
+ */
+export async function StatsStrip() {
+  const { totalVolumeNgn, totalTransactions } = await getStats();
+  const STATS = [
+    {
+      value: compactNaira(totalVolumeNgn),
+      caption: "Settled to Nigerian banks",
+    },
+    { value: compactCount(totalTransactions), caption: "Transfers completed" },
+    // Median across 295 settled orders in the export is 3.8 min. The old
+    // "< 90 sec" was not survivable: only 1.4% of real payouts landed that
+    // fast, while 65% land inside five minutes.
+    { value: "~3 min", caption: "Typical time to payout" },
+  ];
+
   return (
     <section className="relative overflow-hidden bg-[#121212] px-[100px] pb-[100px] pt-[165px] mt-[50px] max-[720px]:mt-0 max-[720px]:px-[20px] max-[720px]:pb-[40px] max-[720px]:pt-[110px]">
       <Image
