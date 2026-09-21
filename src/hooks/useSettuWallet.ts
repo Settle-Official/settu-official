@@ -167,8 +167,6 @@ export function useSettuWallet() {
     [],
   );
 
-  // Derives the Solana address from the same phrase and links it, so a user
-  // backs up one phrase and gets every chain.
   // One derivation path per chain over the same phrase, so adding a chain is
   // a table entry rather than another copy of this function.
   const deriveChain = useCallback(
