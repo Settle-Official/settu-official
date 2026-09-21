@@ -73,28 +73,32 @@ export function useSettuWallet() {
       setError(null);
       const { sealed, publicKey, mnemonic } = prepared;
       try {
+        const secret = await unsealSecret(sealed, {
+          type: "password",
+          secret: password,
+        });
+
         const res = await fetch("/api/wallet/sponsor-account", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ publicKey }),
         });
-        if (!res.ok) {
-          throw new Error(
-            (await res.json().catch(() => ({})))?.error ??
-              "Could not create your wallet",
-          );
+
+        // 409 means the account is already on-chain from an attempt that failed
+        // later; resume from linking rather than stranding it.
+        if (res.status !== 409) {
+          if (!res.ok) {
+            throw new Error(
+              (await res.json().catch(() => ({})))?.error ??
+                "Could not create your wallet",
+            );
+          }
+          const { xdr } = (await res.json()) as { xdr: string };
+          const tx = TransactionBuilder.fromXDR(xdr, Networks.PUBLIC);
+          tx.sign(Keypair.fromSecret(secret));
+          // The sponsor is this transaction's source, so it already pays the fee.
+          await submitToHorizon(tx.toXDR());
         }
-        const { xdr } = (await res.json()) as { xdr: string };
-
-        const secret = await unsealSecret(sealed, {
-          type: "password",
-          secret: password,
-        });
-        const tx = TransactionBuilder.fromXDR(xdr, Networks.PUBLIC);
-        tx.sign(Keypair.fromSecret(secret));
-
-        // The sponsor is this transaction's source, so it already pays the fee.
-        await submitToHorizon(tx.toXDR());
 
         const walletId = await linkToAccount(publicKey, secret);
         await putKeyBlob(walletId, sealed);
