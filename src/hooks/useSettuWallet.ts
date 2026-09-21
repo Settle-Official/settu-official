@@ -3,6 +3,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { Keypair, Networks, TransactionBuilder } from "@stellar/stellar-sdk";
 import {
+  accountFromMnemonic as evmAccountFromMnemonic,
+  addressFromMnemonic as evmAddressFromMnemonic,
+  signMessage as signEvmMessage,
+} from "@/lib/settu-wallet/evm";
+import {
   addressFromMnemonic as solanaAddressFromMnemonic,
   keypairFromMnemonic as solanaKeypairFromMnemonic,
   signMessage as signSolanaMessage,
@@ -34,6 +39,26 @@ import {
   requestChallenge,
   submitSignature,
 } from "@/lib/api/wallets";
+
+export type DerivableChain = "solana" | "evm";
+
+interface Derivation {
+  address: string;
+  sign: (challenge: string) => Promise<string>;
+}
+
+const DERIVATIONS: Record<DerivableChain, (phrase: string) => Derivation> = {
+  solana: (phrase) => ({
+    address: solanaAddressFromMnemonic(phrase),
+    sign: async (challenge) =>
+      signSolanaMessage(solanaKeypairFromMnemonic(phrase), challenge),
+  }),
+  evm: (phrase) => ({
+    address: evmAddressFromMnemonic(phrase),
+    sign: (challenge) =>
+      signEvmMessage(evmAccountFromMnemonic(phrase), challenge),
+  }),
+};
 
 export interface PreparedWallet {
   sealed: SealedWallet;
@@ -144,8 +169,14 @@ export function useSettuWallet() {
 
   // Derives the Solana address from the same phrase and links it, so a user
   // backs up one phrase and gets every chain.
-  const deriveSolana = useCallback(
-    async (walletId: string, password: string): Promise<string> => {
+  // One derivation path per chain over the same phrase, so adding a chain is
+  // a table entry rather than another copy of this function.
+  const deriveChain = useCallback(
+    async (
+      walletId: string,
+      password: string,
+      chain: DerivableChain,
+    ): Promise<string> => {
       setIsBusy(true);
       setError(null);
       try {
@@ -154,21 +185,16 @@ export function useSettuWallet() {
           type: "password",
           secret: password,
         });
-        const solanaAddress = solanaAddressFromMnemonic(phrase);
+
+        const { address, sign } = DERIVATIONS[chain](phrase);
 
         // Linked through the same challenge/verify path, so control is proved
         // rather than asserted.
-        const { nonce, challenge } = await requestChallenge(
-          "solana",
-          solanaAddress,
-        );
-        await submitSignature(
-          nonce,
-          signSolanaMessage(solanaKeypairFromMnemonic(phrase), challenge),
-        );
-        return solanaAddress;
+        const { nonce, challenge } = await requestChallenge(chain, address);
+        await submitSignature(nonce, await sign(challenge));
+        return address;
       } catch (err: any) {
-        setError(err?.message ?? "Could not add your Solana wallet");
+        setError(err?.message ?? "Could not add that wallet");
         throw err;
       } finally {
         setIsBusy(false);
@@ -282,7 +308,7 @@ export function useSettuWallet() {
     finalize,
     unlock,
     recoverWithPhrase,
-    deriveSolana,
+    deriveChain,
     unlockByPasskey,
     addPasskey,
     canUsePasskey: isPasskeySupported(),

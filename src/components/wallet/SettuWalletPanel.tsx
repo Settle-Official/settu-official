@@ -2,7 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { AuthButton, AuthField } from "@/components/auth/AuthField";
-import { useSettuWallet, type PreparedWallet } from "@/hooks/useSettuWallet";
+import {
+  useSettuWallet,
+  type DerivableChain,
+  type PreparedWallet,
+} from "@/hooks/useSettuWallet";
 import { listWallets, shortAddress } from "@/lib/api/wallets";
 import {
   fetchBalances,
@@ -28,7 +32,7 @@ export function SettuWalletPanel({ onReady }: Props) {
     finalize,
     unlock,
     recoverWithPhrase,
-    deriveSolana,
+    deriveChain,
     lock,
   } = useSettuWallet();
   const [walletId, setWalletId] = useState<string | undefined>();
@@ -39,10 +43,16 @@ export function SettuWalletPanel({ onReady }: Props) {
     let cancelled = false;
     listWallets()
       .then((wallets) => {
-        const solana = wallets.find(
-          (w) => w.chain_family === "solana" && w.is_settu_wallet,
-        );
-        if (!cancelled && solana) setSolanaAddress(solana.address);
+        if (!cancelled) {
+          const derived: Partial<Record<DerivableChain, string>> = {};
+          for (const chain of ["solana", "evm"] as const) {
+            const found = wallets.find(
+              (w) => w.chain_family === chain && w.is_settu_wallet,
+            );
+            if (found) derived[chain] = found.address;
+          }
+          setChainAddresses(derived);
+        }
 
         const existing = wallets.find(
           (w) => w.chain_family === "stellar" && w.is_settu_wallet,
@@ -68,9 +78,11 @@ export function SettuWalletPanel({ onReady }: Props) {
   const [pendingPassword, setPendingPassword] = useState("");
   const [balances, setBalances] = useState<WalletBalance[] | null>(null);
   const [copiedAddress, setCopiedAddress] = useState(false);
-  const [solanaAddress, setSolanaAddress] = useState<string | null>(null);
+  const [chainAddresses, setChainAddresses] = useState<
+    Partial<Record<DerivableChain, string>>
+  >({});
   const [solanaPassword, setSolanaPassword] = useState("");
-  const [addingSolana, setAddingSolana] = useState(false);
+  const [addingChain, setAddingChain] = useState<DerivableChain | null>(null);
   const [needsUpgrade, setNeedsUpgrade] = useState(false);
   const [upgradePhrase, setUpgradePhrase] = useState("");
 
@@ -282,107 +294,85 @@ export function SettuWalletPanel({ onReady }: Props) {
 
         <div className="h-px bg-[var(--line)]" />
 
-        {solanaAddress ? (
-          <div>
-            <p className="m-0 text-[0.69rem] tracking-[0.08em] text-[var(--muted)]">
-              SOLANA
-            </p>
-            <p className="mt-[0.2rem] mb-0 font-mono text-[0.8rem]">
-              {shortAddress(solanaAddress)}
-            </p>
-          </div>
-        ) : needsUpgrade ? (
-          <form
-            className="flex flex-col gap-[0.5rem]"
-            onSubmit={async (event) => {
-              event.preventDefault();
-              if (!walletId) return;
-              setLocalError(null);
-              try {
-                // Reseals as v2 under the same password, then derives.
-                await recoverWithPhrase(walletId, upgradePhrase, solanaPassword);
-                setSolanaAddress(await deriveSolana(walletId, solanaPassword));
-                setUpgradePhrase("");
-                setSolanaPassword("");
-                setNeedsUpgrade(false);
-                setAddingSolana(false);
-              } catch {
-                // The hook already surfaced it.
-              }
-            }}
-          >
-            <p className="m-0 text-[0.75rem] text-[var(--muted)]">
-              This wallet was created before multi-chain support. Enter your 24
-              words once to enable other chains — your wallet and funds are
-              unchanged.
-            </p>
-            <textarea
-              value={upgradePhrase}
-              onChange={(event) => setUpgradePhrase(event.target.value)}
-              rows={3}
-              placeholder="Your 24 words, separated by spaces"
-              disabled={isBusy}
-              className="border border-[var(--line)] bg-transparent p-[0.8rem] font-mono text-[0.85rem] outline-none placeholder:text-[var(--muted)] disabled:opacity-50"
-            />
-            <AuthField
-              label="YOUR PASSWORD"
-              type="password"
-              value={solanaPassword}
-              onChange={setSolanaPassword}
-              autoComplete="current-password"
-              disabled={isBusy}
-            />
-            {shown && (
-              <p className="m-0 text-[0.72rem] text-[#ff6b6b]">{shown}</p>
-            )}
-            <AuthButton disabled={isBusy}>
-              {isBusy ? "Enabling…" : "Enable multi-chain"}
-            </AuthButton>
-          </form>
-        ) : addingSolana ? (
-          <form
-            className="flex flex-col gap-[0.5rem]"
-            onSubmit={async (event) => {
-              event.preventDefault();
-              if (!walletId) return;
-              setLocalError(null);
-              try {
-                setSolanaAddress(await deriveSolana(walletId, solanaPassword));
-                setSolanaPassword("");
-                setAddingSolana(false);
-              } catch (err: any) {
-                // A v1 envelope holds no phrase, so ask for it rather than
-                // leaving the user to find the recovery screen themselves.
-                if (/predates multi-chain/i.test(err?.message ?? "")) {
-                  setNeedsUpgrade(true);
+        {(["solana", "evm"] as const).map((chain) => {
+          const existing = chainAddresses[chain];
+          const label = chain === "evm" ? "EVM" : "SOLANA";
+
+          if (existing) {
+            return (
+              <div key={chain}>
+                <p className="m-0 text-[0.69rem] tracking-[0.08em] text-[var(--muted)]">
+                  {label}
+                </p>
+                <p className="mt-[0.2rem] mb-0 font-mono text-[0.8rem]">
+                  {shortAddress(existing)}
+                </p>
+              </div>
+            );
+          }
+
+          if (addingChain !== chain) {
+            return (
+              <button
+                key={chain}
+                type="button"
+                onClick={() => {
+                  setAddingChain(chain);
+                  setLocalError(null);
+                }}
+                className="h-10 border border-[var(--line)] text-[0.72rem] uppercase tracking-[0.08em] text-[var(--muted)]"
+              >
+                Add {label} wallet
+              </button>
+            );
+          }
+
+          return (
+            <form
+              key={chain}
+              className="flex flex-col gap-[0.5rem]"
+              onSubmit={async (event) => {
+                event.preventDefault();
+                if (!walletId) return;
+                setLocalError(null);
+                try {
+                  const address = await deriveChain(
+                    walletId,
+                    solanaPassword,
+                    chain,
+                  );
+                  setChainAddresses((current) => ({
+                    ...current,
+                    [chain]: address,
+                  }));
+                  setSolanaPassword("");
+                  setAddingChain(null);
+                } catch (err: any) {
+                  // A v1 envelope holds no phrase, so ask for it rather than
+                  // leaving the user to find the recovery screen themselves.
+                  if (/predates multi-chain/i.test(err?.message ?? "")) {
+                    setNeedsUpgrade(true);
+                  }
                 }
-              }
-            }}
-          >
-            <AuthField
-              label="CONFIRM PASSWORD TO ADD SOLANA"
-              type="password"
-              value={solanaPassword}
-              onChange={setSolanaPassword}
-              autoComplete="current-password"
-              disabled={isBusy}
-            />
-            {shown && (
-              <p className="m-0 text-[0.72rem] text-[#ff6b6b]">{shown}</p>
-            )}
-            <AuthButton disabled={isBusy}>
-              {isBusy ? "Adding…" : "Add Solana wallet"}
-            </AuthButton>
-          </form>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setAddingSolana(true)}
-            className="h-10 border border-[var(--line)] text-[0.72rem] uppercase tracking-[0.08em] text-[var(--muted)]"
-          >
-            Add Solana wallet
-          </button>
-        )}
+              }}
+            >
+              <AuthField
+                label={`CONFIRM PASSWORD TO ADD ${label}`}
+                type="password"
+                value={solanaPassword}
+                onChange={setSolanaPassword}
+                autoComplete="current-password"
+                disabled={isBusy}
+              />
+              {shown && (
+                <p className="m-0 text-[0.72rem] text-[#ff6b6b]">{shown}</p>
+              )}
+              <AuthButton disabled={isBusy}>
+                {isBusy ? "Adding…" : `Add ${label} wallet`}
+              </AuthButton>
+            </form>
+          );
+        })}
 
         <p className="m-0 text-[0.72rem] text-[var(--muted)]">
           Same recovery phrase covers every chain. Locks itself after 15 minutes
