@@ -19,7 +19,9 @@ import {
 import {
   canCover,
   creationReserveCost,
+  minimumBalance,
   remainingCapacity,
+  spendableXlm,
   trustlineReserveCost,
   type SponsorState,
 } from "./reserves";
@@ -92,9 +94,12 @@ async function loadFundedSponsor(
 
   const state = sponsorState(account);
   if (!canCover(state, reserveCostXlm, EXTRA_BUFFER_XLM)) {
+    // Balance alone is misleading: most of it is locked as reserves.
     throw new SponsorUnavailableError(
-      `Sponsor cannot cover this reserve: ${state.balanceXlm} XLM held, ` +
-        `${remainingCapacity(state)} wallets of capacity left`,
+      `Sponsor needs ${reserveCostXlm} XLM free but has ` +
+        `${spendableXlm(state)} available of ${state.balanceXlm} total ` +
+        `(${minimumBalance(state)} locked as reserves for ${state.numSponsoring} ` +
+        `sponsored entries); capacity ${remainingCapacity(state)} wallets`,
     );
   }
   return account;
