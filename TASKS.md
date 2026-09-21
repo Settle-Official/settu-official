@@ -101,6 +101,26 @@ dashboard for *seeing*, Telegram for *doing*, rather than rebuilding actions.
 
 ## 4. Product
 
+**Cashback is paused** pending team approval — not cancelled, just not being
+built. Resume from here.
+
+Now that Settu can create wallets, the model likely simplifies: cashback
+becomes a USDC payment into the user's Settu wallet after settlement, rather
+than a tracked balance with a withdrawal flow. The balance and withdrawal
+subsystem existed only because there was nowhere to push funds to; a Settu
+wallet removes that, along with the unclaimed-cashback liability. The
+trustline is already there.
+
+That suggests a simpler rule to weigh: *cashback is paid to your Settu
+wallet — offramp from anywhere, and if you have one, you earn.* It makes the
+wallet the incentive and sidesteps attribution entirely for Settu wallets,
+since we know the address belongs to the account. External wallets would
+still need signature-proven attribution (#44) before they can earn.
+
+Wallet linking stays regardless: the Settu wallet is Stellar-only, and
+someone already holding funds in Freighter or MetaMask should not have to
+move them.
+
 - [ ] **Cashback.** Unblocked now that accounts and multi-chain wallet linking
       exist. Ships with `CASHBACK_ENABLED=false` and refuses to accrue unless
       both a rate and a total programme budget ceiling are set. Team funds the
