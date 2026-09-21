@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Keypair, Networks, TransactionBuilder } from "@stellar/stellar-sdk";
 import {
   addUnlockMethod,
   createSealedWallet,
+  resealFromMnemonic,
   unsealSecret,
   type SealedWallet,
   type UnlockWith,
@@ -135,6 +136,43 @@ export function useSettuWallet() {
     [],
   );
 
+  // Forgotten password. The phrase yields the key but not the DEK, so the
+  // envelope is rebuilt under a new password; the Stellar key is untouched.
+  const recoverWithPhrase = useCallback(
+    async (
+      walletId: string,
+      phrase: string,
+      newPassword: string,
+    ): Promise<string> => {
+      setIsBusy(true);
+      setError(null);
+      try {
+        const { sealed } = await getKeyBlob(walletId);
+        const resealed = await resealFromMnemonic(phrase, newPassword);
+
+        // A valid phrase for a different wallet would otherwise overwrite this
+        // one's blob with key material that cannot open it.
+        if (resealed.publicKey !== (sealed as SealedWallet).publicKey) {
+          throw new Error("That phrase belongs to a different wallet.");
+        }
+
+        await putKeyBlob(walletId, resealed);
+        const opened = await unlockWallet(resealed, {
+          type: "password",
+          secret: newPassword,
+        });
+        setAddress(opened);
+        return opened;
+      } catch (err: any) {
+        setError(err?.message ?? "Could not recover your wallet");
+        throw err;
+      } finally {
+        setIsBusy(false);
+      }
+    },
+    [],
+  );
+
   // Adds a passkey to an unlocked wallet, proving the password first.
   const addPasskey = useCallback(
     async (walletId: string, password: string, label: string) => {
@@ -202,6 +240,7 @@ export function useSettuWallet() {
     prepare,
     finalize,
     unlock,
+    recoverWithPhrase,
     unlockByPasskey,
     addPasskey,
     canUsePasskey: isPasskeySupported(),

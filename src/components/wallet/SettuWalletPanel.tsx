@@ -4,19 +4,32 @@ import { useEffect, useState } from "react";
 import { AuthButton, AuthField } from "@/components/auth/AuthField";
 import { useSettuWallet, type PreparedWallet } from "@/hooks/useSettuWallet";
 import { listWallets, shortAddress } from "@/lib/api/wallets";
+import {
+  fetchBalances,
+  formatAmount,
+  type WalletBalance,
+} from "@/lib/stellar/settu-wallet/balances";
 
 // Matches the account password rule, so the two don't disagree on screen.
 const MIN_PASSWORD_LENGTH = 12;
 
-type Phase = "create" | "recovery" | "unlock" | "ready";
+type Phase = "create" | "recovery" | "unlock" | "recover" | "ready";
 
 interface Props {
   readonly onReady?: (address: string) => void;
 }
 
 export function SettuWalletPanel({ onReady }: Props) {
-  const { address, isBusy, error, prepare, finalize, unlock, lock } =
-    useSettuWallet();
+  const {
+    address,
+    isBusy,
+    error,
+    prepare,
+    finalize,
+    unlock,
+    recoverWithPhrase,
+    lock,
+  } = useSettuWallet();
   const [walletId, setWalletId] = useState<string | undefined>();
   const [phase, setPhase] = useState<Phase>(address ? "ready" : "create");
 
@@ -41,11 +54,28 @@ export function SettuWalletPanel({ onReady }: Props) {
   const [confirm, setConfirm] = useState("");
   const [phrase, setPhrase] = useState("");
   const [savedPhrase, setSavedPhrase] = useState(false);
-  const [usePhrase, setUsePhrase] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [pending, setPending] = useState<PreparedWallet | null>(null);
   const [pendingPassword, setPendingPassword] = useState("");
+  const [balances, setBalances] = useState<WalletBalance[] | null>(null);
+  const [copiedAddress, setCopiedAddress] = useState(false);
+
+  // Refreshed whenever the wallet is open, so a deposit shows without a reload.
+  useEffect(() => {
+    if (phase !== "ready" || !address) return;
+    let cancelled = false;
+    const load = () =>
+      fetchBalances(address)
+        .then((next) => !cancelled && setBalances(next))
+        .catch(() => {});
+    load();
+    const timer = setInterval(load, 20_000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [phase, address]);
 
   const shown = localError ?? error;
 
@@ -88,14 +118,33 @@ export function SettuWalletPanel({ onReady }: Props) {
     setLocalError(null);
     if (!walletId) return;
     try {
-      const opened = await unlock(
-        walletId,
-        usePhrase
-          ? { type: "mnemonic", secret: phrase }
-          : { type: "password", secret: password },
-      );
+      const opened = await unlock(walletId, {
+        type: "password",
+        secret: password,
+      });
       setPassword("");
+      setPhase("ready");
+      onReady?.(opened);
+    } catch {
+      // The hook already surfaced it.
+    }
+  }
+
+  // The phrase is for recovery, not routine unlocking, so it always ends in a
+  // new password rather than opening the wallet once.
+  async function handleRecover(event: React.FormEvent) {
+    event.preventDefault();
+    setLocalError(null);
+    if (!walletId) return;
+    if (password.length < MIN_PASSWORD_LENGTH || password !== confirm) {
+      setLocalError("Choose a new password of at least 12 characters.");
+      return;
+    }
+    try {
+      const opened = await recoverWithPhrase(walletId, phrase, password);
       setPhrase("");
+      setPassword("");
+      setConfirm("");
       setPhase("ready");
       onReady?.(opened);
     } catch {
@@ -174,10 +223,50 @@ export function SettuWalletPanel({ onReady }: Props) {
           <h2 className="m-0 font-space-grotesk text-[1.1rem] font-bold">
             YOUR SETTU WALLET
           </h2>
-          <p className="mt-[0.35rem] mb-0 font-mono text-[0.85rem]">
-            {shortAddress(address)}
-          </p>
+          <div className="mt-[0.35rem] flex items-center gap-2">
+            <p className="m-0 font-mono text-[0.85rem]">
+              {shortAddress(address)}
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                navigator.clipboard?.writeText(address);
+                setCopiedAddress(true);
+                setTimeout(() => setCopiedAddress(false), 1500);
+              }}
+              className="border border-[var(--line)] px-2 py-[0.15rem] text-[0.62rem] uppercase tracking-[0.08em] text-[var(--muted)]"
+            >
+              {copiedAddress ? "Copied" : "Copy"}
+            </button>
+          </div>
         </div>
+
+        <div className="flex flex-col gap-[0.35rem]">
+          {balances === null ? (
+            <p className="m-0 text-[0.72rem] text-[var(--muted)]">
+              Loading balance…
+            </p>
+          ) : balances.length === 0 ? (
+            <p className="m-0 text-[0.72rem] text-[var(--muted)]">
+              No funds yet. Send USDC to the address above.
+            </p>
+          ) : (
+            balances.map((balance) => (
+              <div
+                key={`${balance.code}-${balance.issuer ?? "native"}`}
+                className="flex items-baseline justify-between border border-[var(--line)] px-3 py-2"
+              >
+                <span className="text-[0.72rem] tracking-[0.08em] text-[var(--muted)]">
+                  {balance.code}
+                </span>
+                <span className="font-mono text-[0.95rem]">
+                  {formatAmount(balance.amount)}
+                </span>
+              </div>
+            ))
+          )}
+        </div>
+
         <p className="m-0 text-[0.72rem] text-[var(--muted)]">
           Locks itself after 15 minutes of inactivity.
         </p>
@@ -185,6 +274,7 @@ export function SettuWalletPanel({ onReady }: Props) {
           type="button"
           onClick={() => {
             lock();
+            setBalances(null);
             setPhase(walletId ? "unlock" : "create");
           }}
           className="h-10 border border-[var(--line)] text-[0.72rem] uppercase tracking-[0.08em] text-[var(--muted)]"
@@ -192,6 +282,76 @@ export function SettuWalletPanel({ onReady }: Props) {
           Lock
         </button>
       </section>
+    );
+  }
+
+  if (phase === "recover") {
+    return (
+      <form
+        onSubmit={handleRecover}
+        className="flex flex-col gap-[0.9rem] border border-[var(--line)] bg-[#0a0a0a] p-[1.2rem]"
+      >
+        <div>
+          <h2 className="m-0 font-space-grotesk text-[1.1rem] font-bold">
+            RECOVER WITH YOUR PHRASE
+          </h2>
+          <p className="mt-[0.35rem] mb-0 text-[0.78rem] text-[var(--muted)]">
+            Enter your 24 words and choose a new password. Your wallet and its
+            funds stay exactly as they are.
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-[0.4rem]">
+          <label className="text-[0.69rem] tracking-[0.08em] text-[var(--muted)]">
+            RECOVERY PHRASE
+          </label>
+          <textarea
+            value={phrase}
+            onChange={(event) => setPhrase(event.target.value)}
+            rows={3}
+            placeholder="Your 24 words, separated by spaces"
+            disabled={isBusy}
+            className="border border-[var(--line)] bg-transparent p-[0.8rem] font-mono text-[0.85rem] outline-none placeholder:text-[var(--muted)] disabled:opacity-50"
+          />
+        </div>
+
+        <AuthField
+          label={`NEW PASSWORD (${MIN_PASSWORD_LENGTH}+ CHARACTERS)`}
+          type="password"
+          value={password}
+          onChange={setPassword}
+          autoComplete="new-password"
+          disabled={isBusy}
+        />
+        <AuthField
+          label="CONFIRM NEW PASSWORD"
+          type="password"
+          value={confirm}
+          onChange={setConfirm}
+          autoComplete="new-password"
+          disabled={isBusy}
+        />
+
+        {shown && <p className="m-0 text-[0.75rem] text-[#ff6b6b]">{shown}</p>}
+
+        <AuthButton disabled={isBusy}>
+          {isBusy ? "Recovering…" : "Set new password"}
+        </AuthButton>
+
+        <button
+          type="button"
+          onClick={() => {
+            setPhrase("");
+            setPassword("");
+            setConfirm("");
+            setLocalError(null);
+            setPhase("unlock");
+          }}
+          className="text-[0.72rem] text-[var(--muted)] underline"
+        >
+          Back
+        </button>
+      </form>
     );
   }
 
@@ -205,30 +365,14 @@ export function SettuWalletPanel({ onReady }: Props) {
           UNLOCK YOUR WALLET
         </h2>
 
-        {usePhrase ? (
-          <div className="flex flex-col gap-[0.4rem]">
-            <label className="text-[0.69rem] tracking-[0.08em] text-[var(--muted)]">
-              RECOVERY PHRASE
-            </label>
-            <textarea
-              value={phrase}
-              onChange={(event) => setPhrase(event.target.value)}
-              rows={3}
-              placeholder="Your 24 words, separated by spaces"
-              disabled={isBusy}
-              className="border border-[var(--line)] bg-transparent p-[0.8rem] font-mono text-[0.85rem] outline-none placeholder:text-[var(--muted)] disabled:opacity-50"
-            />
-          </div>
-        ) : (
-          <AuthField
-            label="PASSWORD"
-            type="password"
-            value={password}
-            onChange={setPassword}
-            autoComplete="current-password"
-            disabled={isBusy}
-          />
-        )}
+        <AuthField
+          label="PASSWORD"
+          type="password"
+          value={password}
+          onChange={setPassword}
+          autoComplete="current-password"
+          disabled={isBusy}
+        />
 
         {shown && <p className="m-0 text-[0.75rem] text-[#ff6b6b]">{shown}</p>}
 
@@ -239,12 +383,13 @@ export function SettuWalletPanel({ onReady }: Props) {
         <button
           type="button"
           onClick={() => {
-            setUsePhrase((value) => !value);
+            setPassword("");
             setLocalError(null);
+            setPhase("recover");
           }}
           className="text-[0.72rem] text-[var(--muted)] underline"
         >
-          {usePhrase ? "Use my password" : "Use my recovery phrase instead"}
+          Forgot your password?
         </button>
       </form>
     );
