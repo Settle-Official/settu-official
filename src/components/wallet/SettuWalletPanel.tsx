@@ -71,6 +71,8 @@ export function SettuWalletPanel({ onReady }: Props) {
   const [solanaAddress, setSolanaAddress] = useState<string | null>(null);
   const [solanaPassword, setSolanaPassword] = useState("");
   const [addingSolana, setAddingSolana] = useState(false);
+  const [needsUpgrade, setNeedsUpgrade] = useState(false);
+  const [upgradePhrase, setUpgradePhrase] = useState("");
 
   // Refreshed whenever the wallet is open, so a deposit shows without a reload.
   useEffect(() => {
@@ -289,6 +291,54 @@ export function SettuWalletPanel({ onReady }: Props) {
               {shortAddress(solanaAddress)}
             </p>
           </div>
+        ) : needsUpgrade ? (
+          <form
+            className="flex flex-col gap-[0.5rem]"
+            onSubmit={async (event) => {
+              event.preventDefault();
+              if (!walletId) return;
+              setLocalError(null);
+              try {
+                // Reseals as v2 under the same password, then derives.
+                await recoverWithPhrase(walletId, upgradePhrase, solanaPassword);
+                setSolanaAddress(await deriveSolana(walletId, solanaPassword));
+                setUpgradePhrase("");
+                setSolanaPassword("");
+                setNeedsUpgrade(false);
+                setAddingSolana(false);
+              } catch {
+                // The hook already surfaced it.
+              }
+            }}
+          >
+            <p className="m-0 text-[0.75rem] text-[var(--muted)]">
+              This wallet was created before multi-chain support. Enter your 24
+              words once to enable other chains — your wallet and funds are
+              unchanged.
+            </p>
+            <textarea
+              value={upgradePhrase}
+              onChange={(event) => setUpgradePhrase(event.target.value)}
+              rows={3}
+              placeholder="Your 24 words, separated by spaces"
+              disabled={isBusy}
+              className="border border-[var(--line)] bg-transparent p-[0.8rem] font-mono text-[0.85rem] outline-none placeholder:text-[var(--muted)] disabled:opacity-50"
+            />
+            <AuthField
+              label="YOUR PASSWORD"
+              type="password"
+              value={solanaPassword}
+              onChange={setSolanaPassword}
+              autoComplete="current-password"
+              disabled={isBusy}
+            />
+            {shown && (
+              <p className="m-0 text-[0.72rem] text-[#ff6b6b]">{shown}</p>
+            )}
+            <AuthButton disabled={isBusy}>
+              {isBusy ? "Enabling…" : "Enable multi-chain"}
+            </AuthButton>
+          </form>
         ) : addingSolana ? (
           <form
             className="flex flex-col gap-[0.5rem]"
@@ -300,8 +350,12 @@ export function SettuWalletPanel({ onReady }: Props) {
                 setSolanaAddress(await deriveSolana(walletId, solanaPassword));
                 setSolanaPassword("");
                 setAddingSolana(false);
-              } catch {
-                // The hook already surfaced it.
+              } catch (err: any) {
+                // A v1 envelope holds no phrase, so ask for it rather than
+                // leaving the user to find the recovery screen themselves.
+                if (/predates multi-chain/i.test(err?.message ?? "")) {
+                  setNeedsUpgrade(true);
+                }
               }
             }}
           >
