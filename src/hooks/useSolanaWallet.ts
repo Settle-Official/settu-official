@@ -3,6 +3,13 @@
 import { useState, useCallback, useEffect } from "react";
 import { VersionedTransaction, Keypair } from "@solana/web3.js";
 import bs58 from "bs58";
+import { unlockedMnemonic } from "@/lib/settu-wallet/session";
+import {
+  addressFromMnemonic as settuSolanaAddress,
+  keypairFromMnemonic as settuSolanaKeypair,
+  signAndSendTransaction as settuSignAndSend,
+  signMessage as settuSignMessage,
+} from "@/lib/settu-wallet/solana";
 import {
   connectSolana,
   disconnectSolana,
@@ -21,6 +28,11 @@ import {
  * through AppKit's provider rather than Wallet Standard's features.
  */
 export function useSolanaWallet() {
+  // An unlocked Settu wallet is already this chain's wallet; AppKit is only
+  // for people connecting an external one.
+  const settuPhrase = unlockedMnemonic();
+  const settuAddress = settuPhrase ? settuSolanaAddress(settuPhrase) : null;
+
   const [address, setAddress] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -78,6 +90,14 @@ export function useSolanaWallet() {
 
   const signAndSendBurn = useCallback(
     async (transactionBase64: string, eventKeypair: Keypair): Promise<string> => {
+      if (settuPhrase) {
+        return settuSignAndSend(
+          settuSolanaKeypair(settuPhrase),
+          transactionBase64,
+          [eventKeypair],
+        );
+      }
+
       const provider = await getSolanaProvider();
 
       const tx = VersionedTransaction.deserialize(
@@ -90,11 +110,15 @@ export function useSolanaWallet() {
       // Already a base58 signature string.
       return provider.signAndSendTransaction(tx);
     },
-    [],
+    [settuPhrase],
   );
 
   // Proves control of the address for wallet linking.
   const signMessage = useCallback(async (message: string): Promise<string> => {
+    if (settuPhrase) {
+      return settuSignMessage(settuSolanaKeypair(settuPhrase), message);
+    }
+
     const provider = await getSolanaProvider();
     // Declared as Uint8Array, but some wallets return a base58 string — the
     // mismatch that broke the burn path, so tolerate both here.
@@ -104,11 +128,11 @@ export function useSolanaWallet() {
     return typeof signature === "string"
       ? signature
       : bs58.encode(signature as Uint8Array);
-  }, []);
+  }, [settuPhrase]);
 
   return {
-    address,
-    isConnected: !!address,
+    address: settuAddress ?? address,
+    isConnected: !!(settuAddress ?? address),
     isConnecting,
     error,
     connect,

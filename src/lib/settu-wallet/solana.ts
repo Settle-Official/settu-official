@@ -1,7 +1,7 @@
 // Solana keys from the same recovery phrase as Stellar — a different
 // derivation path, not a second wallet with a second phrase to back up.
 
-import { Keypair } from "@solana/web3.js";
+import { Keypair, VersionedTransaction } from "@solana/web3.js";
 import nacl from "tweetnacl";
 import bs58 from "bs58";
 import { mnemonicToSeedSync } from "bip39";
@@ -34,4 +34,30 @@ export function signMessage(keypair: Keypair, message: string): string {
     keypair.secretKey,
   );
   return bs58.encode(signature);
+}
+
+/** Signs a prepared burn and relays it, so the Settu wallet needs no provider. */
+export async function signAndSendTransaction(
+  keypair: Keypair,
+  transactionBase64: string,
+  extraSigners: Keypair[],
+): Promise<string> {
+  const tx = VersionedTransaction.deserialize(
+    Uint8Array.from(Buffer.from(transactionBase64, "base64")),
+  );
+  tx.sign([...extraSigners, keypair]);
+
+  // Relayed rather than sent direct, so the RPC key stays server-side.
+  const res = await fetch("/api/wallet/solana/submit", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      transaction: Buffer.from(tx.serialize()).toString("base64"),
+    }),
+  });
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(payload?.error ?? "Could not submit that transaction");
+  }
+  return payload.signature as string;
 }
