@@ -5,6 +5,7 @@ import {
   addUnlockMethod,
   createSealedWallet,
   resealFromMnemonic,
+  unsealMnemonic,
   unsealSecret,
 } from "./keys";
 import { isValidMnemonic, keypairFromMnemonic } from "./mnemonic";
@@ -210,4 +211,20 @@ test("each wallet gets a distinct keypair", async () => {
   const b = await createSealedWallet(PASSWORD);
   assert.notEqual(a.publicKey, b.publicKey);
   assert.notEqual(a.sealed.ciphertext, b.sealed.ciphertext);
+});
+
+test("the envelope now seals the mnemonic, so other chains can derive", async () => {
+  const { sealed, mnemonic } = await createSealedWallet(PASSWORD);
+  assert.equal(sealed.version, 2);
+  const recovered = await unsealMnemonic(sealed, {
+    type: "password",
+    secret: PASSWORD,
+  });
+  assert.equal(recovered, mnemonic);
+});
+
+test("a Stellar secret is never mistaken for a phrase", () => {
+  // This is what separates a v1 payload from a v2 one on unseal.
+  const secret = Keypair.random().secret();
+  assert.equal(isValidMnemonic(secret), false);
 });

@@ -10,6 +10,7 @@ import {
   signTransaction as signWithWallet,
   type StellarWallet,
 } from "@/lib/stellar/wallet-adapter";
+import { isUnlocked as isSettuWalletUnlocked } from "@/lib/stellar/settu-wallet/session";
 
 export function useStellarWallet() {
   const [wallet, setWallet] = useState<StellarWallet | null>(null);
@@ -30,10 +31,9 @@ export function useStellarWallet() {
   useEffect(() => {
     let cancelled = false;
 
-    // Only boot the kit on mount when there's actually a session to restore;
-    // otherwise defer it to the Connect click so a first-time visitor doesn't
-    // pay to download every wallet module before they've asked for one.
-    if (hasStoredWalletSession()) {
+    // An unlocked Settu wallet is a session too, and it leaves no kit storage,
+    // so the dashboard would otherwise never see it.
+    if (hasStoredWalletSession() || isSettuWalletUnlocked()) {
       (async () => {
         // Subscribe before restoring: the kit emits current state on
         // subscribe, so the other order lets that initial (still empty) event

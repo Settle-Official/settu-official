@@ -2,7 +2,7 @@
 // per unlock method. The server holds no wrap key, so it cannot decrypt.
 
 import { Keypair } from "@stellar/stellar-sdk";
-import { createMnemonic, keypairFromMnemonic } from "./mnemonic";
+import { createMnemonic, isValidMnemonic, keypairFromMnemonic } from "./mnemonic";
 
 // The mnemonic is not a wrap: holding it yields the key directly, with nothing
 // to unwrap and no dependence on the stored blob.
@@ -23,7 +23,9 @@ export interface DekWrap {
 }
 
 export interface SealedWallet {
-  version: 1;
+  // v1 sealed the Stellar secret. v2 seals the mnemonic, so every chain can be
+  // derived from one envelope; v1 blobs keep working untouched.
+  version: 1 | 2;
   publicKey: string;
   iv: string;
   ciphertext: string;
@@ -149,11 +151,12 @@ export interface CreatedWallet {
   mnemonic: string;
 }
 
-/** Builds a fresh envelope around an existing keypair. */
+/** Builds a fresh v2 envelope around a mnemonic. */
 async function sealSecret(
-  keypair: Keypair,
+  mnemonic: string,
   password: string,
 ): Promise<SealedWallet> {
+  const keypair = keypairFromMnemonic(mnemonic);
   const dek = randomBytes(DEK_BYTES);
   const iv = randomBytes(AES_IV_BYTES);
   const dekKey = await subtle().importKey(
@@ -166,11 +169,11 @@ async function sealSecret(
   const ciphertext = await subtle().encrypt(
     { name: "AES-GCM", iv: iv as BufferSource },
     dekKey,
-    new TextEncoder().encode(keypair.secret()) as BufferSource,
+    new TextEncoder().encode(mnemonic) as BufferSource,
   );
 
   return {
-    version: 1,
+    version: 2,
     publicKey: keypair.publicKey(),
     iv: toB64(iv),
     ciphertext: toB64(new Uint8Array(ciphertext)),
@@ -183,11 +186,10 @@ export async function createSealedWallet(
   password: string,
 ): Promise<CreatedWallet> {
   const mnemonic = createMnemonic();
-  const keypair = keypairFromMnemonic(mnemonic);
   return {
-    publicKey: keypair.publicKey(),
+    publicKey: keypairFromMnemonic(mnemonic).publicKey(),
     mnemonic,
-    sealed: await sealSecret(keypair, password),
+    sealed: await sealSecret(mnemonic, password),
   };
 }
 
@@ -196,32 +198,60 @@ export type UnlockWith =
   | { type: "passkey"; secret: string }
   | { type: "mnemonic"; secret: string };
 
-/** Decrypt the Stellar secret. Throws rather than returning a partial result. */
-export async function unsealSecret(
+/** The decrypted payload: a mnemonic in v2, a bare Stellar secret in v1. */
+async function unsealPayload(
   sealed: SealedWallet,
   unlock: UnlockWith,
 ): Promise<string> {
-  // The phrase is the key, so this path never touches the stored blob and
-  // still works if the blob is gone.
   if (unlock.type === "mnemonic") {
-    const keypair = keypairFromMnemonic(unlock.secret);
-    if (keypair.publicKey() !== sealed.publicKey) {
+    if (keypairFromMnemonic(unlock.secret).publicKey() !== sealed.publicKey) {
       throw new Error("That phrase belongs to a different wallet.");
     }
-    return keypair.secret();
+    return unlock.secret;
   }
 
   const dek = await unwrapDek(sealed, unlock.type, unlock.secret);
-
-  const dekKey = await subtle().importKey("raw", dek as BufferSource, "AES-GCM", false, [
-    "decrypt",
-  ]);
+  const dekKey = await subtle().importKey(
+    "raw",
+    dek as BufferSource,
+    "AES-GCM",
+    false,
+    ["decrypt"],
+  );
   const plaintext = await subtle().decrypt(
     { name: "AES-GCM", iv: fromB64(sealed.iv) as BufferSource },
     dekKey,
     fromB64(sealed.ciphertext) as BufferSource,
   );
-  const stellarSecret = new TextDecoder().decode(plaintext);
+  return new TextDecoder().decode(plaintext);
+}
+
+/**
+ * The recovery phrase, for deriving keys on chains other than Stellar.
+ * v1 envelopes hold only a Stellar secret, so they have none to give.
+ */
+export async function unsealMnemonic(
+  sealed: SealedWallet,
+  unlock: UnlockWith,
+): Promise<string> {
+  const payload = await unsealPayload(sealed, unlock);
+  if (!isValidMnemonic(payload)) {
+    throw new Error(
+      "This wallet predates multi-chain support. Recover it with your phrase to enable other chains.",
+    );
+  }
+  return payload;
+}
+
+/** Decrypt the Stellar secret. Throws rather than returning a partial result. */
+export async function unsealSecret(
+  sealed: SealedWallet,
+  unlock: UnlockWith,
+): Promise<string> {
+  const payload = await unsealPayload(sealed, unlock);
+  const stellarSecret = isValidMnemonic(payload)
+    ? keypairFromMnemonic(payload).secret()
+    : payload;
 
   // Server-stored, so a tampered publicKey must not redirect signing.
   if (Keypair.fromSecret(stellarSecret).publicKey() !== sealed.publicKey) {
@@ -255,6 +285,5 @@ export async function resealFromMnemonic(
   phrase: string,
   password: string,
 ): Promise<SealedWallet> {
-  const keypair = keypairFromMnemonic(phrase);
-  return sealSecret(keypair, password);
+  return sealSecret(phrase, password);
 }
