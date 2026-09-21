@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { AuthButton, AuthField } from "@/components/auth/AuthField";
+import { unlockedMnemonic } from "@/lib/settu-wallet/session";
 import {
+  deriveAddress,
   useSettuWallet,
   type DerivableChain,
   type PreparedWallet,
@@ -43,13 +45,21 @@ export function SettuWalletPanel({ onReady }: Props) {
     let cancelled = false;
     listWallets()
       .then((wallets) => {
+        // is_settu_wallet only marks the wallet holding the key blob, so a
+        // derived chain is recognised by matching the address we can derive.
         if (!cancelled) {
+          const phrase = unlockedMnemonic();
           const derived: Partial<Record<DerivableChain, string>> = {};
-          for (const chain of ["solana", "evm"] as const) {
-            const found = wallets.find(
-              (w) => w.chain_family === chain && w.is_settu_wallet,
-            );
-            if (found) derived[chain] = found.address;
+          if (phrase) {
+            for (const chain of ["solana", "evm"] as const) {
+              const mine = deriveAddress(chain, phrase);
+              const found = wallets.find(
+                (w) =>
+                  w.chain_family === chain &&
+                  w.address.toLowerCase() === mine.toLowerCase(),
+              );
+              if (found) derived[chain] = found.address;
+            }
           }
           setChainAddresses(derived);
         }

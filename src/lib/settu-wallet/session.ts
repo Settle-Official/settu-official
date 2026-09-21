@@ -2,7 +2,7 @@
 // Never persisted: a reload or the idle timeout means unlocking again.
 
 import { Keypair, Networks, TransactionBuilder } from "@stellar/stellar-sdk";
-import { unsealSecret, type SealedWallet, type UnlockWith } from "./keys";
+import { unsealWallet, type SealedWallet, type UnlockWith } from "./keys";
 
 // Long enough to finish an offramp, short enough that an unattended tab isn't
 // left able to sign.
@@ -10,6 +10,9 @@ const IDLE_TIMEOUT_MS = 15 * 60_000;
 
 interface Session {
   keypair: Keypair;
+  // Held so other chains can be derived without a second unlock. Null for a
+  // v1 envelope, which sealed only the Stellar secret.
+  mnemonic: string | null;
   expiresAt: number;
 }
 
@@ -25,9 +28,10 @@ export async function unlockWallet(
   sealed: SealedWallet,
   unlock: UnlockWith,
 ): Promise<string> {
-  const secret = await unsealSecret(sealed, unlock);
+  const { secret, mnemonic } = await unsealWallet(sealed, unlock);
   session = {
     keypair: Keypair.fromSecret(secret),
+    mnemonic,
     expiresAt: Date.now() + IDLE_TIMEOUT_MS,
   };
   return session.keypair.publicKey();
@@ -43,6 +47,11 @@ export function unlockedAddress(): string | null {
 
 export function isUnlocked(): boolean {
   return live() !== null;
+}
+
+/** The phrase, for deriving other chains while the wallet is open. */
+export function unlockedMnemonic(): string | null {
+  return live()?.mnemonic ?? null;
 }
 
 /** Signs and extends the idle window, since signing is activity. */

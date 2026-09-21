@@ -60,6 +60,11 @@ const DERIVATIONS: Record<DerivableChain, (phrase: string) => Derivation> = {
   }),
 };
 
+/** The address a chain derives to, without unsealing anything. */
+export function deriveAddress(chain: DerivableChain, phrase: string): string {
+  return DERIVATIONS[chain](phrase).address;
+}
+
 export interface PreparedWallet {
   sealed: SealedWallet;
   publicKey: string;

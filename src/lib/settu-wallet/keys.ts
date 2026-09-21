@@ -243,6 +243,21 @@ export async function unsealMnemonic(
   return payload;
 }
 
+/** Both halves from one unwrap; v1 envelopes carry no phrase. */
+export async function unsealWallet(
+  sealed: SealedWallet,
+  unlock: UnlockWith,
+): Promise<{ secret: string; mnemonic: string | null }> {
+  const payload = await unsealPayload(sealed, unlock);
+  const isPhrase = isValidMnemonic(payload);
+  const secret = isPhrase ? keypairFromMnemonic(payload).secret() : payload;
+
+  if (Keypair.fromSecret(secret).publicKey() !== sealed.publicKey) {
+    throw new Error("Wallet data failed its integrity check.");
+  }
+  return { secret, mnemonic: isPhrase ? payload : null };
+}
+
 /** Decrypt the Stellar secret. Throws rather than returning a partial result. */
 export async function unsealSecret(
   sealed: SealedWallet,
