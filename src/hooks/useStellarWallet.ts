@@ -10,7 +10,7 @@ import {
   signTransaction as signWithWallet,
   type StellarWallet,
 } from "@/lib/stellar/wallet-adapter";
-import { isUnlocked as isSettuWalletUnlocked } from "@/lib/stellar/settu-wallet/session";
+import { isUnlocked as isSettuWalletUnlocked } from "@/lib/settu-wallet/session";
 
 export function useStellarWallet() {
   const [wallet, setWallet] = useState<StellarWallet | null>(null);

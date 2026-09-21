@@ -26,7 +26,7 @@ import {
   lockWallet,
   signWithSettuWallet,
   unlockedAddress,
-} from "./settu-wallet/session";
+} from "@/lib/settu-wallet/session";
 
 export interface StellarWallet {
   /** Kit module id of the connected wallet, e.g. "freighter" or "wallet_connect". */

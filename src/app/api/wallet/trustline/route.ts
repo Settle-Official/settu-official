@@ -4,8 +4,8 @@ import {
   SponsorUnavailableError,
   isSponsoredByUs,
   signSponsoredTrustline,
-} from "@/lib/stellar/settu-wallet/sponsor";
-import { describeAsset } from "@/lib/stellar/settu-wallet/asset-info";
+} from "@/lib/settu-wallet/sponsor";
+import { describeAsset } from "@/lib/settu-wallet/asset-info";
 
 export const runtime = "nodejs";
 

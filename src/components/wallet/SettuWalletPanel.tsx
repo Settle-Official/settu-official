@@ -8,7 +8,7 @@ import {
   fetchBalances,
   formatAmount,
   type WalletBalance,
-} from "@/lib/stellar/settu-wallet/balances";
+} from "@/lib/settu-wallet/balances";
 
 // Matches the account password rule, so the two don't disagree on screen.
 const MIN_PASSWORD_LENGTH = 12;
@@ -28,6 +28,7 @@ export function SettuWalletPanel({ onReady }: Props) {
     finalize,
     unlock,
     recoverWithPhrase,
+    deriveSolana,
     lock,
   } = useSettuWallet();
   const [walletId, setWalletId] = useState<string | undefined>();
@@ -38,7 +39,14 @@ export function SettuWalletPanel({ onReady }: Props) {
     let cancelled = false;
     listWallets()
       .then((wallets) => {
-        const existing = wallets.find((w) => w.is_settu_wallet);
+        const solana = wallets.find(
+          (w) => w.chain_family === "solana" && w.is_settu_wallet,
+        );
+        if (!cancelled && solana) setSolanaAddress(solana.address);
+
+        const existing = wallets.find(
+          (w) => w.chain_family === "stellar" && w.is_settu_wallet,
+        );
         if (cancelled || !existing) return;
         setWalletId(existing.id);
         setPhase((current) => (current === "create" ? "unlock" : current));
@@ -60,6 +68,9 @@ export function SettuWalletPanel({ onReady }: Props) {
   const [pendingPassword, setPendingPassword] = useState("");
   const [balances, setBalances] = useState<WalletBalance[] | null>(null);
   const [copiedAddress, setCopiedAddress] = useState(false);
+  const [solanaAddress, setSolanaAddress] = useState<string | null>(null);
+  const [solanaPassword, setSolanaPassword] = useState("");
+  const [addingSolana, setAddingSolana] = useState(false);
 
   // Refreshed whenever the wallet is open, so a deposit shows without a reload.
   useEffect(() => {
@@ -267,8 +278,61 @@ export function SettuWalletPanel({ onReady }: Props) {
           )}
         </div>
 
+        <div className="h-px bg-[var(--line)]" />
+
+        {solanaAddress ? (
+          <div>
+            <p className="m-0 text-[0.69rem] tracking-[0.08em] text-[var(--muted)]">
+              SOLANA
+            </p>
+            <p className="mt-[0.2rem] mb-0 font-mono text-[0.8rem]">
+              {shortAddress(solanaAddress)}
+            </p>
+          </div>
+        ) : addingSolana ? (
+          <form
+            className="flex flex-col gap-[0.5rem]"
+            onSubmit={async (event) => {
+              event.preventDefault();
+              if (!walletId) return;
+              setLocalError(null);
+              try {
+                setSolanaAddress(await deriveSolana(walletId, solanaPassword));
+                setSolanaPassword("");
+                setAddingSolana(false);
+              } catch {
+                // The hook already surfaced it.
+              }
+            }}
+          >
+            <AuthField
+              label="CONFIRM PASSWORD TO ADD SOLANA"
+              type="password"
+              value={solanaPassword}
+              onChange={setSolanaPassword}
+              autoComplete="current-password"
+              disabled={isBusy}
+            />
+            {shown && (
+              <p className="m-0 text-[0.72rem] text-[#ff6b6b]">{shown}</p>
+            )}
+            <AuthButton disabled={isBusy}>
+              {isBusy ? "Adding…" : "Add Solana wallet"}
+            </AuthButton>
+          </form>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setAddingSolana(true)}
+            className="h-10 border border-[var(--line)] text-[0.72rem] uppercase tracking-[0.08em] text-[var(--muted)]"
+          >
+            Add Solana wallet
+          </button>
+        )}
+
         <p className="m-0 text-[0.72rem] text-[var(--muted)]">
-          Locks itself after 15 minutes of inactivity.
+          Same recovery phrase covers every chain. Locks itself after 15 minutes
+          of inactivity.
         </p>
         <button
           type="button"

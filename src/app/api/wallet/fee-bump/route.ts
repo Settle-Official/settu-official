@@ -4,7 +4,7 @@ import {
   FeeBumpRejected,
   SponsorUnavailableError,
   feeBumpAndSubmit,
-} from "@/lib/stellar/settu-wallet/sponsor";
+} from "@/lib/settu-wallet/sponsor";
 
 export const runtime = "nodejs";
 

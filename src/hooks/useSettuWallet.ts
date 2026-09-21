@@ -3,25 +3,31 @@
 import { useCallback, useEffect, useState } from "react";
 import { Keypair, Networks, TransactionBuilder } from "@stellar/stellar-sdk";
 import {
+  addressFromMnemonic as solanaAddressFromMnemonic,
+  keypairFromMnemonic as solanaKeypairFromMnemonic,
+  signMessage as signSolanaMessage,
+} from "@/lib/settu-wallet/solana";
+import {
   addUnlockMethod,
   createSealedWallet,
   resealFromMnemonic,
+  unsealMnemonic,
   unsealSecret,
   type SealedWallet,
   type UnlockWith,
-} from "@/lib/stellar/settu-wallet/keys";
+} from "@/lib/settu-wallet/keys";
 import {
   isPasskeySupported,
   registerPasskey,
   unlockWithPasskey,
-} from "@/lib/stellar/settu-wallet/passkey";
-import { STELLAR_HORIZON_URL } from "@/lib/stellar/settu-wallet/account";
+} from "@/lib/settu-wallet/passkey";
+import { STELLAR_HORIZON_URL } from "@/lib/settu-wallet/account";
 import {
   isUnlocked,
   lockWallet,
   unlockWallet,
   unlockedAddress,
-} from "@/lib/stellar/settu-wallet/session";
+} from "@/lib/settu-wallet/session";
 import {
   getKeyBlob,
   putKeyBlob,
@@ -136,6 +142,41 @@ export function useSettuWallet() {
     [],
   );
 
+  // Derives the Solana address from the same phrase and links it, so a user
+  // backs up one phrase and gets every chain.
+  const deriveSolana = useCallback(
+    async (walletId: string, password: string): Promise<string> => {
+      setIsBusy(true);
+      setError(null);
+      try {
+        const { sealed } = await getKeyBlob(walletId);
+        const phrase = await unsealMnemonic(sealed as SealedWallet, {
+          type: "password",
+          secret: password,
+        });
+        const solanaAddress = solanaAddressFromMnemonic(phrase);
+
+        // Linked through the same challenge/verify path, so control is proved
+        // rather than asserted.
+        const { nonce, challenge } = await requestChallenge(
+          "solana",
+          solanaAddress,
+        );
+        await submitSignature(
+          nonce,
+          signSolanaMessage(solanaKeypairFromMnemonic(phrase), challenge),
+        );
+        return solanaAddress;
+      } catch (err: any) {
+        setError(err?.message ?? "Could not add your Solana wallet");
+        throw err;
+      } finally {
+        setIsBusy(false);
+      }
+    },
+    [],
+  );
+
   // Forgotten password. The phrase yields the key but not the DEK, so the
   // envelope is rebuilt under a new password; the Stellar key is untouched.
   const recoverWithPhrase = useCallback(
@@ -241,6 +282,7 @@ export function useSettuWallet() {
     finalize,
     unlock,
     recoverWithPhrase,
+    deriveSolana,
     unlockByPasskey,
     addPasskey,
     canUsePasskey: isPasskeySupported(),

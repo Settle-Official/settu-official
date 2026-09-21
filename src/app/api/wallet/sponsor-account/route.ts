@@ -5,7 +5,7 @@ import {
   SponsorUnavailableError,
   accountExists,
   signSponsoredCreation,
-} from "@/lib/stellar/settu-wallet/sponsor";
+} from "@/lib/settu-wallet/sponsor";
 
 export const runtime = "nodejs";
 
