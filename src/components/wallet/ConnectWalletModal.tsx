@@ -88,10 +88,21 @@ function OneKeyManyChains() {
     <svg width="56" height="40" viewBox="0 0 56 40" fill="none" aria-hidden>
       <g stroke="#C9A962" strokeWidth="1.5">
         <circle cx="14" cy="20" r="6" />
-        <path d="M20 20h6M26 20l4-9h9M26 20h13M26 20l4 9h9" />
-        <circle cx="45" cy="11" r="3.5" fill="#C9A962" fillOpacity="0.25" />
-        <circle cx="45" cy="20" r="3.5" fill="#C9A962" fillOpacity="0.25" />
-        <circle cx="45" cy="29" r="3.5" fill="#C9A962" fillOpacity="0.25" />
+        <path
+          className="wallet-flow"
+          d="M20 20h6M26 20l4-9h9M26 20h13M26 20l4 9h9"
+        />
+        {[11, 20, 29].map((cy, index) => (
+          <circle
+            key={cy}
+            className="wallet-node"
+            cx="45"
+            cy={cy}
+            r="3.5"
+            fill="#C9A962"
+            style={{ animationDelay: `${index * 0.35}s` }}
+          />
+        ))}
         <path d="M14 20h-6" strokeLinecap="round" />
         <path d="M9 17v6" strokeLinecap="round" />
       </g>
@@ -107,8 +118,10 @@ function PlugIntoWallet() {
         <rect x="26" y="10" width="22" height="20" rx="3" />
         <path d="M26 16h22" />
         <circle cx="42" cy="23" r="2" fill="currentColor" />
-        <path d="M8 20h14" strokeLinecap="round" />
-        <path d="M17 15l5 5-5 5" strokeLinecap="round" strokeLinejoin="round" />
+        <g className="wallet-plug">
+          <path d="M8 20h14" strokeLinecap="round" />
+          <path d="M17 15l5 5-5 5" strokeLinecap="round" strokeLinejoin="round" />
+        </g>
       </g>
     </svg>
   );

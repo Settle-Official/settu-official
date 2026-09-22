@@ -229,3 +229,52 @@ button {
   letter-spacing: 0.06em;
   color: #0a0a0a;
 }
+
+/* Connect-wallet illustrations */
+@keyframes wallet-flow {
+  to {
+    stroke-dashoffset: -14;
+  }
+}
+
+@keyframes wallet-node {
+  0%,
+  100% {
+    fill-opacity: 0.15;
+  }
+  50% {
+    fill-opacity: 0.7;
+  }
+}
+
+@keyframes wallet-plug {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  50% {
+    transform: translateX(4px);
+  }
+}
+
+.wallet-flow {
+  stroke-dasharray: 5 9;
+  animation: wallet-flow 1.1s linear infinite;
+}
+
+.wallet-node {
+  animation: wallet-node 2.1s ease-in-out infinite;
+}
+
+.wallet-plug {
+  animation: wallet-plug 1.6s ease-in-out infinite;
+}
+
+/* Decorative only, so stillness costs nothing. */
+@media (prefers-reduced-motion: reduce) {
+  .wallet-flow,
+  .wallet-node,
+  .wallet-plug {
+    animation: none;
+  }
+}
