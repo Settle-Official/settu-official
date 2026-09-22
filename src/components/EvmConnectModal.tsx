@@ -53,7 +53,7 @@ export function EvmConnectModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative z-10 w-[92vw] max-w-[400px] border border-[var(--line)] bg-[#0c0c0c] p-6">
+      <div className="relative z-10 w-[92vw] max-w-[400px] border border-[var(--line)] bg-[var(--surface-2)] p-6">
         <div className="mb-4 flex items-center justify-between">
           <h3 className="m-0 font-space-grotesk text-[1.05rem] font-bold tracking-[-0.02em]">
             {showQr ? "CONTINUE IN YOUR WALLET" : "CONNECT EVM WALLET"}
@@ -62,7 +62,7 @@ export function EvmConnectModal({
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="text-[1.1rem] leading-none text-[var(--muted)] hover:text-white"
+            className="text-[1.1rem] leading-none text-[var(--muted)] hover:text-[var(--foreground)]"
           >
             ✕
           </button>
@@ -97,14 +97,14 @@ export function EvmConnectModal({
                     () => {},
                   )
                 }
-                className="h-10 border border-[var(--line)] text-[0.72rem] font-bold uppercase tracking-[0.08em] text-[var(--foreground)] hover:border-[#666] disabled:opacity-40"
+                className="h-10 border border-[var(--line)] text-[0.72rem] font-bold uppercase tracking-[0.08em] text-[var(--foreground)] hover:border-[var(--muted-strong)] disabled:opacity-40"
               >
                 {copied ? "Copied ✓" : "Copy pairing link"}
               </button>
               <button
                 type="button"
                 onClick={() => setShowQr(false)}
-                className="h-10 text-[0.72rem] font-bold uppercase tracking-[0.08em] text-[var(--muted)] hover:text-white"
+                className="h-10 text-[0.72rem] font-bold uppercase tracking-[0.08em] text-[var(--muted)] hover:text-[var(--foreground)]"
               >
                 ← Back to wallet list
               </button>
@@ -124,13 +124,13 @@ export function EvmConnectModal({
                 type="button"
                 disabled={isConnecting}
                 onClick={() => onPickInjected(w.info.rdns)}
-                className="flex h-11 items-center gap-3 border border-[var(--line)] px-3 text-left text-[0.85rem] hover:border-[#666] disabled:opacity-40"
+                className="flex h-11 items-center gap-3 border border-[var(--line)] px-3 text-left text-[0.85rem] hover:border-[var(--muted-strong)] disabled:opacity-40"
               >
                 {w.info.icon ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={w.info.icon} alt="" className="h-5 w-5" />
                 ) : (
-                  <span className="h-5 w-5 shrink-0 rounded-sm bg-[#2a2a2a]" />
+                  <span className="h-5 w-5 shrink-0 rounded-sm bg-[var(--line-strong)]" />
                 )}
                 <span className="font-bold">{w.info.name}</span>
               </button>
@@ -139,7 +139,7 @@ export function EvmConnectModal({
               type="button"
               disabled={isConnecting}
               onClick={onWalletConnectClick}
-              className="flex h-11 items-center gap-3 border border-[var(--line)] px-3 text-left text-[0.85rem] hover:border-[#666] disabled:opacity-40"
+              className="flex h-11 items-center gap-3 border border-[var(--line)] px-3 text-left text-[0.85rem] hover:border-[var(--muted-strong)] disabled:opacity-40"
             >
               <span className="h-5 w-5 shrink-0 rounded-sm bg-[#3396ff]" />
               <span className="font-bold">WalletConnect</span>

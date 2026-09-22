@@ -77,7 +77,7 @@ export function ChainTabs({
               onClick={() => setActive(chain)}
               style={
                 isActive
-                  ? { borderColor: "#C9A962", color: "#C9A962" }
+                  ? { borderColor: "var(--accent)", color: "var(--accent)" }
                   : undefined
               }
               className={`flex-1 border py-2 text-[0.7rem] uppercase tracking-[0.08em] ${
@@ -133,7 +133,7 @@ export function ChainTabs({
                     onClick={() => setNetwork(key)}
                     style={
                       selected
-                        ? { borderColor: "#C9A962", color: "#C9A962" }
+                        ? { borderColor: "var(--accent)", color: "var(--accent)" }
                         : undefined
                     }
                     className={`border px-2 py-[0.2rem] text-[0.62rem] uppercase tracking-[0.06em] ${

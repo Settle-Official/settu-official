@@ -168,7 +168,7 @@ export function SettuWalletPanel({ onReady }: Props) {
 
   if (phase === "recovery") {
     return (
-      <section className="flex flex-col gap-[1rem] border border-[var(--line)] bg-[#0a0a0a] p-[1.2rem]">
+      <section className="flex flex-col gap-[1rem] border border-[var(--line)] bg-[var(--bg)] p-[1.2rem]">
         <div>
           <h2 className="m-0 font-space-grotesk text-[1.1rem] font-bold">
             SAVE YOUR RECOVERY PHRASE
@@ -190,7 +190,7 @@ export function SettuWalletPanel({ onReady }: Props) {
               <span className="w-5 text-right text-[var(--muted)]">
                 {index + 1}
               </span>
-              <span style={{ color: "#C9A962" }}>{word}</span>
+              <span style={{ color: "var(--accent)" }}>{word}</span>
             </li>
           ))}
         </ol>
@@ -217,7 +217,7 @@ export function SettuWalletPanel({ onReady }: Props) {
           I have written these words down somewhere safe.
         </label>
 
-        {shown && <p className="m-0 text-[0.75rem] text-[#ff6b6b]">{shown}</p>}
+        {shown && <p className="m-0 text-[0.75rem] text-[var(--danger)]">{shown}</p>}
 
         <AuthButton
           type="button"
@@ -232,7 +232,7 @@ export function SettuWalletPanel({ onReady }: Props) {
 
   if (phase === "ready" && address) {
     return (
-      <section className="flex flex-col gap-[0.9rem] border border-[var(--line)] bg-[#0a0a0a] p-[1.2rem]">
+      <section className="flex flex-col gap-[0.9rem] border border-[var(--line)] bg-[var(--bg)] p-[1.2rem]">
         <h2 className="m-0 font-space-grotesk text-[1.1rem] font-bold">
           YOUR SETTU WALLET
         </h2>
@@ -284,7 +284,7 @@ export function SettuWalletPanel({ onReady }: Props) {
               disabled={isBusy}
             />
             {shown && (
-              <p className="m-0 text-[0.72rem] text-[#ff6b6b]">{shown}</p>
+              <p className="m-0 text-[0.72rem] text-[var(--danger)]">{shown}</p>
             )}
             <AuthButton disabled={isBusy}>
               {isBusy ? "Enabling…" : "Enable multi-chain"}
@@ -325,7 +325,7 @@ export function SettuWalletPanel({ onReady }: Props) {
               disabled={isBusy}
             />
             {shown && (
-              <p className="m-0 text-[0.72rem] text-[#ff6b6b]">{shown}</p>
+              <p className="m-0 text-[0.72rem] text-[var(--danger)]">{shown}</p>
             )}
             <AuthButton disabled={isBusy}>
               {isBusy ? "Adding…" : "Add wallet"}
@@ -363,7 +363,7 @@ export function SettuWalletPanel({ onReady }: Props) {
     return (
       <form
         onSubmit={handleRecover}
-        className="flex flex-col gap-[0.9rem] border border-[var(--line)] bg-[#0a0a0a] p-[1.2rem]"
+        className="flex flex-col gap-[0.9rem] border border-[var(--line)] bg-[var(--bg)] p-[1.2rem]"
       >
         <div>
           <h2 className="m-0 font-space-grotesk text-[1.1rem] font-bold">
@@ -406,7 +406,7 @@ export function SettuWalletPanel({ onReady }: Props) {
           disabled={isBusy}
         />
 
-        {shown && <p className="m-0 text-[0.75rem] text-[#ff6b6b]">{shown}</p>}
+        {shown && <p className="m-0 text-[0.75rem] text-[var(--danger)]">{shown}</p>}
 
         <AuthButton disabled={isBusy}>
           {isBusy ? "Recovering…" : "Set new password"}
@@ -433,7 +433,7 @@ export function SettuWalletPanel({ onReady }: Props) {
     return (
       <form
         onSubmit={handleUnlock}
-        className="flex flex-col gap-[0.9rem] border border-[var(--line)] bg-[#0a0a0a] p-[1.2rem]"
+        className="flex flex-col gap-[0.9rem] border border-[var(--line)] bg-[var(--bg)] p-[1.2rem]"
       >
         <h2 className="m-0 font-space-grotesk text-[1.1rem] font-bold">
           UNLOCK YOUR WALLET
@@ -448,7 +448,7 @@ export function SettuWalletPanel({ onReady }: Props) {
           disabled={isBusy}
         />
 
-        {shown && <p className="m-0 text-[0.75rem] text-[#ff6b6b]">{shown}</p>}
+        {shown && <p className="m-0 text-[0.75rem] text-[var(--danger)]">{shown}</p>}
 
         <AuthButton disabled={isBusy}>
           {isBusy ? "Unlocking…" : "Unlock"}
@@ -475,7 +475,7 @@ export function SettuWalletPanel({ onReady }: Props) {
   return (
     <form
       onSubmit={handleCreate}
-      className="flex flex-col gap-[0.9rem] border border-[var(--line)] bg-[#0a0a0a] p-[1.2rem]"
+      className="flex flex-col gap-[0.9rem] border border-[var(--line)] bg-[var(--bg)] p-[1.2rem]"
     >
       <div>
         <h2 className="m-0 font-space-grotesk text-[1.1rem] font-bold">
@@ -504,7 +504,7 @@ export function SettuWalletPanel({ onReady }: Props) {
         disabled={isBusy}
       />
 
-      {shown && <p className="m-0 text-[0.75rem] text-[#ff6b6b]">{shown}</p>}
+      {shown && <p className="m-0 text-[0.75rem] text-[var(--danger)]">{shown}</p>}
 
       <AuthButton disabled={!canCreate}>
         {isBusy ? "Creating…" : "Create wallet"}

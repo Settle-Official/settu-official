@@ -94,22 +94,31 @@ export async function fetchBurnMessage(params: {
   if (!res.ok) {
     throw new Error(`Iris /v2/messages failed: ${res.status} ${await res.text()}`);
   }
+  // mintRecipient and amount live on decodedMessage.decodedMessageBody, NOT
+  // on decodedMessage itself — only destinationDomain is at the outer level.
+  // Reading them one level too high returned undefined for every burn, which
+  // silently broke the whole burn backstop: findStellarBurn treats a message
+  // with no mintRecipient as "not a CCTP burn" and skips it, so no stranded
+  // burn was ever recoverable. Verified against a live Stellar burn.
   const data = (await res.json()) as {
     messages?: Array<{
       status?: string;
       decodedMessage?: {
-        mintRecipient?: string;
-        amount?: string;
         destinationDomain?: string;
+        decodedMessageBody?: {
+          mintRecipient?: string;
+          amount?: string;
+        };
       };
     }>;
   };
   const first = data.messages?.[0];
   if (!first) return null;
+  const body = first.decodedMessage?.decodedMessageBody;
   return {
     status: first.status ?? "unknown",
-    mintRecipient: first.decodedMessage?.mintRecipient,
-    amount: first.decodedMessage?.amount,
+    mintRecipient: body?.mintRecipient,
+    amount: body?.amount,
     destinationDomain: first.decodedMessage?.destinationDomain,
   };
 }

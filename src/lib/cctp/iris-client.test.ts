@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildMessagesUrl, buildFeeQuoteUrl, computeAtomicFee } from "./iris-client";
+import {
+  buildMessagesUrl,
+  buildFeeQuoteUrl,
+  computeAtomicFee,
+  fetchBurnMessage,
+} from "./iris-client";
 
 test("buildMessagesUrl puts domain in the path and txHash in the query", () => {
   const url = buildMessagesUrl("https://iris-api.circle.com", 27, "abc123");
@@ -42,4 +47,65 @@ test("computeAtomicFee rounds up (ceiling division) rather than undercharging", 
 test("computeAtomicFee treats NaN/negative rates as zero", () => {
   assert.equal(computeAtomicFee(NaN, BigInt(1_000_000)), BigInt(0));
   assert.equal(computeAtomicFee(-5, BigInt(1_000_000)), BigInt(0));
+});
+
+
+// Regression: mintRecipient and amount sit on
+// decodedMessage.decodedMessageBody, one level deeper than they look. Reading
+// them off decodedMessage returned undefined for every burn, and since
+// findStellarBurn skips any message without a mintRecipient, the burn
+// backstop silently matched nothing — two real burns stranded, both needing
+// manual registration. Payload below is trimmed from a live Iris response for
+// a Stellar burn (domain 27).
+test("fetchBurnMessage reads mintRecipient/amount from decodedMessageBody", async () => {
+  const realShape = {
+    messages: [
+      {
+        status: "complete",
+        decodedMessage: {
+          sourceDomain: "27",
+          destinationDomain: "6",
+          // Deliberately absent here — this is the level the old code read.
+          decodedMessageBody: {
+            amount: "1000000",
+            mintRecipient: "0x852f715f1420f7065f07535b2174c6ed0aedea12",
+            burnToken: "0x0000000000000000000000000000000000000000",
+          },
+        },
+      },
+    ],
+  };
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify(realShape), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    })) as typeof fetch;
+
+  try {
+    const msg = await fetchBurnMessage({
+      sourceDomain: 27,
+      transactionHash: "afcf8be06276ed923caa08ccecc4a2e3c132f862e4dea3cd541248e315f3b1c4",
+    });
+    assert.equal(msg?.mintRecipient, "0x852f715f1420f7065f07535b2174c6ed0aedea12");
+    assert.equal(msg?.amount, "1000000");
+    assert.equal(msg?.status, "complete");
+    assert.equal(msg?.destinationDomain, "6");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("fetchBurnMessage returns null when Iris has no message yet (404)", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response("", { status: 404 })) as typeof fetch;
+  try {
+    assert.equal(
+      await fetchBurnMessage({ sourceDomain: 27, transactionHash: "0xdead" }),
+      null,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

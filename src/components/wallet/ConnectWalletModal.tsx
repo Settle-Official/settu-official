@@ -28,7 +28,7 @@ export function ConnectWalletModal({
         onClick={onClose}
         className="absolute inset-0 bg-black/70 backdrop-blur-sm"
       />
-      <div className="relative z-10 flex w-full max-w-[400px] flex-col gap-[0.9rem] border border-[var(--line)] bg-[#0a0a0a] p-[1.2rem]">
+      <div className="relative z-10 flex w-full max-w-[400px] flex-col gap-[0.9rem] border border-[var(--line)] bg-[var(--bg)] p-[1.2rem]">
         <h3 className="m-0 font-space-grotesk text-[1.05rem] font-bold">
           CONNECT WALLET
         </h3>
@@ -37,13 +37,13 @@ export function ConnectWalletModal({
           <button
             type="button"
             onClick={() => setShowSettu(true)}
-            style={{ borderColor: "#C9A962" }}
-            className="flex flex-col items-center gap-[0.5rem] border p-3 transition-colors hover:bg-[#151515]"
+            style={{ borderColor: "var(--accent)" }}
+            className="flex flex-col items-center gap-[0.5rem] border p-3 transition-colors hover:bg-[var(--bg-highlight)]"
           >
             <OneKeyManyChains />
             <span
               className="text-[0.74rem] font-semibold uppercase tracking-[0.08em]"
-              style={{ color: "#C9A962" }}
+              style={{ color: "var(--accent)" }}
             >
               Settu Wallet
             </span>
@@ -58,7 +58,7 @@ export function ConnectWalletModal({
               onConnectExternal();
               onClose();
             }}
-            className="flex flex-col items-center gap-[0.5rem] border border-[var(--line)] p-3 transition-colors hover:border-[#C9A962]"
+            className="flex flex-col items-center gap-[0.5rem] border border-[var(--line)] p-3 transition-colors hover:border-[var(--accent)]"
           >
             <PlugIntoWallet />
             <span className="text-[0.74rem] font-semibold uppercase tracking-[0.08em]">
@@ -86,7 +86,7 @@ export function ConnectWalletModal({
 function OneKeyManyChains() {
   return (
     <svg width="56" height="40" viewBox="0 0 56 40" fill="none" aria-hidden>
-      <g stroke="#C9A962" strokeWidth="1.5">
+      <g stroke="var(--accent)" strokeWidth="1.5">
         <circle cx="14" cy="20" r="6" />
         <path
           className="wallet-flow"
@@ -99,7 +99,7 @@ function OneKeyManyChains() {
             cx="45"
             cy={cy}
             r="3.5"
-            fill="#C9A962"
+            fill="var(--accent)"
             style={{ animationDelay: `${index * 0.35}s` }}
           />
         ))}

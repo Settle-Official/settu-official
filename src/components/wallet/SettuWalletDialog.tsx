@@ -96,7 +96,7 @@ export function SettuWalletDialog({
             autoComplete="current-password"
             disabled={isBusy}
           />
-          {error && <p className="m-0 text-[0.75rem] text-[#ff6b6b]">{error}</p>}
+          {error && <p className="m-0 text-[0.75rem] text-[var(--danger)]">{error}</p>}
           <AuthButton disabled={isBusy}>
             {isBusy ? "Unlocking…" : "Unlock"}
           </AuthButton>
@@ -125,7 +125,7 @@ export function SettuWalletDialog({
             autoComplete="new-password"
             disabled={isBusy}
           />
-          {error && <p className="m-0 text-[0.75rem] text-[#ff6b6b]">{error}</p>}
+          {error && <p className="m-0 text-[0.75rem] text-[var(--danger)]">{error}</p>}
           <AuthButton disabled={!canCreate}>
             {isBusy ? "Preparing…" : "Create wallet"}
           </AuthButton>
@@ -148,7 +148,7 @@ export function SettuWalletDialog({
                 <span className="w-5 text-right text-[var(--muted)]">
                   {index + 1}
                 </span>
-                <span style={{ color: "#C9A962" }}>{word}</span>
+                <span style={{ color: "var(--accent)" }}>{word}</span>
               </li>
             ))}
           </ol>
@@ -172,7 +172,7 @@ export function SettuWalletDialog({
             />
             I have written these words down somewhere safe.
           </label>
-          {error && <p className="m-0 text-[0.75rem] text-[#ff6b6b]">{error}</p>}
+          {error && <p className="m-0 text-[0.75rem] text-[var(--danger)]">{error}</p>}
           <AuthButton
             type="button"
             disabled={!saved || isBusy}
@@ -209,7 +209,7 @@ function Shell({
         onClick={onClose}
         className="absolute inset-0 bg-black/70 backdrop-blur-sm"
       />
-      <div className="relative z-10 flex w-full max-w-[400px] flex-col gap-[0.9rem] border border-[var(--line)] bg-[#0a0a0a] p-[1.2rem]">
+      <div className="relative z-10 flex w-full max-w-[400px] flex-col gap-[0.9rem] border border-[var(--line)] bg-[var(--bg)] p-[1.2rem]">
         <h3 className="m-0 font-space-grotesk text-[1.05rem] font-bold">
           {title}
         </h3>

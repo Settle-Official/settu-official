@@ -48,7 +48,7 @@ export function ProgressSteps({ isConnected, isConnecting }: Readonly<ProgressSt
             className={cn(
               "border border-[var(--line)] p-[0.9rem]",
               active &&
-                "border-[var(--accent)] bg-[var(--accent)] text-[#0a0a0a]",
+                "border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-contrast)]",
             )}
           >
             <span className="text-[1.5rem] font-bold">{step.number}</span>

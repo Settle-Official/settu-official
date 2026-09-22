@@ -138,7 +138,7 @@ export function SelectField({
       <div
         className={cn(
           "relative h-[46px] border border-[var(--line)] transition-colors",
-          !isLoading && "hover:border-[#666]",
+          !isLoading && "hover:border-[var(--muted-strong)]",
         )}
       >
         <button
@@ -178,7 +178,7 @@ export function SelectField({
           </svg>
         </button>
         {isOpen && !isLoading ? (
-          <div className="absolute left-0 right-0 top-[calc(100%+0.35rem)] z-20 border border-[var(--line)] bg-[#0a0a0a] shadow-[0_8px_24px_rgba(0,0,0,0.5)]">
+          <div className="absolute left-0 right-0 top-[calc(100%+0.35rem)] z-20 border border-[var(--line)] bg-[var(--bg)] shadow-[0_8px_24px_rgba(0,0,0,0.5)]">
             {showSearch ? (
               <div className="border-b border-[var(--line)] p-[0.4rem]">
                 <input
@@ -198,7 +198,7 @@ export function SelectField({
                   autoCorrect="off"
                   autoCapitalize="none"
                   spellCheck={false}
-                  className="h-[34px] w-full bg-[#111] px-[0.6rem] text-[0.9rem] text-[var(--foreground)] outline-none placeholder:text-[var(--muted)]"
+                  className="h-[34px] w-full bg-[var(--surface)] px-[0.6rem] text-[0.9rem] text-[var(--foreground)] outline-none placeholder:text-[var(--muted)]"
                 />
               </div>
             ) : null}

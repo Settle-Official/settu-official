@@ -27,7 +27,7 @@ export default function ForgotPassword() {
 
   return (
     <main className="min-h-screen p-4">
-      <section className="mx-auto mt-[12vh] flex max-w-[440px] flex-col gap-[1.1rem] border border-[var(--line)] bg-[#0a0a0a] p-[1.2rem]">
+      <section className="mx-auto mt-[12vh] flex max-w-[440px] flex-col gap-[1.1rem] border border-[var(--line)] bg-[var(--bg)] p-[1.2rem]">
         <h1 className="m-0 font-space-grotesk text-[1.5rem] font-bold">RESET PASSWORD</h1>
 
         {sent ? (

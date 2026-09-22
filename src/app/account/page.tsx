@@ -15,7 +15,7 @@ export default function Account() {
         {isLoading ? (
           <p className="text-[0.8rem] text-[var(--muted)]">Loading...</p>
         ) : isAuthenticated && user ? (
-          <div className="flex flex-col gap-[1.1rem] border border-[var(--line)] bg-[#0a0a0a] p-[1.2rem]">
+          <div className="flex flex-col gap-[1.1rem] border border-[var(--line)] bg-[var(--bg)] p-[1.2rem]">
             <div>
               <h1 className="m-0 font-space-grotesk text-[1.5rem] font-bold">ACCOUNT</h1>
               <p className="mt-[0.3rem] mb-0 font-mono text-[0.8rem] text-[var(--muted)]">

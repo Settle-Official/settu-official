@@ -44,7 +44,7 @@ export function VerifyEmailNotice({ email }: { readonly email: string }) {
         </button>
       )}
 
-      {error && <p className="m-0 text-[0.72rem] text-[#ff6b6b]">{error}</p>}
+      {error && <p className="m-0 text-[0.72rem] text-[var(--danger)]">{error}</p>}
     </div>
   );
 }

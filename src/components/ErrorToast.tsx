@@ -47,7 +47,7 @@ export function ErrorToast({ message, onDismiss }: ErrorToastProps) {
           <button
             type="button"
             onClick={() => { setVisible(false); setTimeout(onDismiss, 300); }}
-            className="ml-2 flex-shrink-0 text-[var(--muted)] hover:text-white transition-colors leading-none"
+            className="ml-2 flex-shrink-0 text-[var(--muted)] hover:text-[var(--foreground)] transition-colors leading-none"
           >
             ✕
           </button>

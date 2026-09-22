@@ -27,7 +27,7 @@ export function RecentTransactionsTable({
   const pageRows = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return (
-    <section className="border border-[var(--line)] bg-[#0a0a0a] p-[0.8rem]">
+    <section className="border border-[var(--line)] bg-[var(--bg)] p-[0.8rem]">
       <div className="mb-[0.65rem] flex items-end justify-between">
         <h2 className="m-0 font-space-grotesk font-bold text-[1.50rem]">
           RECENT TRANSACTIONS
@@ -42,19 +42,19 @@ export function RecentTransactionsTable({
       <table className="w-full border-collapse text-[0.72rem] max-[720px]:block max-[720px]:overflow-x-auto">
         <thead>
           <tr>
-            <th className="bg-[var(--accent)] p-[0.55rem] font-semibold font-space-grotesk text-left text-[0.7rem] text-[#0a0a0a]">
+            <th className="bg-[var(--accent)] p-[0.55rem] font-semibold font-space-grotesk text-left text-[0.7rem] text-[var(--accent-contrast)]">
               TYPE
             </th>
-            <th className="bg-[var(--accent)] p-[0.55rem] font-semibold font-space-grotesk text-left text-[0.7rem] text-[#0a0a0a]">
+            <th className="bg-[var(--accent)] p-[0.55rem] font-semibold font-space-grotesk text-left text-[0.7rem] text-[var(--accent-contrast)]">
               TX HASH
             </th>
-            <th className="bg-[var(--accent)] p-[0.55rem] font-semibold font-space-grotesk text-left text-[0.7rem] text-[#0a0a0a]">
+            <th className="bg-[var(--accent)] p-[0.55rem] font-semibold font-space-grotesk text-left text-[0.7rem] text-[var(--accent-contrast)]">
               USDC
             </th>
-            <th className="bg-[var(--accent)] p-[0.55rem] font-semibold font-space-grotesk text-left text-[0.7rem] text-[#0a0a0a]">
+            <th className="bg-[var(--accent)] p-[0.55rem] font-semibold font-space-grotesk text-left text-[0.7rem] text-[var(--accent-contrast)]">
               NAIRA
             </th>
-            <th className="bg-[var(--accent)] p-[0.55rem] font-semibold font-space-grotesk text-left text-[0.7rem] text-[#0a0a0a]">
+            <th className="bg-[var(--accent)] p-[0.55rem] font-semibold font-space-grotesk text-left text-[0.7rem] text-[var(--accent-contrast)]">
               STATUS
             </th>
           </tr>
@@ -68,7 +68,7 @@ export function RecentTransactionsTable({
                     "inline-block border px-[0.55rem] py-[0.2rem] text-[0.6rem]",
                     row.type === "onramp"
                       ? "border-[var(--accent)] text-[var(--accent)]"
-                      : "border-white text-white",
+                      : "border-[var(--foreground)] text-[var(--foreground)]",
                   )}
                 >
                   {row.type === "onramp" ? "ONRAMP" : "OFFRAMP"}
@@ -87,8 +87,8 @@ export function RecentTransactionsTable({
                 <span
                   className={
                     row.status === "SETTLING"
-                      ? "inline-block border border-[var(--accent)] bg-[var(--accent)] px-[0.55rem] py-[0.2rem] text-[0.6rem] text-[#0a0a0a]"
-                      : "inline-block border border-white px-[0.55rem] py-[0.2rem] text-[0.6rem]"
+                      ? "inline-block border border-[var(--accent)] bg-[var(--accent)] px-[0.55rem] py-[0.2rem] text-[0.6rem] text-[var(--accent-contrast)]"
+                      : "inline-block border border-[var(--foreground)] px-[0.55rem] py-[0.2rem] text-[0.6rem]"
                   }
                 >
                   {row.status}

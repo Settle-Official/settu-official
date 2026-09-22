@@ -20,14 +20,29 @@ import {
 import type { PayoutStatus } from "./types";
 import { pushRecentTransaction, addVolume } from "@/lib/stats-store";
 import { formatFiat } from "@/lib/format/currency";
+import { updateTransactionByOrderId } from "./transaction-history";
 
 export async function recordOfframpPayoutConfirmed(
   orderId: string,
   opts: { txHash?: string } = {},
 ): Promise<void> {
+  const meta = await getOrderMeta(orderId);
+  // Ahead of the claim guard on purpose. The guard exists to make the stats
+  // push happen exactly once, but this is a state reconciliation, not a
+  // counter — it must still run on the poll path when the webhook already
+  // took the claim, and it is safe to repeat (same terminal value, and
+  // updateTransactionByOrderId refuses to regress a completed record).
+  // Without this, an offramp that finishes at `fulfilled` — which Paycrest
+  // never sends a webhook for — would sit at "pending" in history forever.
+  void updateTransactionByOrderId(orderId, "completed", {
+    ...(meta?.payoutValue !== undefined
+      ? { destinationAmount: String(meta.payoutValue) }
+      : {}),
+    ...(opts.txHash ? { mintTxHash: opts.txHash } : {}),
+  });
+
   if (!(await claimSettlementRecording(orderId))) return;
 
-  const meta = await getOrderMeta(orderId);
   const usdc = meta?.amountUsdc;
   if (usdc === undefined || !Number.isFinite(usdc)) return;
 
@@ -53,7 +68,21 @@ export async function reconcilePayoutOrder(
   orderId: string,
 ): Promise<PayoutStatus> {
   const cached = await getPayoutStatus(orderId);
-  if (cached && isTerminal(cached.status)) return cached.status;
+  if (cached && isTerminal(cached.status)) {
+    // Don't re-poll Paycrest for an order that's already finished — but do
+    // still reconcile, because the permanent transaction record is written
+    // at burn time and only this path brings it to a terminal state. The old
+    // bare `return` skipped that, so any order whose payout was already
+    // cached as terminal kept a "pending" record forever: the user saw a
+    // stuck transfer in History and got no completion notification, even
+    // though the money had landed. recordOfframpPayoutConfirmed is
+    // idempotent (the stats push is claimed once via Redis SET NX), so
+    // running it again here is safe.
+    if (cached.status === "settled") {
+      await recordOfframpPayoutConfirmed(orderId, { txHash: cached.txHash });
+    }
+    return cached.status;
+  }
 
   const apiKey = process.env.PAYCREST_API_KEY;
   if (!apiKey) return cached?.status ?? "unknown";

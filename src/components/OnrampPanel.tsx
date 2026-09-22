@@ -39,6 +39,10 @@ export interface OnrampPanelProps {
    * not a write trigger. The write itself happens server-side in
    * finalizeOnrampOrder, regardless of what detected the delivery. */
   readonly onDelivered?: () => void;
+  /** Fired on every terminal status (delivered, refunded, or expired) — the
+   * wallet's balance may have just changed (or the user needs to see that
+   * it didn't), regardless of which way the order ended. */
+  readonly onSettled?: () => void;
 }
 
 // User-facing copy for each streamed onramp status.
@@ -48,6 +52,7 @@ export function OnrampPanel({
   walletAddress,
   onConnect,
   onDelivered,
+  onSettled,
 }: Readonly<OnrampPanelProps>) {
   const [phase, setPhase] = useState<OnrampPhase>("form");
 
@@ -157,16 +162,18 @@ export function OnrampPanel({
       if (next === "delivered") {
         setPhase("done");
         onDelivered?.();
+        onSettled?.();
         return true;
       }
       if (next === "refunded" || next === "expired") {
         setPhase("error");
+        onSettled?.();
         return true;
       }
       if (next === "bridge_failed") setPhase("error");
       return false;
     },
-    [onDelivered],
+    [onDelivered, onSettled],
   );
 
   // Authoritative read, shared by the backstop poller and the manual check.
@@ -336,7 +343,7 @@ export function OnrampPanel({
 
   // form
   return (
-    <section className="flex flex-col gap-[1.1rem] border border-[var(--line)] bg-[#0a0a0a] p-[1.2rem]">
+    <section className="flex flex-col gap-[1.1rem] border border-[var(--line)] bg-[var(--bg)] p-[1.2rem]">
       <div>
         <h2 className="m-0 font-space-grotesk font-bold text-[1.50rem]">
           {isConnected ? "BUY USDC ON STELLAR" : "CONNECT WALLET"}
@@ -399,7 +406,7 @@ export function OnrampPanel({
       </div>
 
       <div className="flex flex-col gap-[0.6rem]">
-        <div className="border border-[var(--line)] bg-[#111] px-3 py-2">
+        <div className="border border-[var(--line)] bg-[var(--surface)] px-3 py-2">
           <p className="m-0 text-[1rem] text-[var(--accent)]">
             By default, USDC is sent to your{" "}
             <span className="text-[var(--foreground)]">connected wallet</span>{" "}
@@ -442,13 +449,13 @@ export function OnrampPanel({
         className={cn(
           "h-12 font-bold uppercase tracking-[0.08em] transition-colors",
           !isConnected &&
-            "bg-[var(--accent)] text-[#0a0a0a] hover:brightness-110",
+            "bg-[var(--accent)] text-[var(--accent-contrast)] hover:brightness-110",
           isConnected &&
             !canSubmit &&
-            "bg-[#2f2f2f] text-[var(--muted)] cursor-not-allowed",
+            "bg-[var(--line-strong)] text-[var(--muted)] cursor-not-allowed",
           isConnected &&
             canSubmit &&
-            "bg-[#efefef] text-[#0a0a0a] hover:brightness-95",
+            "bg-[var(--foreground)] text-[var(--bg)] hover:brightness-95",
         )}
       >
         {!isConnected
@@ -482,7 +489,7 @@ function VirtualAccountView({
   };
 
   return (
-    <section className="flex flex-col gap-[1.1rem] border border-[var(--line)] bg-[#0a0a0a] p-[1.2rem]">
+    <section className="flex flex-col gap-[1.1rem] border border-[var(--line)] bg-[var(--bg)] p-[1.2rem]">
       <div>
         <h2 className="m-0 font-space-grotesk font-bold text-[1.4rem]">
           SEND {account.currency} {account.amountToTransfer}
@@ -522,7 +529,7 @@ function VirtualAccountView({
 
       <Countdown validUntil={account.validUntil} />
 
-      <div className="flex items-center gap-2 border border-[var(--line)] bg-[#111] px-3 py-2">
+      <div className="flex items-center gap-2 border border-[var(--line)] bg-[var(--surface)] px-3 py-2">
         <Spinner />
         <span className="text-[0.8rem] text-[var(--muted)]">
           {ONRAMP_STATUS_LABEL[status] ?? ONRAMP_STATUS_LABEL.pending}
@@ -572,7 +579,7 @@ function StatusView({
   const isDone = phase === "done";
   const isError = phase === "error";
   return (
-    <section className="flex min-h-[40vh] flex-col items-center justify-center gap-4 border border-[var(--line)] bg-[#0a0a0a] p-8 text-center">
+    <section className="flex min-h-[40vh] flex-col items-center justify-center gap-4 border border-[var(--line)] bg-[var(--bg)] p-8 text-center">
       {isDone ? (
         <div className="text-[3rem]">✓</div>
       ) : isError ? (
@@ -590,7 +597,7 @@ function StatusView({
         <button
           type="button"
           onClick={onReset}
-          className="mt-2 h-10 bg-[var(--accent)] px-6 text-[0.75rem] font-bold uppercase tracking-[0.08em] text-[#0a0a0a]"
+          className="mt-2 h-10 bg-[var(--accent)] px-6 text-[0.75rem] font-bold uppercase tracking-[0.08em] text-[var(--accent-contrast)]"
         >
           New onramp
         </button>
@@ -694,6 +701,9 @@ function LabeledInput({
           type={type}
           value={value}
           onChange={(e) => onChange(e.target.value)}
+          // A focused number input still eats scroll-wheel ticks to bump its
+          // value — blurring on wheel hands that scroll back to the page.
+          onWheel={(e) => e.currentTarget.blur()}
           placeholder={placeholder}
           maxLength={maxLength}
           className="flex-1 bg-transparent text-[0.95rem] outline-none placeholder:text-[var(--muted)]"
