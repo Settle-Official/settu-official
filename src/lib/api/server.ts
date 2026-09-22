@@ -109,9 +109,10 @@ export async function serviceWrite(
   path: string,
   body: unknown,
   timeoutMs?: number,
+  method: string = "POST",
 ): Promise<boolean> {
   try {
-    await serviceFetch(path, { method: "POST", body, timeoutMs });
+    await serviceFetch(path, { method, body, timeoutMs });
     return true;
   } catch (error) {
     // Logged, not thrown: this is the second leg of a dual write, and the
