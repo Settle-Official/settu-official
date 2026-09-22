@@ -14,6 +14,11 @@ import { RecentTransactionsTable } from "@/components/RecentTransactionsTable";
 import { RightPanel, type PlatformStats } from "@/components/RightPanel";
 import { PlatformStatsCard } from "@/components/PlatformStatsCard";
 import { OnrampPanel } from "@/components/OnrampPanel";
+import { SettuUnlockDialog } from "@/components/wallet/SettuUnlockDialog";
+import {
+  isUnlocked as isSettuUnlocked,
+  lockWallet as lockSettuWallet,
+} from "@/lib/settu-wallet/session";
 import { useStellarWallet } from "@/hooks/useStellarWallet";
 import { useEvmWallet } from "@/hooks/useEvmWallet";
 import { useSolanaWallet } from "@/hooks/useSolanaWallet";
@@ -384,6 +389,16 @@ export function StellarampDashboard() {
 
   const [sourceChain, setSourceChain] =
     useState<OfframpSourceChainKey>("stellar");
+  const [showSettuUnlock, setShowSettuUnlock] = useState(false);
+  // Re-read after unlock so the header and the wallet hooks agree.
+  const [settuUnlocked, setSettuUnlocked] = useState(false);
+
+  // The session expires on its own, so the header must not keep claiming it.
+  useEffect(() => {
+    const timer = setInterval(() => setSettuUnlocked(isSettuUnlocked()), 5000);
+    setSettuUnlocked(isSettuUnlocked());
+    return () => clearInterval(timer);
+  }, []);
 
   const isSolanaSource = sourceChain === "solana";
   const isEvmSource = sourceChain !== "stellar" && !isSolanaSource;
@@ -737,6 +752,15 @@ export function StellarampDashboard() {
   };
 
   const handleDisconnect = async () => {
+    // The Settu wallet serves every chain, so locking it is the disconnect
+    // whatever source is selected.
+    if (isSettuUnlocked()) {
+      lockSettuWallet();
+      setSettuUnlocked(false);
+      setUserTransactions([]);
+      return;
+    }
+
     // Disconnect whichever wallet is actually in use — a non-Stellar path
     // only applies to an offramp surface (FormCard or Agent Mode); onramp is
     // always Stellar.
@@ -2046,7 +2070,19 @@ export function StellarampDashboard() {
             }
             onConnect={handleConnect}
             onDisconnect={handleDisconnect}
+            onConnectSettu={() => setShowSettuUnlock(true)}
+            isSettuWallet={settuUnlocked}
           />
+
+          {showSettuUnlock && (
+            <SettuUnlockDialog
+              onUnlocked={() => {
+                setSettuUnlocked(true);
+                setShowSettuUnlock(false);
+              }}
+              onClose={() => setShowSettuUnlock(false)}
+            />
+          )}
 
           {/* Three fixed-width buttons overflow narrow mobile viewports (the
               Agent tab used to run off-screen); below `sm` this collapses to
