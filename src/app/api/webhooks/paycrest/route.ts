@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { createHmac, timingSafeEqual } from "crypto";
 import {
   mapPaycrestStatus,
@@ -36,6 +36,17 @@ function verifyPaycrestSignature(
 }
 
 export async function POST(request: NextRequest) {
+  // Vercel can freeze the function the moment the response is sent, dropping a
+  // bare `void`. after() reads this array once the 2xx is already on the wire.
+  const background: Promise<unknown>[] = [];
+  after(() => Promise.all(background));
+
+  // Caught at queue time, not inside after(): a rejection landing before that
+  // callback runs would be an unhandled rejection.
+  const inBackground = (...promises: Promise<unknown>[]) => {
+    background.push(...promises.map((p) => p.catch(() => {})));
+  };
+
   try {
     const signature = request.headers.get("X-Paycrest-Signature");
     if (!signature) {
@@ -93,10 +104,12 @@ export async function POST(request: NextRequest) {
 
     // Confirmation ping: every verified delivery lands here. Lets you see in
     // Telegram that webhooks are actually reaching the deployment.
-    void notify(
-      `📥 Webhook received: <code>${event ?? "?"}</code>` +
-        ` · ${onrampRecord ? "onramp" : "offramp"} · order <code>${orderId}</code>`,
-      "info",
+    inBackground(
+      notify(
+        `📥 Webhook received: <code>${event ?? "?"}</code>` +
+          ` · ${onrampRecord ? "onramp" : "offramp"} · order <code>${orderId}</code>`,
+        "info",
+      ),
     );
 
     // Prefer the bare status from the v2 payload; fall back to mapping the
@@ -116,22 +129,24 @@ export async function POST(request: NextRequest) {
       // Rich alert on every onramp status change, enriched from the stored
       // record (refund account, rate) which the webhook payload lacks.
       const rec = await getOnrampOrder(orderId);
-      void alertRampEvent({
-        direction: "onramp",
-        orderId,
-        status,
-        accountName: rec?.refundAccountName ?? data?.recipient?.accountName,
-        accountNumber:
-          rec?.refundAccountIdentifier ?? data?.recipient?.accountIdentifier,
-        bank: rec?.refundInstitution ?? data?.recipient?.institution,
-        currency: rec?.currency ?? data?.recipient?.currency,
-        amountIn: rec?.fiatAmount,
-        amountInUnit: rec?.currency,
-        rate: rec?.rate ?? (data?.rate ? Number(data.rate) : undefined),
-        payoutValue: data?.amount, // USDC delivered
-        payoutUnit: "USDC",
-        stellarAddress: rec?.userStellarAddress,
-      });
+      inBackground(
+        alertRampEvent({
+          direction: "onramp",
+          orderId,
+          status,
+          accountName: rec?.refundAccountName ?? data?.recipient?.accountName,
+          accountNumber:
+            rec?.refundAccountIdentifier ?? data?.recipient?.accountIdentifier,
+          bank: rec?.refundInstitution ?? data?.recipient?.institution,
+          currency: rec?.currency ?? data?.recipient?.currency,
+          amountIn: rec?.fiatAmount,
+          amountInUnit: rec?.currency,
+          rate: rec?.rate ?? (data?.rate ? Number(data.rate) : undefined),
+          payoutValue: data?.amount, // USDC delivered
+          payoutUnit: "USDC",
+          stellarAddress: rec?.userStellarAddress,
+        }),
+      );
 
       if (status === "settled") {
         // Bridge inline. handleOnrampSettled is lock-guarded and hold-and-alert
@@ -194,30 +209,34 @@ export async function POST(request: NextRequest) {
         // Fall back to the order id so a real identifier is always shown
         // instead of a placeholder.
         const displayHash = payoutRecord.txHash || orderId;
-        void pushRecentTransaction({
-          txHash: `${displayHash.slice(0, 4)}...${displayHash.slice(-4)}`,
-          usdc: usdcAmount.toFixed(2),
-          naira: formatFiat(payoutValue, meta?.currency ?? rcpt?.currency),
-          status: "COMPLETE",
-          type: "offramp",
-        });
-        void addVolume(usdcAmount);
+        inBackground(
+          pushRecentTransaction({
+            txHash: `${displayHash.slice(0, 4)}...${displayHash.slice(-4)}`,
+            usdc: usdcAmount.toFixed(2),
+            naira: formatFiat(payoutValue, meta?.currency ?? rcpt?.currency),
+            status: "COMPLETE",
+            type: "offramp",
+          }),
+          addVolume(usdcAmount),
+        );
       }
     }
 
-    void alertOfframpEvent({
-      orderId,
-      status,
-      accountName: meta?.accountName ?? rcpt?.accountName,
-      accountNumber: meta?.accountIdentifier ?? rcpt?.accountIdentifier,
-      bank: meta?.institution ?? rcpt?.institution,
-      currency: meta?.currency ?? rcpt?.currency,
-      amountUsdc: meta?.amountUsdc ?? data?.amount,
-      rate: meta?.rate ?? payloadRate,
-      payoutValue,
-      sourceChain: meta?.sourceChain,
-      reference: meta?.reference ?? data?.reference,
-    });
+    inBackground(
+      alertOfframpEvent({
+        orderId,
+        status,
+        accountName: meta?.accountName ?? rcpt?.accountName,
+        accountNumber: meta?.accountIdentifier ?? rcpt?.accountIdentifier,
+        bank: meta?.institution ?? rcpt?.institution,
+        currency: meta?.currency ?? rcpt?.currency,
+        amountUsdc: meta?.amountUsdc ?? data?.amount,
+        rate: meta?.rate ?? payloadRate,
+        payoutValue,
+        sourceChain: meta?.sourceChain,
+        reference: meta?.reference ?? data?.reference,
+      }),
+    );
 
     // Keep the permanent transaction record in step with reality. It is
     // written at burn time, when neither the outcome nor the payout figure
@@ -230,13 +249,15 @@ export async function POST(request: NextRequest) {
       status === "validated" || status === "fulfilled" || status === "settled";
     const lost = status === "refunded" || status === "expired";
     if (settled || lost) {
-      // Fire-and-forget, like the other post-payout writes here: this is a
+      // Backgrounded, like the other post-payout writes here: this is a
       // bookkeeping update, and failing it must not make Paycrest retry a
       // delivery whose funds already moved.
-      void updateTransactionByOrderId(orderId, settled ? "completed" : "failed", {
-        ...(payoutValue !== undefined ? { destinationAmount: String(payoutValue) } : {}),
-        ...(payoutRecord.txHash ? { mintTxHash: payoutRecord.txHash } : {}),
-      });
+      inBackground(
+        updateTransactionByOrderId(orderId, settled ? "completed" : "failed", {
+          ...(payoutValue !== undefined ? { destinationAmount: String(payoutValue) } : {}),
+          ...(payoutRecord.txHash ? { mintTxHash: payoutRecord.txHash } : {}),
+        }),
+      );
     }
 
     // 2xx quickly so Paycrest marks the delivery successful.
