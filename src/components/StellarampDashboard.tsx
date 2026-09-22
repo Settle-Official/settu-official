@@ -782,6 +782,13 @@ export function StellarampDashboard() {
   const handleSourceChainChange = async (next: OfframpSourceChainKey) => {
     if (next === sourceChain) return;
 
+    // The Settu wallet serves every chain from one key, so switching source
+    // is just a view change — tearing it down would lock it for no reason.
+    if (isSettuUnlocked()) {
+      setSourceChain(next);
+      return;
+    }
+
     // Close the shared sheet and tear down regardless of connection state. The
     // old code only cleaned up an already-connected wallet, so switching chains
     // mid-connect left that attempt running and both chains showed

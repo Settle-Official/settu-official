@@ -10,7 +10,10 @@ import {
   signTransaction as signWithWallet,
   type StellarWallet,
 } from "@/lib/stellar/wallet-adapter";
-import { isUnlocked as isSettuWalletUnlocked } from "@/lib/settu-wallet/session";
+import {
+  isUnlocked as isSettuWalletUnlocked,
+  unlockedAddress as settuStellarAddress,
+} from "@/lib/settu-wallet/session";
 
 export function useStellarWallet() {
   const [wallet, setWallet] = useState<StellarWallet | null>(null);
@@ -95,9 +98,16 @@ export function useStellarWallet() {
     [wallet],
   );
 
+  // Computed per render, matching the Solana and EVM hooks. Read from state
+  // instead and unlocking would not show until something else re-rendered.
+  const settuAddress = settuStellarAddress();
+  const active: StellarWallet | null = settuAddress
+    ? { type: "settu", publicKey: settuAddress, isConnected: true }
+    : wallet;
+
   return {
-    wallet,
-    isConnected: !!wallet,
+    wallet: active,
+    isConnected: !!active,
     isConnecting,
     error,
     connect,
