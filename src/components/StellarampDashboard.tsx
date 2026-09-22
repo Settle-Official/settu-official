@@ -14,7 +14,7 @@ import { RecentTransactionsTable } from "@/components/RecentTransactionsTable";
 import { RightPanel, type PlatformStats } from "@/components/RightPanel";
 import { PlatformStatsCard } from "@/components/PlatformStatsCard";
 import { OnrampPanel } from "@/components/OnrampPanel";
-import { SettuUnlockDialog } from "@/components/wallet/SettuUnlockDialog";
+import { ConnectWalletModal } from "@/components/wallet/ConnectWalletModal";
 import {
   isUnlocked as isSettuUnlocked,
   lockWallet as lockSettuWallet,
@@ -389,7 +389,7 @@ export function StellarampDashboard() {
 
   const [sourceChain, setSourceChain] =
     useState<OfframpSourceChainKey>("stellar");
-  const [showSettuUnlock, setShowSettuUnlock] = useState(false);
+  const [showConnect, setShowConnect] = useState(false);
   // Re-read after unlock so the header and the wallet hooks agree.
   const [settuUnlocked, setSettuUnlocked] = useState(false);
 
@@ -2075,19 +2075,18 @@ export function StellarampDashboard() {
                 ? externalWallet.isConnected && !externalBalances
                 : isLoadingBalance
             }
-            onConnect={handleConnect}
+            onConnect={() => setShowConnect(true)}
             onDisconnect={handleDisconnect}
-            onConnectSettu={() => setShowSettuUnlock(true)}
-            isSettuWallet={settuUnlocked}
           />
 
-          {showSettuUnlock && (
-            <SettuUnlockDialog
-              onUnlocked={() => {
+          {showConnect && (
+            <ConnectWalletModal
+              onSettuReady={() => {
                 setSettuUnlocked(true);
-                setShowSettuUnlock(false);
+                setShowConnect(false);
               }}
-              onClose={() => setShowSettuUnlock(false)}
+              onConnectExternal={handleConnect}
+              onClose={() => setShowConnect(false)}
             />
           )}
 
@@ -2144,7 +2143,7 @@ export function StellarampDashboard() {
                   isConnected={isConnected}
                   isConnecting={isConnecting}
                   walletAddress={wallet?.publicKey}
-                  onConnect={handleConnect}
+                  onConnect={() => setShowConnect(true)}
                   onDelivered={handleOnrampDelivered}
                 />
               </div>
@@ -2170,7 +2169,7 @@ export function StellarampDashboard() {
                     <AgentPanel
                       isConnected={uiIsConnected}
                       isConnecting={uiIsConnecting}
-                      onConnect={handleConnect}
+                      onConnect={() => setShowConnect(true)}
                       activeSourceChain={sourceChain}
                       sourceChainLabel={activeSourceChainLabel}
                       offrampStep={offrampStep}
@@ -2188,7 +2187,7 @@ export function StellarampDashboard() {
                       isConnecting={uiIsConnecting}
                       isExecutingOfframp={isExecutingOfframp}
                       resetKey={formResetKey}
-                      onConnect={handleConnect}
+                      onConnect={() => setShowConnect(true)}
                       sourceChain={sourceChain}
                       onSourceChainChange={handleSourceChainChange}
                       walletAddress={activeUserAddress ?? null}
@@ -2218,7 +2217,7 @@ export function StellarampDashboard() {
                     quote={pricingState.quote}
                     isLoadingQuote={pricingState.isLoadingQuote}
                     currency={pricingState.currency}
-                    onConnect={handleConnect}
+                    onConnect={() => setShowConnect(true)}
                   />
                 </div>
                 <div className="col-start-1 max-[1100px]:order-3 max-[1100px]:col-auto">

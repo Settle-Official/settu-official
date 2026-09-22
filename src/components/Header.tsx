@@ -29,9 +29,6 @@ export interface HeaderProps {
   readonly isBalanceLoading?: boolean;
   readonly onConnect: () => void;
   readonly onDisconnect: () => void;
-  /** Unlocks the Settu wallet, which serves every chain at once. */
-  readonly onConnectSettu?: () => void;
-  readonly isSettuWallet?: boolean;
 }
 
 export function Header({
@@ -45,8 +42,6 @@ export function Header({
   isBalanceLoading = false,
   onConnect,
   onDisconnect,
-  onConnectSettu,
-  isSettuWallet = false,
 }: Readonly<HeaderProps>) {
   const shortened =
     walletAddress && `${walletAddress.slice(0, 8)}...${walletAddress.slice(-4)}`;
@@ -54,11 +49,7 @@ export function Header({
     ? "CONNECTING..."
     : isConnected && shortened
       ? shortened
-      : "EXTERNAL WALLET";
-
-  // One at a time: the two would otherwise both claim to be the source wallet.
-  const externalBlocked = isSettuWallet;
-  const settuBlocked = isConnected && !isSettuWallet;
+      : "CONNECT WALLET";
 
   return (
     <>
@@ -80,31 +71,13 @@ export function Header({
               <AccountLink />
             </div>
           )}
-          {onConnectSettu && (
-            <button
-              type="button"
-              onClick={isSettuWallet ? onDisconnect : onConnectSettu}
-              disabled={settuBlocked}
-              title={
-                settuBlocked
-                  ? "Disconnect your external wallet first"
-                  : undefined
-              }
-              className="mb-2 min-w-[210px] border-4 border-[#C9A962] bg-[#101010] px-4 py-[0.7rem] text-[0.75rem] font-semibold uppercase tracking-[0.08em] text-[#f4e1ad] rounded-none shadow-[0_0_0_1px_rgba(201,169,98,0.35)] transition-colors hover:bg-[#C9A962] hover:text-[#0a0a0a] disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              {isSettuWallet && shortened ? shortened : "SETTU WALLET"}
-            </button>
-          )}
           <button
             type="button"
-            onClick={isConnected && !isSettuWallet ? onDisconnect : onConnect}
-            disabled={isConnecting || externalBlocked}
-            title={
-              externalBlocked ? "Lock your Settu wallet first" : undefined
-            }
-            className="min-w-[210px] border-2 border-[var(--line)] bg-transparent px-4 py-[0.7rem] text-[0.75rem] font-semibold uppercase tracking-[0.08em] text-[var(--muted)] rounded-none transition-colors hover:border-[#C9A962] hover:text-[#f4e1ad] disabled:opacity-40 disabled:cursor-not-allowed"
+            onClick={isConnected ? onDisconnect : onConnect}
+            disabled={isConnecting}
+            className="min-w-[210px] border-4 border-[#C9A962] bg-[#101010] px-4 py-[0.7rem] text-[0.75rem] font-semibold uppercase tracking-[0.08em] text-[#f4e1ad] rounded-none shadow-[0_0_0_1px_rgba(201,169,98,0.35)] transition-colors hover:bg-[#C9A962] hover:text-[#0a0a0a] focus:outline-none focus:ring-2 focus:ring-[#C9A962]/70 disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            {isSettuWallet ? "EXTERNAL WALLET" : buttonText}
+            {buttonText}
           </button>
           {isConnected ? (
             <div className="mt-2 flex flex-col items-end gap-[0.15rem]">
