@@ -105,9 +105,20 @@ export function ChainTabs({
                 setCopied(true);
                 setTimeout(() => setCopied(false), 1500);
               }}
-              className="border border-[var(--line)] px-2 py-[0.15rem] text-[0.62rem] uppercase tracking-[0.08em] text-[var(--muted)]"
+              aria-label={copied ? "Address copied" : "Copy address"}
+              title={copied ? "Copied" : "Copy address"}
+              className="text-[var(--muted)] transition-colors hover:text-[var(--accent)]"
             >
-              {copied ? "Copied" : "Copy"}
+              {copied ? (
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                  <path d="M20 6L9 17l-5-5" />
+                </svg>
+              ) : (
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="9" y="9" width="11" height="11" rx="1" />
+                  <path d="M5 15V5a1 1 0 011-1h10" />
+                </svg>
+              )}
             </button>
           </div>
 
