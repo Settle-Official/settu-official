@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { shortAddress } from "@/lib/api/wallets";
+import { EVM_SOURCE_CHAINS, type EvmChainKey } from "@/lib/cctp/evm-chains";
 
 export type WalletChain = "stellar" | "evm" | "solana";
 
@@ -10,6 +11,10 @@ export const CHAIN_LABEL: Record<WalletChain, string> = {
   evm: "ETH",
   solana: "SOLANA",
 };
+
+// One EVM address works on every chain we support, so the network is a view
+// over the same wallet rather than a different one.
+const EVM_NETWORKS = Object.keys(EVM_SOURCE_CHAINS) as EvmChainKey[];
 
 interface Balance {
   code: string;
@@ -31,6 +36,7 @@ export function ChainTabs({
   readonly onAdd: (chain: WalletChain) => void;
 }) {
   const [active, setActive] = useState<WalletChain>("stellar");
+  const [network, setNetwork] = useState<EvmChainKey>("base");
   const [balances, setBalances] = useState<Balance[] | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -43,7 +49,9 @@ export function ChainTabs({
     }
     let cancelled = false;
     const load = () =>
-      fetch(`/api/wallet/balances?chain=${active}&address=${address}`)
+      fetch(
+        `/api/wallet/balances?chain=${active}&address=${address}&network=${network}`,
+      )
         .then((res) => res.json())
         .then((data) => !cancelled && setBalances(data.balances ?? []))
         .catch(() => {});
@@ -55,7 +63,7 @@ export function ChainTabs({
       cancelled = true;
       clearInterval(timer);
     };
-  }, [active, address]);
+  }, [active, address, network]);
 
   return (
     <div className="flex flex-col gap-[0.9rem]">
@@ -102,6 +110,31 @@ export function ChainTabs({
               {copied ? "Copied" : "Copy"}
             </button>
           </div>
+
+          {active === "evm" && (
+            <div className="flex flex-wrap gap-[0.35rem]">
+              {EVM_NETWORKS.map((key) => {
+                const selected = key === network;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setNetwork(key)}
+                    style={
+                      selected
+                        ? { borderColor: "#C9A962", color: "#C9A962" }
+                        : undefined
+                    }
+                    className={`border px-2 py-[0.2rem] text-[0.62rem] uppercase tracking-[0.06em] ${
+                      selected ? "" : "border-[var(--line)] text-[var(--muted)]"
+                    }`}
+                  >
+                    {EVM_SOURCE_CHAINS[key].label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           {balances === null ? (
             <p className="m-0 text-[0.72rem] text-[var(--muted)]">

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Connection, PublicKey } from "@solana/web3.js";
 import { requireSolanaRpcUrl, SOLANA_CONFIG } from "@/lib/solana/config";
-import { EVM_SOURCE_CHAINS } from "@/lib/cctp/evm-chains";
+import { EVM_SOURCE_CHAINS, type EvmChainKey } from "@/lib/cctp/evm-chains";
 import { STELLAR_HORIZON_URL } from "@/lib/settu-wallet/account";
 
 export const runtime = "nodejs";
@@ -15,6 +15,7 @@ export interface ChainBalance {
 // it do, which is why this is a route rather than a client fetch.
 export async function GET(request: NextRequest) {
   const chain = request.nextUrl.searchParams.get("chain");
+  const network = request.nextUrl.searchParams.get("network") ?? "base";
   const address = request.nextUrl.searchParams.get("address")?.trim();
   if (!address) {
     return NextResponse.json({ error: "address is required" }, { status: 400 });
@@ -23,7 +24,8 @@ export async function GET(request: NextRequest) {
   try {
     if (chain === "stellar") return NextResponse.json({ balances: await stellar(address) });
     if (chain === "solana") return NextResponse.json({ balances: await solana(address) });
-    if (chain === "evm") return NextResponse.json({ balances: await evm(address) });
+    if (chain === "evm")
+      return NextResponse.json({ balances: await evm(address, network) });
     return NextResponse.json({ error: "unknown chain" }, { status: 400 });
   } catch (error: any) {
     // An unfunded address is the normal case, not an error worth surfacing.
@@ -61,10 +63,14 @@ async function solana(address: string): Promise<ChainBalance[]> {
   return out;
 }
 
-async function evm(address: string): Promise<ChainBalance[]> {
-  // Base, because that is where an offramp's USDC lives.
-  const base = EVM_SOURCE_CHAINS.base;
-  const rpcUrl = process.env[base.rpcUrlEnvVar];
+async function evm(
+  address: string,
+  network: string,
+): Promise<ChainBalance[]> {
+  // One address works on every EVM chain, so only the network varies.
+  const config = EVM_SOURCE_CHAINS[network as EvmChainKey];
+  if (!config) return [];
+  const rpcUrl = process.env[config.rpcUrlEnvVar];
   if (!rpcUrl) return [];
 
   const call = async (method: string, params: unknown[]) => {
@@ -79,14 +85,17 @@ async function evm(address: string): Promise<ChainBalance[]> {
   const wei = await call("eth_getBalance", [address, "latest"]);
   const usdc = await call("eth_call", [
     {
-      to: base.usdcAddress,
+      to: config.usdcAddress,
       data: `0x70a08231000000000000000000000000${address.slice(2).toLowerCase()}`,
     },
     "latest",
   ]);
 
   return [
-    { code: "ETH", amount: String(Number(BigInt(wei ?? "0x0")) / 1e18) },
+    {
+      code: config.nativeCurrencySymbol,
+      amount: String(Number(BigInt(wei ?? "0x0")) / 1e18),
+    },
     { code: "USDC", amount: String(Number(BigInt(usdc || "0x0")) / 1e6) },
   ];
 }
