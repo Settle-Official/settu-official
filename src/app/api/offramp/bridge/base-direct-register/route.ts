@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { recordTransaction } from "@/lib/offramp/transaction-history";
 import { validateAmount, validateAddress } from "@/lib/offramp/utils/validation";
 
+// The transfer has already settled on Base when this is called, and the
+// response is awaited by the browser, so give the write room to finish.
+export const maxDuration = 30;
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
