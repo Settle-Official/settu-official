@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { AuthPanel } from "@/components/auth/AuthPanel";
-import { LinkedWallets } from "@/components/auth/LinkedWallets";
 import { SettuWalletPanel } from "@/components/wallet/SettuWalletPanel";
 import { VerifyEmailNotice } from "@/components/auth/VerifyEmailNotice";
 import { useAuth } from "@/hooks/useAuth";
@@ -29,10 +28,6 @@ export default function Account() {
             <div className="h-px bg-[var(--line)]" />
 
             {user.email_verified && <SettuWalletPanel />}
-
-            <div className="h-px bg-[var(--line)]" />
-
-            <LinkedWallets emailVerified={user.email_verified} />
 
             <div className="h-px bg-[var(--line)]" />
 
