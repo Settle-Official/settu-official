@@ -10,15 +10,21 @@ export interface CreateOnrampOrderInput {
     accountIdentifier: string;
     accountName: string;
   };
+  /**
+   * What the caller already worked out this order buys, used only when the
+   * provider quotes no rate of its own. Without a figure here or a rate
+   * back, the stored row has no USDC amount at all.
+   */
+  readonly estimatedUsdc?: string;
 }
 
 export interface CreateOnrampOrderResult {
   id: string;
   status: string;
   providerAccount: OnrampProviderAccount;
-  /** Fiat amount the order was created for. */
-  amount?: string;
-  /** Fiat per USDC at creation, when the provider quoted one. */
+  /** USDC the order buys, as the provider computed it. */
+  usdcAmount?: string;
+  /** Fiat per USDC at creation. */
   rate?: string;
 }
 
@@ -47,9 +53,16 @@ export async function createOnrampOrder(
   }
   const result = payload.data as CreateOnrampOrderResult;
 
+  // Most trustworthy first: the provider's own figure, then one derived
+  // from the rate it quoted, then whatever the caller worked out.
   const fiat = Number(input.fiatAmount);
   const rate = Number(result.rate);
-  const usdc = Number.isFinite(fiat) && Number.isFinite(rate) && rate > 0 ? (fiat / rate).toFixed(2) : "";
+  const provided = Number(result.usdcAmount);
+  const usdc = Number.isFinite(provided) && provided > 0
+    ? provided.toFixed(2)
+    : Number.isFinite(fiat) && Number.isFinite(rate) && rate > 0
+      ? (fiat / rate).toFixed(2)
+      : (input.estimatedUsdc ?? "");
   TransactionStorage.save({
     id: TransactionStorage.generateId(),
     timestamp: Date.now(),
