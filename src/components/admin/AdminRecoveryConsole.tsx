@@ -1,21 +1,30 @@
 "use client";
 
-import { useCallback, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 
-/** Mirrors OrderDiagnosis on the server; kept structural to avoid importing
- *  server-only modules into the client bundle. */
+/** Mirrors OrderDiagnosis on the server; kept structural so this client
+ *  component never imports server-only modules. */
 interface Diagnosis {
   orderId: string;
   verdict: "stranded-burn" | "bridge-stalled" | "record-stale" | "no-burn" | "unknown" | "healthy";
   summary: string;
   recoverable: boolean;
-  meta: { amountUsdc?: number; senderAddress?: string; sourceChain?: string; payoutValue?: number; currency?: string; createdAt?: number } | null;
+  meta: { amountUsdc?: number; senderAddress?: string; sourceChain?: string } | null;
   payoutStatus: string | null;
-  record: { status?: string; destinationAmount?: string } | null;
+  record: { status?: string } | null;
   transfer: { status?: string } | null;
   onChainBurn: { txHash: string; amountAtomic: string } | null;
   lookupError: string | null;
   sweepWouldSkip: string | null;
+}
+
+interface AuditEntry {
+  at: number;
+  action: string;
+  orderId: string;
+  operator: string;
+  outcome: string;
+  detail?: string;
 }
 
 const VERDICT_STYLE: Record<Diagnosis["verdict"], { label: string; color: string }> = {
@@ -31,6 +40,7 @@ const CARD =
   "rounded-[20px] border border-white/15 bg-white/[0.04] p-[24px] max-[700px]:p-[16px]";
 const FIELD =
   "h-[52px] w-full rounded-[14px] bg-transparent px-[16px] font-[family-name:var(--font-sora)] text-[15px] text-white outline-none placeholder:text-[#8d8c8c]";
+const LOG_COLS = "grid-cols-[130px_110px_130px_130px_minmax(0,1fr)]";
 
 export function AdminRecoveryConsole() {
   const [authed, setAuthed] = useState(false);
@@ -41,6 +51,15 @@ export function AdminRecoveryConsole() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [acting, setActing] = useState<string | null>(null);
+
+  // Whether the modal is open is tracked separately from whether the data
+  // has arrived. Sharing one piece of state made the button look dead on a
+  // slow fetch, and the second click then closed what the first had opened.
+  const [audit, setAudit] = useState<AuditEntry[] | null>(null);
+  const [auditOpen, setAuditOpen] = useState(false);
+  const [auditLoading, setAuditLoading] = useState(false);
+
+  const named = operator.trim().length > 1;
 
   const login = async (e: FormEvent) => {
     e.preventDefault();
@@ -61,6 +80,34 @@ export function AdminRecoveryConsole() {
       setBusy(false);
     }
   };
+
+  const loadAudit = useCallback(async () => {
+    setAuditLoading(true);
+    try {
+      const res = await fetch("/api/admin/audit?limit=50");
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload?.error || "Failed to load audit log");
+      setAudit(payload.data.entries);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setAuditLoading(false);
+    }
+  }, []);
+
+  const openAudit = useCallback(() => {
+    // Opens immediately and loads behind it, so a slow fetch can never make
+    // the button look like it did nothing.
+    setAuditOpen(true);
+    void loadAudit();
+  }, [loadAudit]);
+
+  useEffect(() => {
+    if (!auditOpen) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setAuditOpen(false);
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [auditOpen]);
 
   const lookup = useCallback(
     async (e?: FormEvent) => {
@@ -89,13 +136,17 @@ export function AdminRecoveryConsole() {
   );
 
   const recover = async (orderId: string) => {
-    // These move real money, so the action is spelled out rather than
-    // hidden behind a one-word confirm.
+    if (!named) {
+      setError("Enter your name at the top first — every action is attributed.");
+      return;
+    }
+    // Spelled out rather than hidden behind a one-word confirm: this moves
+    // real money and cannot be undone.
     if (
       !window.confirm(
         `Register the on-chain burn for order ${orderId}?\n\n` +
-          `This mints the USDC to Paycrest and triggers the payout. It is safe to ` +
-          `repeat, but it cannot be undone.`,
+          `This mints the USDC to Paycrest and triggers the payout. It is safe ` +
+          `to repeat, but it cannot be undone.`,
       )
     ) {
       return;
@@ -111,9 +162,10 @@ export function AdminRecoveryConsole() {
       const payload = await res.json();
       if (!res.ok) throw new Error(payload?.error || "Recovery failed");
       // Replace the row with the server's fresh diagnosis rather than
-      // assuming it worked.
+      // assuming the action worked.
       const fresh: Diagnosis = payload.data.diagnosis;
       setOrders((prev) => prev?.map((o) => (o.orderId === orderId ? fresh : o)) ?? [fresh]);
+      if (auditOpen) void loadAudit();
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -148,7 +200,9 @@ export function AdminRecoveryConsole() {
             {busy ? "Checking…" : "Continue"}
           </button>
           {error && (
-            <p className="font-[family-name:var(--font-sora)] text-[13px] text-[#ca4c4c]">{error}</p>
+            <p className="font-[family-name:var(--font-sora)] text-[13px] text-[#ca4c4c]">
+              {error}
+            </p>
           )}
         </form>
       </main>
@@ -158,14 +212,27 @@ export function AdminRecoveryConsole() {
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-[1100px] flex-col gap-[24px] p-[24px]">
       <header className="flex flex-wrap items-baseline justify-between gap-[12px]">
-        <h1 className="font-fraunces text-[28px] text-white">Recovery console</h1>
-        <input
-          value={operator}
-          onChange={(e) => setOperator(e.target.value)}
-          placeholder="Your name (for the audit log)"
-          style={{ border: "1px solid rgba(255,255,255,0.14)" }}
-          className="h-[40px] w-[260px] rounded-[14px] bg-transparent px-[14px] font-[family-name:var(--font-sora)] text-[14px] text-white outline-none placeholder:text-[#8d8c8c]"
-        />
+        <h1 className="font-fraunces text-[28px] text-white">
+          Settu Admin Recovery console
+        </h1>
+        <div className="flex items-center gap-[12px]">
+          <button
+            type="button"
+            onClick={openAudit}
+            style={{ border: "1px solid rgba(255,255,255,0.14)" }}
+            className="h-[40px] rounded-[14px] px-[16px] font-[family-name:var(--font-sora)] text-[14px] text-[#e6e3e3]"
+          >
+            Audit log
+          </button>
+          <input
+            value={operator}
+            onChange={(e) => setOperator(e.target.value)}
+            placeholder="Your name (required)"
+            aria-label="Your name, required for the audit log"
+            style={{ border: `1px solid ${named ? "rgba(255,255,255,0.14)" : "#ca4c4c"}` }}
+            className="h-[40px] w-[240px] rounded-[14px] bg-transparent px-[14px] font-[family-name:var(--font-sora)] text-[14px] text-white outline-none placeholder:text-[#8d8c8c]"
+          />
+        </div>
       </header>
 
       <form onSubmit={lookup} className="flex flex-wrap gap-[12px]">
@@ -219,7 +286,8 @@ export function AdminRecoveryConsole() {
                 <button
                   type="button"
                   onClick={() => recover(o.orderId)}
-                  disabled={acting === o.orderId}
+                  disabled={acting === o.orderId || !named}
+                  title={named ? undefined : "Enter your name at the top first"}
                   style={{ backgroundColor: "#c9a962" }}
                   className="h-[44px] rounded-[40px] px-[22px] font-[family-name:var(--font-sora)] text-[14px] font-medium text-[#1a1a1a] disabled:opacity-50"
                 >
@@ -258,6 +326,109 @@ export function AdminRecoveryConsole() {
           </section>
         );
       })}
+
+      {auditOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Audit log"
+          className="fixed inset-0 z-50 flex items-center justify-center p-[24px]"
+        >
+          <button
+            type="button"
+            aria-label="Close audit log"
+            onClick={() => setAuditOpen(false)}
+            style={{ backgroundColor: "rgba(0,0,0,0.6)" }}
+            className="absolute inset-0 backdrop-blur-md"
+          />
+          <div
+            style={{ border: "1px solid rgba(255,255,255,0.15)" }}
+            className="relative z-10 flex max-h-[80vh] w-full max-w-[1000px] flex-col gap-[18px] rounded-[24px] bg-[#1e1c1c] p-[28px] shadow-[0_28px_60px_rgba(0,0,0,0.6)] max-[700px]:p-[18px]"
+          >
+            <div className="flex items-start justify-between gap-[16px]">
+              <div className="flex flex-col gap-[4px]">
+                <h2 className="font-fraunces text-[22px] text-white">Audit log</h2>
+                <span className="font-[family-name:var(--font-sora)] text-[13px] text-[#8d8c8c]">
+                  {auditLoading
+                    ? "Loading…"
+                    : `${audit?.length ?? 0} most recent action${audit?.length === 1 ? "" : "s"}`}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAuditOpen(false)}
+                aria-label="Close"
+                className="flex size-[36px] shrink-0 items-center justify-center rounded-full text-[20px] leading-none text-[#cfcdcd] transition-colors hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+
+            {auditLoading && !audit ? (
+              <p className="py-[20px] font-[family-name:var(--font-sora)] text-[14px] text-[#bab6b6]">
+                Loading…
+              </p>
+            ) : !audit || audit.length === 0 ? (
+              <p className="py-[20px] font-[family-name:var(--font-sora)] text-[14px] text-[#bab6b6]">
+                Nothing recorded yet.
+              </p>
+            ) : (
+              // Full width here, so the order id shows complete rather than
+              // truncating — it's the value you need in order to act on it.
+              <div
+                data-lenis-prevent
+                className="flex min-h-0 flex-col overflow-y-auto overscroll-contain"
+              >
+                <div
+                  style={{ borderBottom: "1px solid rgba(255,255,255,0.12)" }}
+                  className={`sticky top-0 grid ${LOG_COLS} gap-x-[16px] bg-[#1e1c1c] pb-[10px]`}
+                >
+                  {["When", "Who", "Action", "Outcome", "Order"].map((h) => (
+                    <span
+                      key={h}
+                      className="font-[family-name:var(--font-sora)] text-[12px] uppercase tracking-[0.06em] text-[#8d8c8c]"
+                    >
+                      {h}
+                    </span>
+                  ))}
+                </div>
+                <ul className="flex flex-col">
+                  {audit.map((e, i) => (
+                    <li
+                      key={`${e.at}-${i}`}
+                      style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}
+                      className={`grid ${LOG_COLS} items-baseline gap-x-[16px] py-[12px] font-[family-name:var(--font-sora)] text-[13px] leading-[20px]`}
+                    >
+                      <span className="text-[#a19d9d]">
+                        {new Date(e.at).toLocaleString("en-GB", {
+                          day: "2-digit",
+                          month: "short",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </span>
+                      <span className="truncate text-white">{e.operator}</span>
+                      <span className="text-[#d6d3d3]">{e.action}</span>
+                      <span style={{ color: e.outcome === "error" ? "#ca4c4c" : "#c9a962" }}>
+                        {e.outcome}
+                      </span>
+                      <span className="break-all font-[family-name:var(--font-inter)] text-[12px] text-[#8d8c8c]">
+                        {e.orderId}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            <p className="font-[family-name:var(--font-sora)] text-[12px] leading-[18px] text-[#8d8c8c]">
+              Names are self-reported. A shared password can&apos;t prove who was
+              typing, so treat these as a record of what happened, not proof of
+              who did it.
+            </p>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
@@ -265,8 +436,12 @@ export function AdminRecoveryConsole() {
 function Cell({ label, value }: { readonly label: string; readonly value: string }) {
   return (
     <div className="flex flex-col gap-[4px]">
-      <span className="font-[family-name:var(--font-sora)] text-[12px] text-[#8d8c8c]">{label}</span>
-      <span className="font-[family-name:var(--font-sora)] text-[15px] text-white">{value}</span>
+      <span className="font-[family-name:var(--font-sora)] text-[12px] text-[#8d8c8c]">
+        {label}
+      </span>
+      <span className="font-[family-name:var(--font-sora)] text-[15px] text-white">
+        {value}
+      </span>
     </div>
   );
 }

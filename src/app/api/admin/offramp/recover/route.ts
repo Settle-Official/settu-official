@@ -29,13 +29,22 @@ export async function POST(request: NextRequest) {
   if (!orderId) {
     return NextResponse.json({ error: "orderId is required" }, { status: 400 });
   }
+  // Enforced server-side, not just in the UI. A shared password already means
+  // the log can't prove who acted; letting the name be blank would leave no
+  // trace at all of who moved someone's money.
+  if (!operator) {
+    return NextResponse.json(
+      { error: "Your name is required so the action can be attributed" },
+      { status: 400 },
+    );
+  }
 
   try {
     const result = await recoverOrder(orderId, { ignoreGrace: true });
     await recordAdminAction({
       action: "recover-order",
       orderId,
-      operator: operator || "unknown",
+      operator,
       outcome: result.outcome,
       detail: result.burnTxHash,
     });
@@ -48,7 +57,7 @@ export async function POST(request: NextRequest) {
     await recordAdminAction({
       action: "recover-order",
       orderId,
-      operator: operator || "unknown",
+      operator,
       outcome: "error",
       detail: err?.message,
     });

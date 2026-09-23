@@ -5,7 +5,7 @@ import { AdminRecoveryConsole } from "@/components/admin/AdminRecoveryConsole";
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Recovery console",
+  title: "Settu Admin Recovery console",
   robots: { index: false, follow: false },
 };
 
