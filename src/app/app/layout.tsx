@@ -4,6 +4,7 @@ import { WalletBarProvider } from "@/components/app/WalletBar";
 import { AgentUnreadProvider } from "@/components/app/AgentUnread";
 import { NotificationsProvider } from "@/components/app/Notifications";
 import { ScreenBackProvider } from "@/components/app/ScreenBack";
+import { AgentConversationProvider } from "@/components/app/AgentConversation";
 
 // The product UI shares the landing page's type system.
 const fraunces = Fraunces({
@@ -34,7 +35,9 @@ export default function AppLayout({ children }: { readonly children: React.React
         <AgentUnreadProvider>
           <NotificationsProvider>
             <ScreenBackProvider>
-              <AppShell>{children}</AppShell>
+              <AgentConversationProvider>
+                <AppShell>{children}</AppShell>
+              </AgentConversationProvider>
             </ScreenBackProvider>
           </NotificationsProvider>
         </AgentUnreadProvider>

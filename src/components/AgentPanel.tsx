@@ -3,6 +3,12 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowRightIcon, CheckIcon, CloseIcon, SendIcon } from "@/components/app/icons";
 import { useAgentUnread } from "@/components/app/AgentUnread";
+import {
+  nextId,
+  useAgentConversation,
+  type ChatMessage,
+  type CompletedOrderSummary,
+} from "@/components/app/AgentConversation";
 import { PHONE_QUERY, useMediaQuery } from "@/components/app/useMediaQuery";
 import {
   stepToAgentEvent,
@@ -46,60 +52,6 @@ type PendingOrderSummary =
     }
   | { direction: "onramp"; fiatAmount: string; currency: string; refundAccount: { institution: string } };
 
-type CompletedOrderSummary =
-  | {
-      direction: "offramp";
-      amount: string;
-      token: string;
-      sourceChain: string;
-      beneficiary: { institution: string; accountIdentifier: string; currency: string };
-    }
-  | {
-      direction: "onramp";
-      fiatAmount: string;
-      currency: string;
-      destinationAddress: string;
-      refundAccount: { institution: string; accountIdentifier: string };
-    };
-
-interface ChatMessage {
-  id: string;
-  role: "user" | "agent";
-  text?: string;
-  order?: AgentOrderWithQuote; // present only on the confirmation-card message
-  // Lifecycle of a confirmation card: undefined until Confirm/Cancel is
-  // clicked, "confirmed" while the run is in flight, then "success"/"failed"
-  // once offrampStep resolves ("cancelled" if declined/aborted mid-run, or
-  // "superseded" if an edit to this same draft produced a newer card before
-  // this one was ever confirmed).
-  // "resolved" = the run finished; the card keeps showing its figures and
-  // loses its buttons. The outcome arrives as its own `result` message
-  // further down the thread, rather than overwriting this card — that
-  // rewrote history, putting a green tick above the step narration that
-  // led to it.
-  orderStatus?:
-    | "confirmed"
-    | "resolved"
-    | "success"
-    | "failed"
-    | "cancelled"
-    | "superseded";
-  /** A standalone outcome card, appended after the closing narration. */
-  result?: { kind: "success" | "failed"; title: string; body: string };
-  stepKind?: AgentStepEvent["kind"]; // present only on step-narration messages
-  onrampOrder?: ResolvedOnrampOrder; // present only on the onramp confirmation-card message
-  // Same lifecycle shape as orderStatus, but a pre-creation failure clears
-  // back to undefined instead of "failed" — nothing was created yet, so the
-  // card should stay retryable rather than presenting a dead end.
-  onrampOrderStatus?: "confirmed" | "success" | "failed" | "cancelled" | "superseded";
-  virtualAccount?: {
-    orderId: string;
-    account: CreateOnrampOrderResult["providerAccount"];
-  }; // present only on the post-confirm account-details message
-}
-
-let messageSeq = 0;
-const nextId = () => `m${++messageSeq}`;
 
 export interface AgentPanelProps {
   readonly isConnected: boolean;
@@ -158,23 +110,22 @@ export function AgentPanel({
   connectedStellarAddress,
   onOnrampSettled,
 }: Readonly<AgentPanelProps>) {
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: nextId(),
-      role: "agent",
-      text: 'Tell me what you\'d like to do — offramp crypto to your bank, e.g. "Offramp 500 USDC on Base to my GTBank account 0123456789, Jane Doe", or onramp fiat to USDC, e.g. "Buy 50000 NGN of USDC to GALC4...XZOQCR, refund to my OPay account 0987654321, Jane Doe".',
-    },
-  ]);
+  const {
+    messages,
+    setMessages,
+    readCount,
+    setReadCount,
+    lastCompletedOrder,
+    setLastCompletedOrder,
+    clear: clearConversation,
+  } = useAgentConversation();
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const isPhone = useMediaQuery(PHONE_QUERY);
-  // The most recently *finished* order (offramp success or onramp
-  // "delivered"), regardless of how long ago or how many segment resets have
-  // happened since — this is what "do that again" repeats. Never cleared by
-  // a fresh conversation segment; only ever overwritten by the next
-  // completion.
-  const [lastCompletedOrder, setLastCompletedOrder] = useState<CompletedOrderSummary | null>(null);
+  // Two-step rather than a modal: clearing is cheap to redo, but the thread
+  // can hold bank details and a live order, so it shouldn't go on one tap.
+  const [confirmingClear, setConfirmingClear] = useState(false);
   // The onramp order currently awaiting the user's bank transfer (from the
   // moment it's created until a terminal status arrives). Offramp has no
   // equivalent state here — its "pending" window is `isExecuting` below,
@@ -182,10 +133,9 @@ export function AgentPanel({
   const [onrampPending, setOnrampPending] = useState<ResolvedOnrampOrder | null>(null);
   const lastRenderedStepId = useRef<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
-  // How many messages the user has actually scrolled down to see. Anything
-  // beyond this index is "unread" — divided off in the render below, and
-  // rolled up into the sidebar's Agent badge via AgentUnread.
-  const [readCount, setReadCount] = useState(messages.length);
+  // readCount lives in the conversation provider alongside the messages it
+  // indexes into — kept together, an unread marker survives a tab switch
+  // with the thread it belongs to.
   // Whether the list was scrolled to (near) its bottom *before* the render
   // that's about to run — read inside the scroll-follow effect below to
   // decide whether new content should pull the view down with it. Only a
@@ -768,6 +718,35 @@ export function AgentPanel({
     // message list wants, which is what makes flex-1 fill exactly the
     // remaining space instead of overflowing it.
     <div className="flex min-h-0 flex-1 flex-col gap-[24px]">
+      {/* Only once there is something to clear — a lone greeting isn't a
+          conversation, and the control would just be noise on arrival. */}
+      {messages.length > 1 && (
+        <div className="flex justify-end px-[16px] max-[720px]:px-[14px]">
+          <button
+            type="button"
+            onClick={() => {
+              if (!confirmingClear) {
+                setConfirmingClear(true);
+                return;
+              }
+              setConfirmingClear(false);
+              clearConversation();
+            }}
+            onBlur={() => setConfirmingClear(false)}
+            // Never mid-run: the thread is the only place the user can see
+            // what is happening to a transfer they've already confirmed.
+            disabled={isSending || isExecuting || confirming}
+            aria-label={confirmingClear ? "Confirm clearing the chat" : "Clear chat"}
+            className={`flex h-[34px] items-center gap-[7px] rounded-[40px] px-[14px] font-[family-name:var(--font-sora)] text-[13px] transition-colors disabled:cursor-not-allowed disabled:opacity-40 max-[720px]:h-[30px] max-[720px]:px-[11px] max-[720px]:text-[12px] ${
+              confirmingClear ? "text-[#e07a7e]" : "text-[#8d8686] hover:text-[#cfcdcd]"
+            }`}
+          >
+            {confirmingClear ? "Clear chat? Tap again" : "Clear chat"}
+            <CloseIcon size={13} />
+          </button>
+        </div>
+      )}
+
       <div
         ref={listRef}
         data-lenis-prevent
