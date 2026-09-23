@@ -737,9 +737,16 @@ export function AgentPanel({
             // what is happening to a transfer they've already confirmed.
             disabled={isSending || isExecuting || confirming}
             aria-label={confirmingClear ? "Confirm clearing the chat" : "Clear chat"}
-            className={`flex h-[34px] items-center gap-[7px] rounded-[40px] px-[14px] font-[family-name:var(--font-sora)] text-[13px] transition-colors disabled:cursor-not-allowed disabled:opacity-40 max-[720px]:h-[30px] max-[720px]:px-[11px] max-[720px]:text-[12px] ${
-              confirmingClear ? "text-[#e07a7e]" : "text-[#8d8686] hover:text-[#cfcdcd]"
-            }`}
+            // Inline border/background: globals.css's unlayered
+            // `button { background: none; border: 0 }` reset beats the
+            // layered utilities. Same red outline as the summary card's
+            // Cancel; armed, it fills so the second tap looks different
+            // from the first rather than only reading differently.
+            style={{
+              border: "1px solid rgba(224,122,126,0.65)",
+              backgroundColor: confirmingClear ? "rgba(224,122,126,0.16)" : "transparent",
+            }}
+            className="flex h-[38px] items-center gap-[8px] rounded-[16px] px-[16px] font-[family-name:var(--font-sora)] text-[13px] text-[#e07a7e] transition-[background-color,filter] hover:brightness-125 disabled:cursor-not-allowed disabled:opacity-40 max-[720px]:h-[34px] max-[720px]:gap-[6px] max-[720px]:px-[13px] max-[720px]:text-[12px]"
           >
             {confirmingClear ? "Clear chat? Tap again" : "Clear chat"}
             <CloseIcon size={13} />
