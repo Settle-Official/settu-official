@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { listNonTerminalPayoutOrderIds } from "@/lib/offramp/payout-store";
 import { reconcilePayoutOrder } from "@/lib/offramp/settlement";
+import { requireAdmin, recordOutcome } from "@/lib/admin/guard";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -12,16 +13,19 @@ export const maxDuration = 60;
  * completed offramp could sit "processing" forever.
  *
  * Safe to run repeatedly — reconcilePayoutOrder is rank-guarded and the
- * settlement recording is claimed atomically. Auth:
- * `Authorization: Bearer $ADMIN_API_SECRET` (required in production).
+ * settlement recording is claimed atomically.
+ *
+ * Auth: a signed-in admin account. Log in, then send the session token as
+ * `Authorization: Bearer <token>`.
  */
 export async function POST(request: NextRequest) {
-  const secret = process.env.ADMIN_API_SECRET;
-  if (secret) {
-    const auth = request.headers.get("authorization");
-    if (auth !== `Bearer ${secret}`) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+  let audit;
+  try {
+    audit = await requireAdmin(request, "offramp.sweep_payouts");
+  } catch {
+    // Fails closed: unset config, an unreachable API and a non-admin caller
+    // all land here, and none is a reason to run an admin action.
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const ids = await listNonTerminalPayoutOrderIds();

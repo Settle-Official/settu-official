@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { reviveStuckTransfer } from "@/lib/cctp/revive";
+import { requireAdmin, recordOutcome } from "@/lib/admin/guard";
 
 export const runtime = "nodejs";
 export const maxDuration = 45;
@@ -12,17 +13,10 @@ export const maxDuration = 45;
  * `orderId` (from the original bridge_failed alert) to also un-stick the
  * owning order so the SSE stream can pick it back up.
  *
- * Auth: `Authorization: Bearer $ADMIN_API_SECRET`. Required in production.
+ * Auth: a signed-in admin account. Log in, then send the session token as
+ * `Authorization: Bearer <token>`.
  */
 export async function POST(request: NextRequest) {
-  const secret = process.env.ADMIN_API_SECRET;
-  if (secret) {
-    const auth = request.headers.get("authorization");
-    if (auth !== `Bearer ${secret}`) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-  }
-
   const body = await request.json().catch(() => ({}));
   const transferId = String(body?.transferId ?? "").trim();
   if (!transferId) {
@@ -30,6 +24,19 @@ export async function POST(request: NextRequest) {
   }
   const orderId = body?.orderId ? String(body.orderId).trim() : undefined;
 
+  let audit;
+  try {
+    audit = await requireAdmin(request, "cctp.revive_transfer", {
+      transferId,
+      orderId,
+    });
+  } catch {
+    // Fails closed: unset config, an unreachable API and a non-admin caller
+    // all land here, and none is a reason to run an admin action.
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const result = await reviveStuckTransfer(transferId, orderId);
+  recordOutcome(audit.auditId, result.ok ? "ok" : "conflict", result);
   return NextResponse.json(result, { status: result.ok ? 200 : 409 });
 }
