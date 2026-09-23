@@ -1,18 +1,16 @@
 // A WhatsApp message can ask for something; it can never authorise it.
 // An intent is a short-lived pointer the user then signs for in the web app.
+//
+// Cut over to Postgres outright rather than dual-written: single-use must have
+// exactly one authority, or a link could be spent in one store and still live
+// in the other. The raw token never leaves this process -- the API stores only
+// its SHA-256 -- and expiry is enforced in the query, not by eviction.
 
-import { Redis } from "@upstash/redis";
+import { serviceFetch } from "../api/server";
 
-const redis = new Redis({
-  url: process.env.UPSTASH_REDIS_REST_URL!,
-  token: process.env.UPSTASH_REDIS_REST_TOKEN!,
-});
-
-// Long enough to switch apps and sign, short enough that a leaked link in a
-// chat backup is worthless later.
-const TTL_SECONDS = 15 * 60;
-
-const key = (token: string) => `wallet:intent:${token}`;
+// Creating an intent sits inside Meta's webhook, whose reply carries the link,
+// so it cannot be backgrounded.
+const TIMEOUT_MS = 8_000;
 
 export interface WalletIntent {
   /** WhatsApp sender, so an intent cannot be redeemed from another thread. */
@@ -34,18 +32,32 @@ export async function createIntent(
   request: string,
 ): Promise<string> {
   const token = generateIntentToken();
-  const intent: WalletIntent = { phone, request, createdAt: Date.now() };
-  await redis.set(key(token), intent, { ex: TTL_SECONDS });
+  await serviceFetch("/wallet-intents", {
+    method: "POST",
+    body: { token, phone, request },
+    timeoutMs: TIMEOUT_MS,
+  });
   return token;
 }
 
-// Read and delete in one step, so a link works once even if forwarded.
+// Single-use is the database's job: DELETE ... RETURNING means a forwarded
+// link cannot be redeemed twice, and spent, expired and never-existed all
+// come back the same way.
 export async function consumeIntent(
   token: string,
 ): Promise<WalletIntent | null> {
-  const raw = await redis.getdel(key(token));
-  if (!raw) return null;
-  return typeof raw === "string"
-    ? (JSON.parse(raw) as WalletIntent)
-    : (raw as WalletIntent);
+  const { intent } = await serviceFetch<{
+    intent: { phone: string; request: string; created_at: number } | null;
+  }>("/wallet-intents/consume", {
+    method: "POST",
+    body: { token },
+    timeoutMs: TIMEOUT_MS,
+  });
+
+  if (!intent) return null;
+  return {
+    phone: intent.phone,
+    request: intent.request,
+    createdAt: intent.created_at,
+  };
 }

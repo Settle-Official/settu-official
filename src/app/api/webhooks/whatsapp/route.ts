@@ -45,7 +45,19 @@ export async function POST(request: NextRequest) {
   }
 
   // The agent layer resolves the wording; this transport only carries it.
-  const token = await createIntent(message.from, text);
+  let token: string;
+  try {
+    token = await createIntent(message.from, text);
+  } catch {
+    // Reply plainly and still ack. A failed intent is harmless; a Meta retry
+    // that mints a second link for one request is confusing.
+    await sendMessage(
+      message.from,
+      "Sorry — I couldn't process that just now. Please try again in a moment.",
+    );
+    return NextResponse.json({ ok: true });
+  }
+
   await sendMessage(
     message.from,
     `Open this to review and approve:\n${APP_URL}/wallet/approve?intent=${token}\n\nThe link works once and expires in 15 minutes.`,
