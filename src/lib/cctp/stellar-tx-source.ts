@@ -16,7 +16,15 @@ const HORIZON_URL =
 
 // The burn is already on-chain by the time this runs. Attribution is worth a
 // short wait, never a stalled registration.
-const TIMEOUT_MS = 5000;
+//
+// 5s was below Horizon's real latency: the public instance regularly answers
+// in 5-18s under load, so this timed out, returned null, and — with no
+// connectedAddress fallback being sent at the time — the permanent history
+// record was silently never written. A settled transfer then showed nowhere
+// in the user's History and produced no notification. Two attempts at 9s
+// still bounds registration well under the caller's own budget.
+const TIMEOUT_MS = 9000;
+const ATTEMPTS = 2;
 
 /**
  * The source account of a successful Stellar transaction, or null.
@@ -30,24 +38,35 @@ export async function resolveStellarTxSource(
 ): Promise<string | null> {
   if (!/^[0-9a-f]{64}$/i.test(txHash)) return null;
 
-  try {
-    const response = await fetch(
-      `${HORIZON_URL}/transactions/${txHash.toLowerCase()}`,
-      { signal: AbortSignal.timeout(TIMEOUT_MS) },
-    );
-    if (!response.ok) return null;
+  for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
+    try {
+      const response = await fetch(
+        `${HORIZON_URL}/transactions/${txHash.toLowerCase()}`,
+        { signal: AbortSignal.timeout(TIMEOUT_MS) },
+      );
+      // 404 means Horizon hasn't ingested the transaction yet, which a retry
+      // can fix; other non-OK responses are worth one more try too.
+      if (response.ok) {
+        const tx = await response.json();
 
-    const tx = await response.json();
+        // A failed transaction proves nothing about who controls the account.
+        if (tx?.successful !== true) return null;
 
-    // A failed transaction proves nothing about who controls the account.
-    if (tx?.successful !== true) return null;
-
-    const source = tx?.source_account;
-    return typeof source === "string" && /^G[A-Z0-9]{55}$/.test(source)
-      ? source
-      : null;
-  } catch {
-    // Timeout, network error, or malformed response — all mean "unknown".
-    return null;
+        const source = tx?.source_account;
+        return typeof source === "string" && /^G[A-Z0-9]{55}$/.test(source)
+          ? source
+          : null;
+      }
+    } catch {
+      // Timeout or network error — fall through and retry once.
+    }
+    if (attempt < ATTEMPTS - 1) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
   }
+
+  // Still unknown. The caller falls back to the client-supplied address,
+  // which is unverified but far better than dropping the record entirely.
+  console.warn(`[stellar-tx-source] could not attribute ${txHash}`);
+  return null;
 }

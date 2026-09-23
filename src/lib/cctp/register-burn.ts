@@ -96,9 +96,24 @@ export async function registerOfframpBurn(
         input.connectedAddress)
       : input.connectedAddress;
 
+  if (!attributed) {
+    // Both attribution paths failed: Horizon couldn't say who signed it and
+    // the client sent no address. The transfer is registered and will still
+    // bridge and pay out, but no permanent record exists — so it shows
+    // nowhere in the user's History and produces no completion
+    // notification. Loud, because the alternative is it vanishing silently,
+    // which is exactly how this went unnoticed in production.
+    console.error(
+      `[register-burn] NO HISTORY RECORD for ${input.burnTxHash} ` +
+        `(order ${input.paycrestOrderId ?? "unknown"}): attribution failed and ` +
+        `no connectedAddress was supplied. Recoverable via the admin backfill.`,
+    );
+  }
+
   if (attributed) {
     // Fire-and-forget — the transfer is registered above; a history-write
-    // failure must not fail the caller and re-strand the burn.
+    // failure must not fail the caller and re-strand the burn. Failures are
+    // logged rather than swallowed, so a missing record is traceable.
     void recordTransaction({
       id: input.burnTxHash,
       sourceChain: resolvedSourceChain,
@@ -108,7 +123,12 @@ export async function registerOfframpBurn(
       destinationCurrency: "NGN", // widen if/when other corridors reach here
       destinationAmount: "0", // filled in once the payout is known
       paycrestOrderId: input.paycrestOrderId,
-    });
+    }).catch((err) =>
+      console.error(
+        `[register-burn] history write failed for ${input.burnTxHash}:`,
+        err,
+      ),
+    );
   }
 
   return record.id;
