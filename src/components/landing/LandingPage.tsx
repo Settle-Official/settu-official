@@ -27,11 +27,15 @@ const inter = Inter({
   display: "swap",
 });
 
+// The page ground must match the sections painted on it: every landing
+// section is #121212, and this wrapper was #131212. One point of red is
+// enough to draw a visible seam at each section boundary — most obviously
+// across the hero's horizon glow, where it cut straight through the arc.
 export function LandingPage() {
   return (
     <main
       id="landing-root"
-      className={`${fraunces.variable} ${sora.variable} ${inter.variable} min-h-screen bg-[#131212] text-white font-[family-name:var(--font-sora)]`}
+      className={`${fraunces.variable} ${sora.variable} ${inter.variable} min-h-screen bg-[#121212] text-white font-[family-name:var(--font-sora)]`}
     >
       <LandingScale targetId="landing-root" />
       <Hero />

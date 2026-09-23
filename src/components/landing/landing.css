@@ -348,3 +348,64 @@
     animation: none;
   }
 }
+
+/* Mobile menu — the panel used to mount and unmount outright, so it snapped
+   open with no transition. Same grid-rows 0fr→1fr technique as the FAQ
+   panel above: it animates to the content's own height without hard-coding
+   one. Kept in the tree when closed (hence the visibility/pointer-events
+   guard) because a transition needs something to transition from. */
+.landing-menu-panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(-6px);
+  transition:
+    grid-template-rows 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.22s ease-out,
+    transform 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+    visibility 0s linear 0.3s;
+}
+.landing-menu-panel.is-open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateY(0);
+  transition:
+    grid-template-rows 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.22s ease-out,
+    transform 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+    visibility 0s;
+}
+/* The inner wrapper is what actually clips during the row transition. */
+.landing-menu-panel > div { overflow: hidden; min-height: 0; }
+
+/* Hamburger → X. Three bars rather than two swapped SVG paths, so the
+   transition has something continuous to animate. */
+.landing-burger { position: relative; width: 22px; height: 16px; }
+.landing-burger span {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  border-radius: 2px;
+  background: currentColor;
+  transition:
+    transform 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.18s ease-out;
+}
+.landing-burger span:nth-child(1) { top: 0; }
+.landing-burger span:nth-child(2) { top: 7px; }
+.landing-burger span:nth-child(3) { top: 14px; }
+.landing-burger.is-open span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+.landing-burger.is-open span:nth-child(2) { opacity: 0; transform: scaleX(0.4); }
+.landing-burger.is-open span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-menu-panel,
+  .landing-burger span {
+    transition: none;
+  }
+}

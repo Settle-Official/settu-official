@@ -40,7 +40,13 @@ export function Hero() {
           Nav (with its own mt-[20px]) now sits above this in normal flow. */}
       <div className="relative px-[257px] pb-[103px] max-[720px]:px-[10px] max-[720px]:pb-[90px]">
         {/* Horizon glow below the CTA: a wide, shallow arc whose rim sits
-            just above the hero's bottom edge and fades into the stats strip. */}
+            just above the hero's bottom edge and fades into the stats strip.
+            Two sets of geometry rather than one scaled shape — the arc is
+            drawn at a fixed pixel size and centred, so a phone only ever sees
+            the middle slice of it. At 800 wide with rx 480 that slice carries
+            about 15px of curve across the whole screen, which reads as a
+            straight line; the narrower radii below put a real arc inside the
+            same viewport. */}
         <HorizonGlow
           width={800}
           height={200}
@@ -52,7 +58,20 @@ export function Hero() {
           opacity={1}
           fadeBottomFrom={170}
           fadeX={0.32}
-          className="pointer-events-none absolute bottom-[-40px] left-1/2 max-w-none -translate-x-1/2 max-[720px]:bottom-[-80px]"
+          className="pointer-events-none absolute bottom-[-40px] left-1/2 max-w-none -translate-x-1/2 max-[720px]:hidden"
+        />
+        <HorizonGlow
+          width={460}
+          height={170}
+          rx={240}
+          ry={120}
+          apexY={92}
+          blur={20}
+          spread={12}
+          opacity={1}
+          fadeBottomFrom={130}
+          fadeX={0.26}
+          className="pointer-events-none absolute bottom-[-70px] left-1/2 hidden max-w-none -translate-x-1/2 max-[720px]:block"
         />
         <div className="relative mx-auto flex w-[765px] max-w-full flex-col items-center gap-[34px] pt-[112px] text-center max-[720px]:gap-[20px] max-[720px]:pt-[60px]">
           <HeroCoins />
@@ -67,7 +86,7 @@ export function Hero() {
           </div>
           <a
             href="/app"
-            className="rounded-[40px] bg-[rgba(201,169,98,0.6)] px-[16px] py-[16px] font-[family-name:var(--font-sora)] text-[16px] text-white transition-colors hover:bg-[rgba(201,169,98,0.8)] max-[720px]:mt-[10px] max-[720px]:flex max-[720px]:h-[60px] max-[720px]:w-[192px] max-[720px]:items-center max-[720px]:justify-center"
+            className="rounded-[40px] bg-[rgba(201,169,98,0.6)] px-[16px] py-[16px] font-[family-name:var(--font-sora)] text-[16px] text-white transition-colors hover:bg-[rgba(201,169,98,0.8)] whitespace-nowrap max-[720px]:mt-[10px] max-[720px]:flex max-[720px]:h-[60px] max-[720px]:min-w-[192px] max-[720px]:items-center max-[720px]:justify-center max-[720px]:px-[28px]"
           >
             Convert USDC Now
           </a>

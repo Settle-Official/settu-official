@@ -159,10 +159,10 @@ export function TrustSection() {
                 i === 1 ? "max-[720px]:items-end" : ""
               }`}
             >
-              <h3 className="landing-fraunces whitespace-nowrap text-[20px] font-semibold leading-[25px] text-white max-[720px]:whitespace-normal">
+              <h3 className="landing-fraunces whitespace-nowrap text-[20px] font-semibold leading-[25px] text-white max-[720px]:whitespace-normal max-[720px]:text-[17px] max-[720px]:leading-[22px]">
                 {reason.title}
               </h3>
-              <p className="font-[family-name:var(--font-sora)] text-[18px] leading-[28px] text-[#c2bdbd]">
+              <p className="font-[family-name:var(--font-sora)] text-[18px] leading-[28px] text-[#c2bdbd] max-[720px]:text-[15px] max-[720px]:leading-[24px]">
                 {reason.body}
               </p>
             </div>
