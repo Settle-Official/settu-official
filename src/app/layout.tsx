@@ -35,6 +35,9 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: "#C9A962",
+  // Required for env(safe-area-inset-*) to report anything but 0 — the app
+  // shell sits flush to the bottom edge on phones.
+  viewportFit: "cover",
 };
 
 export default function RootLayout({

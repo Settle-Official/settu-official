@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowRightIcon, CheckIcon, CloseIcon } from "@/components/app/icons";
+import { ArrowRightIcon, CheckIcon, CloseIcon, SendIcon } from "@/components/app/icons";
 import { useAgentUnread } from "@/components/app/AgentUnread";
+import { PHONE_QUERY, useMediaQuery } from "@/components/app/useMediaQuery";
 import {
   stepToAgentEvent,
   type AgentStepEvent,
@@ -71,7 +72,20 @@ interface ChatMessage {
   // once offrampStep resolves ("cancelled" if declined/aborted mid-run, or
   // "superseded" if an edit to this same draft produced a newer card before
   // this one was ever confirmed).
-  orderStatus?: "confirmed" | "success" | "failed" | "cancelled" | "superseded";
+  // "resolved" = the run finished; the card keeps showing its figures and
+  // loses its buttons. The outcome arrives as its own `result` message
+  // further down the thread, rather than overwriting this card — that
+  // rewrote history, putting a green tick above the step narration that
+  // led to it.
+  orderStatus?:
+    | "confirmed"
+    | "resolved"
+    | "success"
+    | "failed"
+    | "cancelled"
+    | "superseded";
+  /** A standalone outcome card, appended after the closing narration. */
+  result?: { kind: "success" | "failed"; title: string; body: string };
   stepKind?: AgentStepEvent["kind"]; // present only on step-narration messages
   onrampOrder?: ResolvedOnrampOrder; // present only on the onramp confirmation-card message
   // Same lifecycle shape as orderStatus, but a pre-creation failure clears
@@ -154,6 +168,7 @@ export function AgentPanel({
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const isPhone = useMediaQuery(PHONE_QUERY);
   // The most recently *finished* order (offramp success or onramp
   // "delivered"), regardless of how long ago or how many segment resets have
   // happened since — this is what "do that again" repeats. Never cleared by
@@ -283,11 +298,12 @@ export function AgentPanel({
       lastRenderedStepId.current = null;
       return;
     }
+    const confirmedOrder = [...messages]
+      .reverse()
+      .find((m) => m.order && m.orderStatus === "confirmed")?.order;
+
     if (offrampStep === "success" || offrampStep === "error") {
       if (offrampStep === "success") {
-        const confirmedOrder = [...messages]
-          .reverse()
-          .find((m) => m.order && m.orderStatus === "confirmed")?.order;
         if (confirmedOrder) {
           setLastCompletedOrder({
             direction: "offramp",
@@ -309,10 +325,7 @@ export function AgentPanel({
         if (idx === -1) return prev;
         const realIdx = prev.length - 1 - idx;
         const next = [...prev];
-        next[realIdx] = {
-          ...next[realIdx],
-          orderStatus: offrampStep === "success" ? "success" : "failed",
-        };
+        next[realIdx] = { ...next[realIdx], orderStatus: "resolved" };
         return next;
       });
     }
@@ -322,9 +335,40 @@ export function AgentPanel({
     });
     if (!event || event.id === lastRenderedStepId.current) return;
     lastRenderedStepId.current = event.id;
+    const outcome: ChatMessage[] =
+      offrampStep === "success"
+        ? [
+            {
+              id: nextId(),
+              role: "agent",
+              result: {
+                kind: "success",
+                title: confirmedOrder
+                  ? `Done! ${fiatSymbol(confirmedOrder.beneficiary.currency)}${confirmedOrder.destinationAmount} is on its way`
+                  : "Done! your money is on its way",
+                body: confirmedOrder
+                  ? `Sent to ${confirmedOrder.beneficiary.institution} •••• ${confirmedOrder.beneficiary.accountIdentifier.slice(-3)}. It usually lands within minutes.`
+                  : "It usually lands within minutes.",
+              },
+            },
+          ]
+        : offrampStep === "error"
+          ? [
+              {
+                id: nextId(),
+                role: "agent",
+                result: {
+                  kind: "failed",
+                  title: "Oops! Transaction failed",
+                  body: offrampError || "That offramp didn't go through.",
+                },
+              },
+            ]
+          : [];
     setMessages((prev) => [
       ...prev,
       { id: nextId(), role: "agent", text: event.text, stepKind: event.kind },
+      ...outcome,
     ]);
   }, [active, offrampStep, offrampError, sourceChainLabel]);
 
@@ -739,7 +783,7 @@ export function AgentPanel({
         // px-[16px]: the bubble tails hang 14px off their bubble, so without
         // this gutter they'd reach past the list and either raise a
         // horizontal scrollbar or get clipped by overflow-x-hidden below.
-        className="flex min-h-0 flex-1 flex-col gap-[28px] overflow-x-hidden overflow-y-auto overscroll-contain px-[16px]"
+        className="flex min-h-0 flex-1 flex-col gap-[28px] overflow-x-hidden overflow-y-auto overscroll-contain px-[16px] max-[720px]:gap-[20px] max-[720px]:px-[14px]"
       >
         {messages.map((m, i) => {
           // The divider sits right before the first message the user hasn't
@@ -748,7 +792,7 @@ export function AgentPanel({
           const isFirstUnread = readCount < messages.length && i === readCount;
 
           return (
-            <div key={m.id} className="flex flex-col gap-[28px]">
+            <div key={m.id} className="flex flex-col gap-[28px] max-[720px]:gap-[20px]">
               {isFirstUnread && <UnreadDivider />}
               <AgentMessage message={m} />
             </div>
@@ -779,17 +823,14 @@ export function AgentPanel({
           type="button"
           onClick={cancelFlowAndOrder}
           style={{ border: "1px solid rgba(255,255,255,0.6)" }}
-          className="mx-auto flex h-[48px] items-center gap-[8px] rounded-[40px] px-[24px] font-[family-name:var(--font-sora)] text-[15px] text-[#e07a7e] transition-[filter] hover:brightness-125"
+          className="mx-auto flex h-[48px] items-center gap-[8px] rounded-[40px] px-[24px] font-[family-name:var(--font-sora)] text-[15px] text-[#e07a7e] transition-[filter] hover:brightness-125 max-[720px]:h-[44px] max-[720px]:text-[15px]"
         >
           Cancel
           <CloseIcon size={14} />
         </button>
       )}
 
-      <div
-        style={{ border: "1px solid rgba(255,255,255,0.12)" }}
-        className="flex items-center gap-[12px] rounded-[40px] bg-white/5 py-[8px] pl-[24px] pr-[8px]"
-      >
+      <div className="agent-composer flex items-center gap-[12px] rounded-[40px] bg-white/5 py-[8px] pl-[24px] pr-[8px] max-[720px]:gap-[10px] max-[720px]:rounded-none max-[720px]:bg-transparent max-[720px]:p-0">
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -800,8 +841,14 @@ export function AgentPanel({
             }
           }}
           disabled={isSending}
-          placeholder="e.g. Offramp 500 USDC on Solana… or Buy 50000 NGN of USDC…"
-          className="h-[40px] min-w-0 flex-1 bg-transparent font-[family-name:var(--font-sora)] text-[16px] text-white outline-none placeholder:text-[#8d8c8c]"
+          // 393px has no room for the long example; the phone design just
+          // prompts with the greeting it wants back.
+          placeholder={
+            isPhone
+              ? "Hey Agent"
+              : "e.g. Offramp 500 USDC on Solana… or Buy 50000 NGN of USDC…"
+          }
+          className="h-[40px] min-w-0 flex-1 bg-transparent font-[family-name:var(--font-sora)] text-[16px] text-white outline-none placeholder:text-[#8d8c8c] max-[720px]:h-[52px] max-[720px]:rounded-[40px] max-[720px]:bg-[#6f6c6c] max-[720px]:px-[20px] max-[720px]:text-[15px] max-[720px]:placeholder:text-[#d8d5d5]"
         />
         <button
           type="button"
@@ -809,15 +856,21 @@ export function AgentPanel({
           disabled={isSending || !input.trim()}
           aria-label="Send"
           style={{ backgroundColor: "#c9a962" }}
-          className="flex size-[48px] shrink-0 items-center justify-center rounded-full text-[#1a1a1a] transition-[filter] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex size-[48px] shrink-0 items-center justify-center rounded-full text-[#1a1a1a] transition-[filter] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50 max-[720px]:size-[52px]"
         >
-          <ArrowRightIcon size={20} />
+          {/* Both glyphs are rendered and one is hidden per breakpoint —
+              swapping on `isPhone` would flip the icon on hydration. */}
+          <ArrowRightIcon size={20} className="max-[720px]:hidden" />
+          <SendIcon size={20} className="hidden max-[720px]:block max-[720px]:size-[22px]" />
         </button>
       </div>
     </div>
   );
 
   function AgentMessage({ message: m }: { readonly message: ChatMessage }) {
+    if (m.result) {
+      return <ChatResultCard result={m.result} />;
+    }
     if (m.order) {
       const o = m.order;
       return (
@@ -837,8 +890,8 @@ export function AgentPanel({
           onCancel={() => cancelOrder(o)}
           confirmLabel={confirming ? "Working…" : isConnected ? "Confirm" : "Connect Wallet"}
           confirmDisabled={confirming}
-          successText="Sent — it usually lands within minutes."
-          failedText={offrampError || "That offramp didn't go through."}
+          // No success/failed text: an offramp card never takes those
+          // statuses any more — the outcome is its own card further down.
         />
       );
     }
@@ -902,7 +955,7 @@ function UnreadDivider() {
   return (
     <div className="flex items-center gap-[16px]" role="separator">
       <span className="h-px flex-1 bg-white/10" />
-      <span className="shrink-0 font-[family-name:var(--font-sora)] text-[13px] text-[#8d8c8c]">
+      <span className="shrink-0 font-[family-name:var(--font-sora)] text-[13px] text-[#8d8c8c] max-[720px]:text-[13px]">
         Unread
       </span>
       <span className="h-px flex-1 bg-white/10" />
@@ -946,7 +999,11 @@ function ChatBubble({ side, tone, stepKind, children }: ChatBubbleProps) {
         // The tail's corner is squared off completely so the tail meets a
         // straight edge — any radius there curves away from the tail and
         // opens a visible sliver between the two.
-        className={`relative max-w-[70%] break-words rounded-[20px] px-[24px] py-[16px] font-[family-name:var(--font-sora)] leading-[26px] ${
+        // Phone: both tones share one size. The desktop pair (15/18px) reads
+        // as a deliberate hierarchy across a wide column; at 393px it just
+        // looks like inconsistent text, and the design sets every bubble the
+        // same.
+        className={`relative max-w-[70%] break-words rounded-[20px] px-[24px] py-[16px] font-[family-name:var(--font-sora)] leading-[26px] max-[720px]:max-w-[78%] max-[720px]:rounded-[14px] max-[720px]:px-[15px] max-[720px]:py-[13px] max-[720px]:text-[14.5px] max-[720px]:leading-[21px] ${
           left ? "rounded-bl-none" : "rounded-br-none"
         } ${tone === "narration" ? "text-[15px]" : "text-[18px]"}`}
       >
@@ -970,25 +1027,52 @@ function BubbleTail({ side, color }: { readonly side: "left" | "right"; readonly
   return (
     <svg
       aria-hidden="true"
-      width="14"
-      height="22"
       viewBox="0 0 14 22"
       fill="none"
-      style={{
-        // Overlaps the bubble by 2px. The path's fill is antialiased away to
-        // nothing in its own rightmost column, so a 1px overlap cancels out
-        // and leaves the hairline it was meant to close; 2px guarantees a
-        // solid column of contact, and is still narrow enough that the
-        // translucent fill doubling up there doesn't read as a seam.
-        [left ? "left" : "right"]: "-12px",
-        // Mirrored for the outgoing side so the point faces away from the
-        // bubble on both sides.
-        transform: left ? undefined : "scaleX(-1)",
-      }}
-      className="absolute bottom-0"
+      // Size and the 2px overlap live in globals.css (.bubble-tail), because
+      // the phone bubble is smaller and the tail has to shrink with it — and
+      // an inline offset can't carry a media query.
+      className={`bubble-tail absolute bottom-0 ${left ? "is-left" : "is-right"}`}
     >
       <path d="M14 22V6c0 8.2-5.6 15.2-14 16h14Z" fill={color} />
     </svg>
+  );
+}
+
+/**
+ * The outcome of a finished run, as its own card in the thread — it arrives
+ * after the closing narration rather than replacing the summary card that
+ * started it, so the conversation still reads in the order it happened.
+ */
+function ChatResultCard({
+  result,
+}: {
+  readonly result: { kind: "success" | "failed"; title: string; body: string };
+}) {
+  const isSuccess = result.kind === "success";
+  return (
+    <div className="flex justify-start">
+      <div className="flex w-[400px] max-w-full flex-col items-center gap-[16px] rounded-[20px] bg-[#232222] p-[24px] text-center max-[720px]:w-full max-[720px]:gap-[12px] max-[720px]:rounded-[14px] max-[720px]:p-[16px]">
+        <span
+          style={{ backgroundColor: isSuccess ? "#2fb457" : "#b23a3e" }}
+          className="flex size-[56px] items-center justify-center rounded-full max-[720px]:size-[48px]"
+        >
+          {isSuccess ? (
+            <CheckIcon size={28} strokeWidth={2.4} className="text-white" />
+          ) : (
+            <CloseIcon size={24} strokeWidth={2.4} className="text-white" />
+          )}
+        </span>
+        <div className="flex flex-col gap-[6px]">
+          <h3 className="font-fraunces text-[20px] leading-[26px] text-white max-[720px]:text-[17px] max-[720px]:leading-[22px]">
+            {result.title}
+          </h3>
+          <p className="font-[family-name:var(--font-sora)] text-[15px] leading-[22px] text-[#d6d3d3] max-[720px]:text-[13px] max-[720px]:leading-[19px]">
+            {result.body}
+          </p>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -997,7 +1081,13 @@ type SummaryRow = [label: string, value: string, tone?: "accent" | "accent-lg"];
 interface SummaryCardProps {
   readonly title: string;
   readonly rows: readonly SummaryRow[];
-  readonly status?: "confirmed" | "success" | "failed" | "cancelled" | "superseded";
+  readonly status?:
+    | "confirmed"
+    | "resolved"
+    | "success"
+    | "failed"
+    | "cancelled"
+    | "superseded";
   readonly onConfirm?: () => void;
   readonly onCancel?: () => void;
   readonly confirmLabel?: string;
@@ -1023,28 +1113,28 @@ function SummaryCard({
   const isTerminal = status === "success" || status === "failed";
   return (
     <div className="flex justify-start">
-      <div className="flex w-[400px] max-w-full flex-col gap-[16px] rounded-[20px] bg-[#232222] p-[24px]">
+      <div className="flex w-[400px] max-w-full flex-col gap-[16px] rounded-[20px] bg-[#232222] p-[24px] max-[720px]:w-full max-[720px]:gap-[12px] max-[720px]:rounded-[14px] max-[720px]:p-[16px]">
         {!isTerminal && (
           <>
-            <h3 className="font-[family-name:var(--font-inter)] text-[13px] font-semibold uppercase tracking-[0.06em] text-[#8d8c8c]">
+            <h3 className="font-[family-name:var(--font-inter)] text-[13px] font-semibold uppercase tracking-[0.06em] text-[#8d8c8c] max-[720px]:text-[13px]">
               {title}
             </h3>
             <dl className="flex flex-col">
               {rows.map(([label, value, tone]) => (
                 <div
                   key={label}
-                  className="flex items-baseline justify-between gap-[16px] border-b border-dashed border-white/10 py-[10px] last:border-b-0"
+                  className="flex items-baseline justify-between gap-[16px] border-b border-dashed border-white/10 py-[10px] last:border-b-0 max-[720px]:gap-[12px] max-[720px]:py-[8px]"
                 >
-                  <dt className="font-[family-name:var(--font-sora)] text-[15px] text-[#bdbcbc]">
+                  <dt className="font-[family-name:var(--font-sora)] text-[15px] text-[#bdbcbc] max-[720px]:text-[14px]">
                     {label}
                   </dt>
                   <dd
                     className={`text-right font-[family-name:var(--font-inter)] ${
                       tone === "accent-lg"
-                        ? "text-[20px] font-semibold text-[#c9a962]"
+                        ? "text-[20px] font-semibold text-[#c9a962] max-[720px]:text-[18px]"
                         : tone === "accent"
-                          ? "text-[14px] text-[#c9a962]"
-                          : "text-[15px] text-white"
+                          ? "text-[14px] text-[#c9a962] max-[720px]:text-[14px]"
+                          : "text-[15px] text-white max-[720px]:text-[14px]"
                     }`}
                   >
                     {value}
@@ -1061,17 +1151,18 @@ function SummaryCard({
               type="button"
               onClick={onCancel}
               disabled={confirmDisabled}
-              style={{ border: "1px solid rgba(255,255,255,0.3)" }}
-              className="h-[48px] flex-1 rounded-[16px] font-[family-name:var(--font-sora)] text-[15px] text-white transition-[filter] hover:brightness-125 disabled:opacity-50"
+              style={{ border: "1px solid rgba(224,122,126,0.65)" }}
+              className="flex h-[48px] flex-1 items-center justify-center gap-[8px] rounded-[16px] font-[family-name:var(--font-sora)] text-[15px] text-[#e07a7e] transition-[filter] hover:brightness-125 disabled:opacity-50 max-[720px]:h-[44px] max-[720px]:max-w-[96px] max-[720px]:gap-[6px] max-[720px]:rounded-[12px] max-[720px]:text-[14px]"
             >
               Cancel
+              <CloseIcon size={15} />
             </button>
             <button
               type="button"
               onClick={onConfirm}
               disabled={confirmDisabled}
               style={{ backgroundColor: "#c9a962" }}
-              className="h-[48px] flex-1 rounded-[16px] font-[family-name:var(--font-sora)] text-[15px] font-semibold text-[#1a1a1a] transition-[filter] hover:brightness-110 disabled:opacity-50"
+              className="h-[48px] flex-1 rounded-[16px] font-[family-name:var(--font-sora)] text-[15px] font-semibold text-[#1a1a1a] transition-[filter] hover:brightness-110 disabled:opacity-50 max-[720px]:h-[44px] max-[720px]:rounded-[12px] max-[720px]:text-[14px]"
             >
               {confirmLabel}
             </button>
@@ -1079,7 +1170,7 @@ function SummaryCard({
         )}
 
         {status === "confirmed" && (
-          <p className="font-[family-name:var(--font-sora)] text-[14px] text-[#8d8c8c]">
+          <p className="font-[family-name:var(--font-sora)] text-[14px] text-[#8d8c8c] max-[720px]:text-[14px]">
             Working on it…
           </p>
         )}
@@ -1088,11 +1179,11 @@ function SummaryCard({
           <div className="flex flex-col items-center gap-[16px] py-[8px] text-center">
             <span
               style={{ backgroundColor: "#2fb457" }}
-              className="flex size-[56px] items-center justify-center rounded-full"
+              className="flex size-[56px] items-center justify-center rounded-full max-[720px]:size-[48px]"
             >
               <CheckIcon size={28} strokeWidth={2.4} className="text-white" />
             </span>
-            <p className="font-[family-name:var(--font-sora)] text-[16px] leading-[24px] text-white">
+            <p className="font-[family-name:var(--font-sora)] text-[16px] leading-[24px] text-white max-[720px]:text-[15px] max-[720px]:leading-[22px]">
               {successText}
             </p>
           </div>
@@ -1102,21 +1193,21 @@ function SummaryCard({
           <div className="flex flex-col items-center gap-[16px] py-[8px] text-center">
             <span
               style={{ backgroundColor: "#b23a3e" }}
-              className="flex size-[56px] items-center justify-center rounded-full"
+              className="flex size-[56px] items-center justify-center rounded-full max-[720px]:size-[48px]"
             >
               <CloseIcon size={24} strokeWidth={2.4} className="text-white" />
             </span>
-            <p className="font-[family-name:var(--font-sora)] text-[16px] leading-[24px] text-white">
+            <p className="font-[family-name:var(--font-sora)] text-[16px] leading-[24px] text-white max-[720px]:text-[15px] max-[720px]:leading-[22px]">
               {failedText}
             </p>
           </div>
         )}
 
         {status === "cancelled" && (
-          <p className="font-[family-name:var(--font-sora)] text-[14px] text-[#8d8c8c]">Cancelled.</p>
+          <p className="font-[family-name:var(--font-sora)] text-[14px] text-[#8d8c8c] max-[720px]:text-[14px]">Cancelled.</p>
         )}
         {status === "superseded" && (
-          <p className="font-[family-name:var(--font-sora)] text-[14px] text-[#8d8c8c]">
+          <p className="font-[family-name:var(--font-sora)] text-[14px] text-[#8d8c8c] max-[720px]:text-[14px]">
             Updated — see below.
           </p>
         )}

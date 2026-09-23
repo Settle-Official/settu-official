@@ -68,24 +68,29 @@ export function Overview() {
   }, [rows]);
 
   const tiles = [
-    { label: "Total transaction", value: stats.total, icon: ArrowsUpDownIcon },
-    { label: "Offramp", value: stats.offramp, icon: MoneyIcon },
-    { label: "Onramp", value: stats.onramp, icon: CurrencyIcon },
-    { label: "Withdraw by agent", value: stats.agent, icon: ChatIcon },
+    // `phoneOnly: false` tiles are dropped on a phone: the mobile design
+    // shows only Offramp and Onramp side by side, and four stacked tiles
+    // pushed Quick Action entirely below the fold.
+    { label: "Total transaction", value: stats.total, icon: ArrowsUpDownIcon, onPhone: false },
+    { label: "Offramp", value: stats.offramp, icon: MoneyIcon, onPhone: true },
+    { label: "Onramp", value: stats.onramp, icon: CurrencyIcon, onPhone: true },
+    { label: "Withdraw by agent", value: stats.agent, icon: ChatIcon, onPhone: false },
   ];
 
   return (
     <>
       {/* Figma's tile frame says gap 40, but four 244px tiles only fit the
           1033px row at 20px — which is what its rendered screenshot shows. */}
-      <div className="grid grid-cols-4 gap-[20px] max-[1100px]:grid-cols-2 max-[720px]:grid-cols-1">
-        {tiles.map(({ label, value, icon: TileIcon }) => (
+      <div className="grid grid-cols-4 gap-[20px] max-[1100px]:grid-cols-2 max-[720px]:grid-cols-2 max-[720px]:gap-[10px]">
+        {tiles.map(({ label, value, icon: TileIcon, onPhone }) => (
           <div
             key={label}
-            className="flex min-h-[110px] flex-col justify-center gap-[10px] rounded-[20px] border border-white/15 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.25)] backdrop-blur-xl bg-[rgba(127,125,125,0.1)] p-[20px]"
+            className={`flex min-h-[110px] flex-col justify-center gap-[10px] rounded-[20px] border border-white/15 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.25)] backdrop-blur-xl bg-[rgba(127,125,125,0.1)] p-[20px] max-[720px]:px-[10px] max-[720px]:py-[20px] ${
+              onPhone ? "" : "max-[720px]:hidden"
+            }`}
           >
             <div className="flex items-center justify-between gap-[10px]">
-              <span className="font-fraunces whitespace-nowrap text-[14px] font-semibold uppercase leading-[17px] text-[#d5d1d1]">
+              <span className="font-fraunces whitespace-nowrap text-[14px] font-semibold uppercase leading-[17px] text-[#d5d1d1] max-[720px]:whitespace-normal">
                 {label}
               </span>
               <TileIcon size={22} className="shrink-0 text-[#f4f3f3]" />
@@ -98,7 +103,7 @@ export function Overview() {
       </div>
 
       <div className="grid grid-cols-[minmax(0,444fr)_minmax(0,545fr)] gap-[44px] max-[1400px]:gap-[20px] max-[1100px]:grid-cols-1">
-        <section className="flex flex-col gap-[24px] rounded-[30px] border border-white/15 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.25)] backdrop-blur-xl bg-white/10 px-[20px] py-[30px]">
+        <section className="flex flex-col gap-[24px] rounded-[30px] border border-white/15 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.25)] backdrop-blur-xl bg-white/10 px-[20px] py-[30px] max-[720px]:gap-[30px]">
           <h2 className="border-b-[0.6px] border-[#484646] pb-[20px] font-fraunces text-[28px] leading-[35px] text-[#f4f0f0]">
             Quick Action
           </h2>
@@ -107,12 +112,12 @@ export function Overview() {
               <Link
                 key={href}
                 href={href}
-                className="flex items-center gap-[12px] rounded-[20px] bg-[rgba(195,164,95,0.2)] p-[20px] transition-colors hover:bg-[rgba(195,164,95,0.32)]"
+                className="flex items-center gap-[12px] rounded-[20px] bg-[rgba(195,164,95,0.2)] p-[20px] transition-colors hover:bg-[rgba(195,164,95,0.32)] max-[720px]:min-h-[100px]"
               >
                 <ActionIcon size={26} className="shrink-0 text-[#fbf9f9]" />
                 <span className="flex min-w-0 flex-1 flex-col gap-[5px]">
-                  <span className="font-fraunces text-[20px] leading-[25px] text-white">{title}</span>
-                  <span className="font-[family-name:var(--font-sora)] text-[14px] leading-[18px] text-[#dcd6d6]">
+                  <span className="font-fraunces text-[20px] leading-[25px] text-white max-[720px]:text-[16px] max-[720px]:leading-[20px]">{title}</span>
+                  <span className="font-[family-name:var(--font-sora)] text-[14px] leading-[18px] text-[#dcd6d6] max-[720px]:text-[12px] max-[720px]:leading-[15px]">
                     {body}
                   </span>
                 </span>
@@ -160,12 +165,12 @@ function ActivityChart({ monthly }: { readonly monthly: ReadonlyArray<number> })
   const [hover, setHover] = useState<number | null>(null);
 
   return (
-    <div className="flex gap-[19px]">
-      <div className="flex w-[62px] shrink-0 flex-col justify-between py-[2px] text-right">
+    <div className="flex gap-[19px] max-[720px]:gap-[10px]">
+      <div className="flex w-[62px] shrink-0 flex-col justify-between py-[2px] text-right max-[720px]:w-[44px]">
         {ticks.map((t, i) => (
           <span
             key={i}
-            className="font-[family-name:var(--font-inter)] text-[14px] leading-[17px] text-white"
+            className="font-[family-name:var(--font-inter)] text-[14px] leading-[17px] text-white max-[720px]:text-[12px] max-[720px]:leading-[15px]"
           >
             {fmt(t)}
           </span>
@@ -174,11 +179,21 @@ function ActivityChart({ monthly }: { readonly monthly: ReadonlyArray<number> })
       <div className="relative flex min-w-0 flex-1 flex-col gap-[16px]">
         <svg
           viewBox={`0 0 ${W} ${H}`}
-          className="h-auto w-full overflow-visible"
+          preserveAspectRatio="none"
+          className="h-auto w-full overflow-visible max-[720px]:h-[230px]"
           aria-label="Monthly transaction volume"
         >
           {ticks.map((t, i) => (
-            <line key={i} x1={0} x2={W} y1={y(t)} y2={y(t)} stroke="#4d4c4c" strokeWidth={0.6} />
+            <line
+              key={i}
+              x1={0}
+              x2={W}
+              y1={y(t)}
+              y2={y(t)}
+              stroke="#4d4c4c"
+              strokeWidth={0.6}
+              vectorEffect="non-scaling-stroke"
+            />
           ))}
           {hover !== null && (
             <line
@@ -245,7 +260,7 @@ function ActivityChart({ monthly }: { readonly monthly: ReadonlyArray<number> })
           </div>
         )}
 
-        <div className="flex justify-between font-[family-name:var(--font-inter)] text-[14px] leading-[17px] text-white">
+        <div className="flex justify-between font-[family-name:var(--font-inter)] text-[14px] leading-[17px] text-white max-[720px]:text-[12px] max-[720px]:leading-[15px]">
           {MONTHS.filter((_, i) => i % 2 === 0).map((m) => (
             <span key={m}>{m}</span>
           ))}

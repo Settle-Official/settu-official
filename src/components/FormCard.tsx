@@ -3,6 +3,9 @@
 import { useState, useEffect } from "react";
 import { AppSelect } from "@/components/app/AppSelect";
 import { CaretDownIcon } from "@/components/app/icons";
+import { useScreenBack } from "@/components/app/ScreenBack";
+import { PHONE_QUERY, useMediaQuery } from "@/components/app/useMediaQuery";
+import { FlowModal } from "@/components/app/FlowModal";
 import { OfframpStatusPanel } from "@/components/app/OfframpStatusPanel";
 import type { OfframpStep } from "@/components/TransactionProgressModal";
 import { MIN_USDC_AMOUNT } from "@/lib/offramp/fiat-conversion";
@@ -224,6 +227,13 @@ export function FormCard({
   const isSolanaSource = sourceChain === "solana";
   const isExternalSource = isEvmSource || isSolanaSource;
 
+  // On a phone the form is two screens, not one column: withdrawal details
+  // first, bank details second (there is no room to show both, and the
+  // design splits them). Above 720px both sections render together exactly
+  // as before — `phoneStep` is simply ignored.
+  const isPhone = useMediaQuery(PHONE_QUERY);
+  const [phoneStep, setPhoneStep] = useState<1 | 2>(1);
+
   // Reset form fields when resetKey changes (after successful transaction)
   useEffect(() => {
     if (resetKey === 0) return; // skip initial mount
@@ -232,6 +242,7 @@ export function FormCard({
     setBank("");
     setAccountName("");
     setQuote(null);
+    setPhoneStep(1);
   }, [resetKey]);
 
   // Fetch gas fee options — the fee is a rate of the burn amount, so refetch
@@ -595,22 +606,42 @@ export function FormCard({
   const sourceChainLabel =
     SOURCE_CHAIN_OPTIONS.find((o) => o.code === sourceChain)?.name ?? sourceChain;
 
+  // The back arrow for step 2 lives in the app shell's title row, not in this
+  // card — so it is published up rather than rendered here. Depends on
+  // `flow.step`, never on `flow` itself: the caller builds that object inline
+  // on every render.
+  const flowStep = flow?.step ?? "idle";
+  const { publish: publishBack } = useScreenBack();
+  useEffect(() => {
+    const wantsBack = isPhone && phoneStep === 2 && flowStep === "idle";
+    publishBack(wantsBack ? () => setPhoneStep(1) : null);
+    return () => publishBack(null);
+  }, [isPhone, phoneStep, flowStep, publishBack]);
+
   // The running flow takes over the whole card — processing steps, then the
   // done or failed card — until the caller closes it.
-  if (flow && flow.step !== "idle") {
-    return (
-      <OfframpStatusPanel
-        step={flow.step}
-        error={flow.error}
-        failedAtStep={flow.failedAtStep}
-        sourceChainLabel={sourceChainLabel}
-        receipt={receipt}
-        onCancel={flow.onCancel}
-        onClose={flow.onClose}
-        onViewTransaction={flow.onViewTransaction}
-      />
-    );
-  }
+  // The running flow is rendered as an overlay at the end of this component,
+  // not in place of the form — see FlowModal.
+  const flowOverlay =
+    flowStep !== "idle" && flow ? (
+      <FlowModal
+        // Only once it has resolved: clicking away from a pending signature
+        // should not look like a way to abandon it.
+        dismissable={flowStep === "success" || flowStep === "error"}
+        onDismiss={flow.onClose}
+      >
+        <OfframpStatusPanel
+          step={flow.step}
+          error={flow.error}
+          failedAtStep={flow.failedAtStep}
+          sourceChainLabel={sourceChainLabel}
+          receipt={receipt}
+          onCancel={flow.onCancel}
+          onClose={flow.onClose}
+          onViewTransaction={flow.onViewTransaction}
+        />
+      </FlowModal>
+    ) : null;
 
   const accountNumberValid = /^\+?\d{6,20}$/.test(accountNumber.trim());
   const accountNumberError =
@@ -620,6 +651,21 @@ export function FormCard({
         : "Enter a valid account number"
       : null;
 
+  // Step 1 on a phone only decides the amount, so it gates on the quote and
+  // the balance — the bank fields it is about to ask for obviously aren't
+  // filled yet. Step 2 (and the whole desktop form) gates on the real
+  // `canInitiateOfframp`, which is what actually guards the transaction.
+  const onPhoneAmountStep = isPhone && phoneStep === 1;
+  const amountStepReady =
+    isConnected &&
+    !isConnecting &&
+    !isExecutingOfframp &&
+    !!quote &&
+    meetsMinimum &&
+    !hasInsufficientBalance &&
+    !gasShort;
+
+  const readyLabel = !isPhone ? "Continue" : phoneStep === 1 ? "Proceed" : "Complete";
   const buttonLabel = isExecutingOfframp
     ? "Processing"
     : isConnecting
@@ -630,23 +676,40 @@ export function FormCard({
           ? "Insufficient USDC balance"
           : gasShort
             ? `Insufficient ${gasCheck?.nativeCurrencySymbol ?? "gas"} for gas`
-            : "Continue";
+            : readyLabel;
+
+  // Step 1's button advances the wizard; everywhere else it submits.
+  const handleButton = onPhoneAmountStep
+    ? () => {
+        if (!isConnected) {
+          onConnect();
+          return;
+        }
+        setPhoneStep(2);
+      }
+    : handlePrimaryAction;
 
   const fieldLabel =
-    "font-[family-name:var(--font-sora)] text-[20px] leading-[25px] text-[#bdbcbc]";
+    "font-[family-name:var(--font-sora)] text-[20px] leading-[25px] text-[#bdbcbc] max-[720px]:text-[15px] max-[720px]:leading-[19px]";
   const fieldBox =
-    "flex h-[70px] w-full items-center gap-[10px] rounded-[20px] border px-[20px] font-[family-name:var(--font-sora)] text-[20px] leading-[25px] text-white transition-colors";
+    "flex h-[70px] w-full items-center gap-[10px] rounded-[20px] border px-[20px] font-[family-name:var(--font-sora)] text-[20px] leading-[25px] text-white transition-colors max-[720px]:h-[54px] max-[720px]:rounded-[14px] max-[720px]:px-[16px] max-[720px]:text-[16px] max-[720px]:leading-[20px]";
   const feeRow = "contents";
+  // The phone design rules a hairline under each section title; the desktop
+  // card has no rule there.
+  const sectionHeading =
+    "font-[family-name:var(--font-inter)] text-[22px] leading-[27px] text-white max-[720px]:border-b max-[720px]:border-[#3a3838] max-[720px]:pb-[16px] max-[720px]:text-[16px] max-[720px]:leading-[20px]";
 
   return (
-    <div className="flex flex-col gap-[30px]">
-      <section className="flex flex-col gap-[30px]">
-        <h2 className="font-[family-name:var(--font-inter)] text-[22px] leading-[27px] text-white">
+    <>
+    <div className="flex flex-col gap-[30px] max-[720px]:gap-[24px]">
+      {(!isPhone || phoneStep === 1) && (
+      <section className="flex flex-col gap-[30px] max-[720px]:gap-[22px]">
+        <h2 className={sectionHeading}>
           Withdrawal information
         </h2>
 
-        <div className="grid grid-cols-2 gap-x-[106px] gap-y-[30px] max-[1100px]:grid-cols-1 max-[1100px]:gap-x-[20px]">
-          <div className="flex flex-col gap-[14px]">
+        <div className="grid grid-cols-2 gap-x-[106px] gap-y-[30px] max-[1100px]:grid-cols-1 max-[1100px]:gap-x-[20px] max-[720px]:gap-y-[22px]">
+          <div className="flex flex-col gap-[14px] max-[720px]:gap-[10px]">
             <span className={fieldLabel}>Source chain</span>
             {/* Switching tears down the active wallet connection (Stellar and
                 EVM can't be connected at once) and clears the amount/quote,
@@ -665,7 +728,7 @@ export function FormCard({
               placeholder="Select"
             />
           </div>
-          <div className="flex flex-col gap-[14px]">
+          <div className="flex flex-col gap-[14px] max-[720px]:gap-[10px]">
             <span className={fieldLabel}>Payout Currency</span>
             <AppSelect
               aria-label="Payout currency"
@@ -686,8 +749,8 @@ export function FormCard({
           </div>
         </div>
 
-        <div className="flex flex-col gap-[10px] border-b-[0.4px] border-[#6a6969] pb-[20px]">
-          <div className="flex flex-col gap-[14px]">
+        <div className="flex flex-col gap-[10px] border-b-[0.4px] border-[#6a6969] pb-[20px] max-[720px]:pb-[16px]">
+          <div className="flex flex-col gap-[14px] max-[720px]:gap-[10px]">
             <span className={fieldLabel}>
               {amountMode === "fiat" ? `Amount to receive (${currency})` : "Amount to withdraw"}
             </span>
@@ -703,7 +766,7 @@ export function FormCard({
                 step={amountMode === "fiat" ? "1" : "0.000001"}
                 placeholder="0"
                 aria-label={amountMode === "fiat" ? `Amount in ${currency}` : "Amount in USDC"}
-                className="min-w-0 flex-1 bg-transparent font-[family-name:var(--font-inter)] text-[20px] leading-[24px] text-white outline-none placeholder:text-[#8d8c8c] [appearance:textfield] [&::-webkit-inner-spin-button]:m-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:m-0 [&::-webkit-outer-spin-button]:appearance-none"
+                className="min-w-0 flex-1 bg-transparent font-[family-name:var(--font-inter)] text-[20px] leading-[24px] text-white outline-none placeholder:text-[#8d8c8c] max-[720px]:text-[16px] max-[720px]:leading-[20px] [appearance:textfield] [&::-webkit-inner-spin-button]:m-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:m-0 [&::-webkit-outer-spin-button]:appearance-none"
               />
               {/* Enter either side of the pair; switching carries the value
                   across from the live quote so the user doesn't retype it. */}
@@ -727,7 +790,7 @@ export function FormCard({
                       style={{
                         backgroundColor: isActive ? "rgba(201,169,98,0.35)" : "transparent",
                       }}
-                      className={`rounded-full px-[12px] py-[5px] font-[family-name:var(--font-inter)] text-[14px] leading-[17px] transition-colors ${
+                      className={`rounded-full px-[12px] py-[5px] font-[family-name:var(--font-inter)] text-[14px] leading-[17px] transition-colors max-[720px]:px-[9px] max-[720px]:py-[4px] max-[720px]:text-[12px] max-[720px]:leading-[15px] ${
                         isActive ? "text-white" : "text-[#bdbcbc]"
                       }`}
                     >
@@ -738,7 +801,7 @@ export function FormCard({
               </div>
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-[10px] font-[family-name:var(--font-inter)] text-[16px] leading-[19px] text-white">
+          <div className="flex flex-wrap items-center gap-[10px] font-[family-name:var(--font-inter)] text-[16px] leading-[19px] text-white max-[720px]:gap-[8px] max-[720px]:text-[13px] max-[720px]:leading-[16px]">
             <span>
               {amountMode === "fiat"
                 ? `Min ${getCurrencyPrefix(currency)}${minFiat?.toLocaleString("en-US") ?? "—"}`
@@ -771,16 +834,16 @@ export function FormCard({
           </div>
         </div>
 
-        <div className="rounded-[20px] bg-[#2b2a2a]">
-          <div className="flex items-center justify-between gap-[20px] px-[30px] py-[20px] font-[family-name:var(--font-inter)] text-[16px] leading-[19px] text-white">
+        <div className="rounded-[20px] bg-[#2b2a2a] max-[720px]:rounded-[14px]">
+          <div className="flex items-center justify-between gap-[20px] px-[30px] py-[20px] font-[family-name:var(--font-inter)] text-[16px] leading-[19px] text-white max-[720px]:gap-[10px] max-[720px]:px-[16px] max-[720px]:py-[16px]">
             {/* The payout is the number the user is actually deciding on, so
                 it gets the size and weight; "You'll receive about" is only a
                 label and steps back to match. */}
-            <span className="flex min-w-0 flex-col gap-[4px]">
-              <span className="text-[13px] leading-[16px] text-[#a19d9d]">
+            <span className="flex min-w-0 flex-col gap-[4px] max-[720px]:flex-row max-[720px]:flex-wrap max-[720px]:items-baseline max-[720px]:gap-x-[5px] max-[720px]:gap-y-[2px]">
+              <span className="text-[13px] leading-[16px] text-[#a19d9d] max-[720px]:text-[12px] max-[720px]:leading-[15px]">
                 {isLoadingQuote ? "Getting your rate…" : "You'll receive about"}
               </span>
-              <span className="truncate text-[26px] font-semibold leading-[32px] text-[#c9a962] max-[600px]:text-[22px] max-[600px]:leading-[28px]">
+              <span className="truncate text-[26px] font-semibold leading-[32px] text-[#c9a962] max-[720px]:text-[13px] max-[720px]:leading-[16px] max-[600px]:text-[13px] max-[600px]:leading-[16px]">
                 {quote
                   ? `${getCurrencyPrefix(quote.currency)}${Number(quote.destinationAmount).toLocaleString("en-US")}`
                   : "—"}
@@ -790,7 +853,7 @@ export function FormCard({
               type="button"
               onClick={() => setShowFee((s) => !s)}
               aria-expanded={showFee}
-              className="flex shrink-0 items-center gap-[10px] p-[10px] text-white"
+              className="flex shrink-0 items-center gap-[10px] p-[10px] text-white max-[720px]:gap-[6px] max-[720px]:p-0 max-[720px]:text-[12px] max-[720px]:leading-[15px]"
             >
               {showFee ? "Hide fee" : "Show fee"}
               <CaretDownIcon
@@ -799,8 +862,11 @@ export function FormCard({
               />
             </button>
           </div>
-          {showFee && (
-            <dl className="grid grid-cols-[1fr_auto] gap-x-[20px] gap-y-[12px] border-t border-white/10 px-[30px] py-[20px] font-[family-name:var(--font-inter)] text-[15px] leading-[19px] text-[#dcd6d6]">
+          {/* Always mounted — see .fee-reveal in globals.css; `showFee` only
+              flips the class so the panel has a state to animate out of. */}
+          <div className={`fee-reveal ${showFee ? "is-open" : ""}`}>
+            <div>
+            <dl className="grid grid-cols-[1fr_auto] gap-x-[20px] gap-y-[12px] border-t border-white/10 px-[30px] py-[20px] font-[family-name:var(--font-inter)] text-[15px] leading-[19px] text-[#dcd6d6] max-[720px]:gap-x-[12px] max-[720px]:gap-y-[10px] max-[720px]:px-[16px] max-[720px]:py-[16px] max-[720px]:text-[12px] max-[720px]:leading-[16px]">
               <div className={feeRow}>
                 <dt>You pay</dt>
                 <dd className="text-right text-white">
@@ -847,17 +913,20 @@ export function FormCard({
                 </dd>
               </div>
             </dl>
-          )}
+            </div>
+          </div>
         </div>
       </section>
+      )}
 
-      <section className="flex flex-col gap-[30px]">
-        <h2 className="font-[family-name:var(--font-inter)] text-[22px] leading-[27px] text-white">
+      {(!isPhone || phoneStep === 2) && (
+      <section className="flex flex-col gap-[30px] max-[720px]:gap-[22px]">
+        <h2 className={sectionHeading}>
           Bank information
         </h2>
-        <div className="grid grid-cols-2 gap-x-[106px] gap-y-[30px] max-[1100px]:grid-cols-1 max-[1100px]:gap-x-[20px]">
+        <div className="grid grid-cols-2 gap-x-[106px] gap-y-[30px] max-[1100px]:grid-cols-1 max-[1100px]:gap-x-[20px] max-[720px]:gap-y-[22px]">
           <div className="flex flex-col gap-[10px]">
-            <div className="flex flex-col gap-[14px]">
+            <div className="flex flex-col gap-[14px] max-[720px]:gap-[10px]">
               <span className={fieldLabel}>
                 {isMobileMoney ? "Phone number" : "Account number"}
               </span>
@@ -888,7 +957,7 @@ export function FormCard({
               </span>
             )}
           </div>
-          <div className="flex flex-col gap-[14px]">
+          <div className="flex flex-col gap-[14px] max-[720px]:gap-[10px]">
             <span className={fieldLabel}>
               {institutionLabel === "BANK"
                 ? "Bank"
@@ -906,7 +975,7 @@ export function FormCard({
             />
           </div>
         </div>
-        <div className="flex flex-col gap-[14px]">
+        <div className="flex flex-col gap-[14px] max-[720px]:gap-[10px]">
           <span className={fieldLabel}>Account name</span>
           <div
             className={`${fieldBox} border-[#d7d6d6]/70 ${
@@ -924,17 +993,22 @@ export function FormCard({
           </div>
         </div>
       </section>
+      )}
 
       <button
         type="button"
-        onClick={handlePrimaryAction}
+        onClick={handleButton}
         disabled={
-          !isConnected ? isConnecting || isExecutingOfframp : !canInitiateOfframp
+          !isConnected
+            ? isConnecting || isExecutingOfframp
+            : onPhoneAmountStep
+              ? !amountStepReady
+              : !canInitiateOfframp
         }
         // Inline: globals.css's unlayered `button { background: none }` reset
         // beats layered bg-* utilities.
         style={{ backgroundColor: "#ecc56f" }}
-        className="flex h-[80px] w-full items-center justify-center gap-[12px] rounded-[40px] font-[family-name:var(--font-sora)] text-[20px] font-semibold leading-[25px] text-[#111010] transition-[filter] hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-70"
+        className="flex h-[80px] w-full items-center justify-center gap-[12px] rounded-[40px] font-[family-name:var(--font-sora)] text-[20px] font-semibold leading-[25px] text-[#111010] transition-[filter] hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-70 max-[720px]:mt-[6px] max-[720px]:h-[60px] max-[720px]:text-[17px] max-[720px]:leading-[21px]"
       >
         {buttonLabel}
         {isExecutingOfframp && (
@@ -945,5 +1019,7 @@ export function FormCard({
         )}
       </button>
     </div>
+    {flowOverlay}
+    </>
   );
 }

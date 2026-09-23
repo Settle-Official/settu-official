@@ -359,6 +359,21 @@ async function registerBridgeTransfer(payload: {
   mintRecipient: string;
   amount: string;
   paycrestOrderId: string;
+  /**
+   * Who signed the burn, as a FALLBACK for attribution only.
+   *
+   * The server prefers Horizon's source_account, which is cryptographic
+   * proof and can't be forged by a modified client. But that lookup has a
+   * 5s timeout and public Horizon regularly takes longer, and when it
+   * returns null this field was absent — so `attributed` came out falsy and
+   * the permanent history record was silently never written. The transfer
+   * still bridged and paid out; it just vanished from the user's History
+   * and produced no completion notification.
+   *
+   * Unverified by definition, so the server only falls back to it when the
+   * chain lookup fails, which keeps the anti-spoofing intent intact.
+   */
+  connectedAddress?: string;
 }): Promise<void> {
   return registerWithBeaconFallback(
     "/api/offramp/bridge/register-transfer",
@@ -447,6 +462,13 @@ export function StellarampDashboard({
   const [offrampInitiator, setOfframpInitiator] = useState<"form" | "agent">(
     "form",
   );
+  // The same value, written synchronously. The state setter above is called
+  // immediately before handleExecuteTrade in the same event handler, so the
+  // already-captured closure inside it still sees the *previous* value —
+  // which recorded every agent-run offramp as initiator "form" and left the
+  // dashboard's "Withdraw by agent" tile permanently at $0. Rendering reads
+  // the state; anything written into a record reads this ref.
+  const offrampInitiatorRef = useRef<"form" | "agent">("form");
 
   // The shared top header reflects the external wallet only for an offramp
   // from a non-Stellar source; onramp is always the Stellar path. Agent Mode
@@ -921,7 +943,7 @@ export function StellarampDashboard({
       amount: tradeData.amount,
       currency: "NGN",
       kind: "offramp",
-      initiator: offrampInitiator,
+      initiator: offrampInitiatorRef.current,
       beneficiary: tradeData.beneficiary,
       status: "pending",
     };
@@ -1160,6 +1182,7 @@ export function StellarampDashboard({
         mintRecipient: settlementAddress,
         amount: tradeData.amount,
         paycrestOrderId: payoutOrderId,
+        connectedAddress: wallet?.publicKey,
       });
       new EventSource(`/api/offramp/bridge/stream/${stellarTxHash}`);
 
@@ -1249,6 +1272,7 @@ export function StellarampDashboard({
 
   const handleFormInitiateOfframp = useCallback(
     (tradeData: Parameters<typeof handleExecuteTrade>[0]) => {
+      offrampInitiatorRef.current = "form";
       setOfframpInitiator("form");
       return handleExecuteTrade(tradeData);
     },
@@ -1257,6 +1281,7 @@ export function StellarampDashboard({
 
   const handleAgentInitiateOfframp = useCallback(
     (tradeData: Parameters<typeof handleExecuteTrade>[0]) => {
+      offrampInitiatorRef.current = "agent";
       setOfframpInitiator("agent");
       return handleExecuteTrade(tradeData);
     },
@@ -1353,7 +1378,7 @@ export function StellarampDashboard({
       amount: tradeData.amount,
       currency: "NGN",
       kind: "offramp",
-      initiator: offrampInitiator,
+      initiator: offrampInitiatorRef.current,
       beneficiary: tradeData.beneficiary,
       status: "pending",
     };
@@ -1679,7 +1704,7 @@ export function StellarampDashboard({
       amount: tradeData.amount,
       currency: "NGN",
       kind: "offramp",
-      initiator: offrampInitiator,
+      initiator: offrampInitiatorRef.current,
       beneficiary: tradeData.beneficiary,
       status: "pending",
     };
@@ -2218,7 +2243,22 @@ export function StellarampDashboard({
           </div>
           )}
 
-          {mode === "onramp" ? (
+          {embedded && mode === "onramp" ? (
+            // The app shell's onramp screen: just the panel, which carries
+            // its own deposit-account and done/failed views. The legacy
+            // branch below keeps the old three-card grid for the
+            // (now unused) non-embedded dashboard.
+            <OnrampPanel
+              isConnected={isConnected}
+              isConnecting={isConnecting}
+              walletAddress={wallet?.publicKey}
+              onConnect={handleConnect}
+              onDelivered={handleOnrampDelivered}
+              onSettled={refreshStellarBalance}
+              usdcBalance={stellarUsdcBalanceRaw}
+              isLoadingBalance={isLoadingBalance}
+            />
+          ) : mode === "onramp" ? (
             <div className="grid grid-cols-[1fr_370px] gap-3 max-[1100px]:grid-cols-1">
               <div className="max-[1100px]:order-1">
                 <OnrampPanel

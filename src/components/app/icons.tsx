@@ -114,6 +114,12 @@ export const ArrowRightIcon = (p: IconProps) => (
   </Icon>
 );
 
+export const ArrowLeftIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M20 12H4M11 5l-7 7 7 7" />
+  </Icon>
+);
+
 export const CloseIcon = (p: IconProps) => (
   <Icon {...p}>
     <path d="M6 6l12 12M18 6L6 18" />
@@ -123,5 +129,26 @@ export const CloseIcon = (p: IconProps) => (
 export const FunnelIcon = (p: IconProps) => (
   <Icon {...p}>
     <path d="M3.5 5h17l-6.6 7.8v5.9l-3.8 2.3v-8.2L3.5 5Z" />
+  </Icon>
+);
+
+/** Filled paper plane — the phone composer's send glyph. */
+export const SendIcon = ({ size = 18, ...p }: IconProps) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="currentColor"
+    stroke="none"
+    aria-hidden="true"
+    {...p}
+  >
+    <path d="M3.2 11.1 19.6 3.3c.9-.4 1.8.5 1.4 1.4l-7.8 16.4c-.4.9-1.7.8-2-.2l-1.8-6-6-1.8c-1-.3-1.1-1.6-.2-2Z" />
+  </svg>
+);
+
+export const MenuIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M3.5 7h17M3.5 12h17M3.5 17h17" />
   </Icon>
 );

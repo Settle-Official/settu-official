@@ -24,7 +24,7 @@ interface AppSelectProps {
 // don't need one.
 const SEARCH_THRESHOLD = 8;
 
-/** The product UI's dropdown: 70px bordered field, 20px radius, caret. */
+/** The product UI's dropdown: 70px bordered field (54px on a phone), caret. */
 export function AppSelect({
   value,
   onChange,
@@ -78,18 +78,18 @@ export function AppSelect({
         // Inline border: globals.css's unlayered `button { border: 0 }` reset
         // beats any layered border-* utility.
         style={{ border: `1px solid ${error ? "#ac4747" : open ? "#d7d6d6" : "rgba(215,214,214,0.7)"}` }}
-        className={`flex h-[70px] w-full items-center justify-between gap-[10px] rounded-[20px] px-[20px] text-left font-[family-name:var(--font-sora)] text-[20px] leading-[25px] transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+        className={`flex h-[70px] w-full items-center justify-between gap-[10px] rounded-[20px] px-[20px] text-left font-[family-name:var(--font-sora)] text-[20px] leading-[25px] transition-colors disabled:cursor-not-allowed disabled:opacity-60 max-[720px]:h-[54px] max-[720px]:rounded-[14px] max-[720px]:px-[16px] max-[720px]:text-[16px] max-[720px]:leading-[20px] ${
           error ? "text-[#ac4747]" : selected ? "text-white" : "text-[#8d8c8c]"
         }`}
       >
         <span className="truncate">{label}</span>
-        <CaretDownIcon size={24} className="shrink-0 text-[#a5a2a2]" />
+        <CaretDownIcon size={24} className="shrink-0 text-[#a5a2a2] max-[720px]:size-[20px]" />
       </button>
 
       {open && (
         <div
           role="listbox"
-          className="absolute left-0 right-0 top-[calc(100%+8px)] z-30 max-h-[320px] overflow-hidden rounded-[20px] border border-white/15 bg-[#1e1c1c] shadow-[0_24px_48px_rgba(0,0,0,0.5)] backdrop-blur-xl"
+          className="absolute left-0 right-0 top-[calc(100%+8px)] z-30 max-h-[320px] overflow-hidden rounded-[20px] border border-white/15 bg-[#1e1c1c] shadow-[0_24px_48px_rgba(0,0,0,0.5)] backdrop-blur-xl max-[720px]:rounded-[14px]"
         >
           {showSearch && (
             <div className="p-[10px]">

@@ -6,14 +6,17 @@ import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useStellarWallet } from "@/hooks/useStellarWallet";
 import { useWalletBar } from "./WalletBar";
 import { useAgentUnread } from "./AgentUnread";
+import { useScreenBack } from "./ScreenBack";
 import { useNotifications } from "./Notifications";
 import {
+  ArrowLeftIcon,
   BellIcon,
   ChatIcon,
   CloseIcon,
   CurrencyIcon,
   DashboardIcon,
   HistoryIcon,
+  MenuIcon,
   MoneyIcon,
   QuestionIcon,
   SearchIcon,
@@ -54,6 +57,7 @@ export function AppShell({ children }: { readonly children: ReactNode }) {
   // and deliberately outlives it, so the badge still shows while the user
   // is on a different screen.
   const { count: agentUnread } = useAgentUnread();
+  const { active: backActive, goBack } = useScreenBack();
   const { unreadCount: notificationUnread } = useNotifications();
   const [collapsed, setCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -83,7 +87,7 @@ export function AppShell({ children }: { readonly children: ReactNode }) {
     // and the page can no longer grow to reveal the lower items.
     <nav
       data-lenis-prevent
-      className="flex min-h-0 flex-1 flex-col gap-[20px] overflow-y-auto overscroll-contain p-[20px]"
+      className="flex min-h-0 flex-1 flex-col gap-[20px] overflow-y-auto overscroll-contain p-[20px] max-[720px]:gap-[10px]"
     >
       {APP_SECTIONS.map(({ href, label, icon: SectionIcon }) => {
         const active = isActive(pathname, href);
@@ -96,7 +100,7 @@ export function AppShell({ children }: { readonly children: ReactNode }) {
             href={href}
             aria-current={active ? "page" : undefined}
             title={collapsed ? label : undefined}
-            className={`flex h-[63px] items-center gap-[10px] rounded-[10px] p-[20px] font-[family-name:var(--font-sora)] text-[18px] leading-[23px] text-white transition-colors hover:bg-[#242323]/70 ${
+            className={`flex h-[63px] items-center gap-[10px] rounded-[10px] p-[20px] font-[family-name:var(--font-sora)] text-[18px] leading-[23px] text-white transition-colors hover:bg-[#242323]/70 max-[720px]:h-[60px] max-[720px]:rounded-none max-[720px]:text-[16px] max-[720px]:leading-[20px] ${
               active ? "bg-[#242323]" : ""
             } ${badge ? "justify-between" : ""} ${collapsed ? "justify-center px-0" : ""}`}
           >
@@ -138,33 +142,44 @@ export function AppShell({ children }: { readonly children: ReactNode }) {
   );
 
   // The page itself never scrolls: the shell is locked to exactly the
-  // viewport (h-screen, not min-h-screen, which would grow to fit content)
-  // so the sidebar and header stay put and each screen's content scrolls
-  // inside its own panel instead.
+  // viewport (.app-shell = 100dvh, not min-height, which would grow to fit
+  // content) so the sidebar and header stay put and each screen's content
+  // scrolls inside its own panel instead. 100dvh rather than 100vh because
+  // on Android Chrome 100vh is the *toolbar-hidden* height — with the
+  // toolbar showing, the bottom of a non-scrolling shell is simply cut off
+  // and unreachable (reported on a Redmi Note 10 Pro).
   const agentRoute = isActive(pathname, "/app/agent");
 
   return (
-    <div className="flex h-screen overflow-hidden gap-[23px] bg-[#191818] px-[20px] pb-[20px] pt-[28px] max-[1100px]:gap-0 max-[1100px]:px-[12px] max-[1100px]:pt-[12px]">
+    <div className="app-shell flex overflow-hidden gap-[23px] bg-[#191818] px-[20px] pb-[20px] pt-[28px] max-[1100px]:gap-0 max-[1100px]:px-[12px] max-[1100px]:pt-[12px] max-[720px]:px-[10px] max-[720px]:pb-0 max-[720px]:pt-[20px]">
       {/* Sidebar — sticky column on desktop, slide-in drawer below 1100px. */}
       <aside
-        className={`sticky top-[28px] flex h-[calc(100vh-48px)] shrink-0 flex-col gap-[50px] self-start rounded-[20px] bg-[#1e1c1c] transition-[width] duration-300 max-[1100px]:hidden ${
+        className={`sticky top-[28px] flex h-[calc(100dvh-48px)] shrink-0 flex-col gap-[50px] self-start rounded-[20px] bg-[#1e1c1c] transition-[width] duration-300 max-[1100px]:hidden ${
           collapsed ? "w-[88px]" : "w-[264px]"
         }`}
       >
         {brand}
         {nav}
       </aside>
-      {drawerOpen && (
-        <div className="fixed inset-0 z-40 hidden max-[1100px]:block">
+      {/* Always rendered so it can transition; `is-open` drives it. */}
+      <div
+        className={`app-drawer fixed inset-0 z-40 hidden max-[1100px]:block ${
+          drawerOpen ? "is-open" : ""
+        }`}
+      >
           <button
             type="button"
             aria-label="Close menu"
             onClick={() => setDrawerOpen(false)}
             style={{ backgroundColor: "rgba(0,0,0,0.6)" }}
-            className="absolute inset-0 backdrop-blur-sm"
+            className="app-drawer-scrim absolute inset-0 backdrop-blur-sm"
+            tabIndex={drawerOpen ? undefined : -1}
           />
-          <aside className="absolute left-[12px] top-[12px] flex h-[calc(100vh-24px)] w-[264px] flex-col gap-[30px] rounded-[20px] bg-[#1e1c1c] shadow-[0_24px_48px_rgba(0,0,0,0.5)]">
-            <div className="flex h-[60px] items-center justify-between px-[20px] py-[10px]">
+          {/* Phone: the drawer is the whole screen and carries the wallet
+              button, since the header no longer has room for it. Tablet
+              keeps the narrower floating panel. */}
+          <aside className="app-drawer-panel absolute left-[12px] top-[12px] flex h-[calc(100dvh-24px)] w-[264px] flex-col gap-[30px] rounded-[20px] bg-[#1e1c1c] shadow-[0_24px_48px_rgba(0,0,0,0.5)] max-[720px]:inset-0 max-[720px]:h-full max-[720px]:w-full max-[720px]:gap-[30px] max-[720px]:rounded-none max-[720px]:py-[40px]">
+            <div className="flex h-[60px] items-center justify-between px-[20px] py-[10px] max-[720px]:h-[61px] max-[720px]:border-b max-[720px]:border-[#242323]">
               <span className="font-[family-name:var(--font-inter)] text-[24px] font-semibold leading-[29px]">
                 <span className="text-[#c9a962]">$</span>
                 <span className="text-white">ETTU</span>
@@ -179,25 +194,54 @@ export function AppShell({ children }: { readonly children: ReactNode }) {
               </button>
             </div>
             {nav}
+            <div className="hidden px-[20px] max-[720px]:block">
+              <button
+                type="button"
+                onClick={isConnected ? disconnect : connect}
+                disabled={isConnecting}
+                style={{ backgroundColor: "rgba(201,169,98,0.2)" }}
+                className="flex h-[60px] w-full items-center justify-center gap-[10px] rounded-[40px] border border-white/15 px-[16px] font-[family-name:var(--font-inter)] text-[18px] text-white disabled:opacity-60"
+              >
+                {isConnected && <span className="size-[9px] rounded-full bg-[#61c85e]" />}
+                {walletLabel}
+              </button>
+            </div>
           </aside>
-        </div>
-      )}
+      </div>
 
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-[28px] max-[1100px]:gap-[16px]">
-        <header className="flex h-[94px] items-center justify-between gap-[20px] rounded-[20px] border border-white/15 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.25)] backdrop-blur-xl bg-white/10 px-[40px] py-[20px] max-[1100px]:h-auto max-[1100px]:flex-wrap max-[1100px]:px-[20px]">
-          <div className="flex items-center gap-[14px]">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-[28px] max-[1100px]:gap-[16px] max-[720px]:gap-[12px]">
+        {/* Phone: a 70px pill carrying only the wordmark and the menu
+            button. Search, notifications and the wallet pill move inside the
+            drawer — on a 390px screen they wrapped the bar onto two rows and
+            ate the top of every screen. */}
+        <header className="flex h-[94px] items-center justify-between gap-[20px] rounded-[20px] border border-white/15 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.25)] backdrop-blur-xl bg-white/10 px-[40px] py-[20px] max-[720px]:h-[70px] max-[720px]:rounded-[40px] max-[720px]:px-[20px] max-[720px]:py-[10px]">
+          <div className="flex items-center gap-[14px] max-[720px]:hidden">
             <button
               type="button"
               onClick={() => setDrawerOpen(true)}
               aria-label="Open menu"
-              className="hidden size-[40px] items-center justify-center rounded-[10px] text-[#cfcdcd] max-[1100px]:flex"
+              className="hidden size-[40px] items-center justify-center rounded-[10px] text-[#cfcdcd] max-[1100px]:flex max-[720px]:hidden"
             >
               <SidebarIcon size={22} />
             </button>
             <h1 className="font-fraunces text-[28px] leading-[35px] text-white">{title}</h1>
           </div>
 
-          <div className="flex items-center gap-[20px] max-[720px]:gap-[10px]">
+          {/* Phone-only wordmark + menu. */}
+          <span className="hidden font-[family-name:var(--font-inter)] text-[24px] font-semibold leading-[29px] max-[720px]:inline">
+            <span className="text-[#c9a962]">$</span>
+            <span className="text-white">ETTU</span>
+          </span>
+          <button
+            type="button"
+            onClick={() => setDrawerOpen(true)}
+            aria-label="Open menu"
+            className="hidden size-[44px] items-center justify-center text-[#eeeaea] max-[720px]:flex"
+          >
+            <MenuIcon size={24} />
+          </button>
+
+          <div className="flex items-center gap-[20px] max-[720px]:hidden">
             {searchOpen ? (
               <form onSubmit={submitSearch} className="flex items-center gap-[8px]">
                 <input
@@ -269,12 +313,36 @@ export function AppShell({ children }: { readonly children: ReactNode }) {
             data-lenis-prevent: the smooth-scroll library captures wheel
             events at the window, and without this it swallows them here —
             leaving a panel that only moves by dragging its scrollbar. */}
+        {/* Phone: the screen name moves out of the pill and onto its own
+            ruled row, which is where the mobile design puts it. */}
+        <div
+          className={`hidden items-center gap-[10px] border-b border-[#252222] px-[10px] pb-[16px] pt-[10px] ${
+            agentRoute ? "" : "max-[720px]:flex"
+          }`}
+        >
+          {/* Claimed by whichever screen is mid-wizard (the offramp form's
+              bank-information step); absent otherwise. */}
+          {backActive && (
+            <button
+              type="button"
+              onClick={goBack}
+              aria-label="Back"
+              className="-my-[10px] flex size-[44px] shrink-0 items-center justify-center text-[#d5d0d0]"
+            >
+              <ArrowLeftIcon size={22} />
+            </button>
+          )}
+          <h1 className="font-[family-name:var(--font-sora)] text-[20px] leading-[30px] text-[#d5d0d0]">
+            {title}
+          </h1>
+        </div>
+
         <section
           data-lenis-prevent
           className={
             agentRoute
-              ? "flex min-h-0 min-w-0 flex-1 flex-col p-[40px] max-[1100px]:p-[20px]"
-              : "flex min-h-0 min-w-0 flex-1 flex-col gap-[30px] overflow-y-auto overscroll-contain rounded-[30px] bg-[rgba(83,79,79,0.2)] p-[40px] max-[1100px]:p-[20px]"
+              ? "flex min-h-0 min-w-0 flex-1 flex-col p-[40px] max-[1100px]:p-[20px] max-[720px]:px-0 max-[720px]:pb-[10px] max-[720px]:pt-[4px]"
+              : "flex min-h-0 min-w-0 flex-1 flex-col gap-[30px] overflow-y-auto overscroll-contain rounded-[30px] bg-[rgba(83,79,79,0.2)] p-[40px] max-[1100px]:p-[20px] max-[720px]:gap-[30px] max-[720px]:px-[20px] max-[720px]:py-[40px]"
           }
         >
           {children}

@@ -246,7 +246,7 @@ export function HelpPanel() {
             <h2 className="font-fraunces text-[22px] leading-[28px] text-white">
               Follow us
             </h2>
-            <ul className="flex flex-wrap gap-[12px]">
+            <ul className="flex flex-wrap gap-[12px] max-[720px]:flex-nowrap max-[720px]:gap-[8px]">
               {SOCIAL_LINKS.map((social) => (
                 <li key={social.label}>
                   <a
@@ -254,7 +254,7 @@ export function HelpPanel() {
                     target="_blank"
                     rel="noopener noreferrer"
                     style={{ border: "1px solid rgba(255,255,255,0.15)" }}
-                    className="flex h-[46px] items-center rounded-[40px] px-[20px] font-[family-name:var(--font-sora)] text-[15px] text-[#e6e3e3] transition-colors hover:text-[#c9a962]"
+                    className="flex h-[46px] items-center whitespace-nowrap rounded-[40px] px-[20px] font-[family-name:var(--font-sora)] text-[15px] text-[#e6e3e3] transition-colors hover:text-[#c9a962] max-[720px]:h-[40px] max-[720px]:px-[14px] max-[720px]:text-[13px]"
                   >
                     {social.label}
                   </a>

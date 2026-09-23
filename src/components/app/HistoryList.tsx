@@ -8,7 +8,10 @@ import { FunnelIcon, SearchIcon } from "./icons";
 import { useWalletHistory, type HistoryRow } from "./useWalletHistory";
 
 const STATUS_LABEL: Record<HistoryRow["status"], string> = {
-  pending: "Pending",
+  // The stored status stays "pending"; only the wording shown to the user
+  // changed — "Processing" says the transfer is moving, where "Pending"
+  // reads as though nothing has happened yet.
+  pending: "Processing",
   completed: "Completed",
   failed: "Failed",
 };
@@ -26,7 +29,9 @@ const STATUS_COLOR: Record<HistoryRow["status"], string> = {
 // and still fill whatever width there is.
 // Nudged from the design's exact ratios to fit real content: "USDC" needs
 // less room than "Coin Type" suggests, while a full date ("19 Sept 2026")
-// needs more than 133 gives it.
+// needs more than 133 gives it. Below 720px these proportions are replaced
+// by fixed pixel columns inside a horizontal scroller — see .history-grid in
+// globals.css. `fr` is kept here only as documentation of the wide layout.
 const COLUMNS = [
   { key: "coin", label: "Coin Type", fr: 125 },
   { key: "worth", label: "Worth", fr: 110 },
@@ -36,18 +41,11 @@ const COLUMNS = [
   { key: "date", label: "Date", fr: 155 },
 ] as const;
 
-const GRID = {
-  display: "grid",
-  gridTemplateColumns: COLUMNS.map((c) => `${c.fr}fr`).join(" "),
-  gap: "clamp(12px, 2.2vw, 54px)",
-  borderBottom: "1px solid #262424",
-};
-
 type StatusFilter = "all" | HistoryRow["status"];
 
 const FILTERS: readonly { readonly value: StatusFilter; readonly label: string }[] = [
   { value: "all", label: "All transactions" },
-  { value: "pending", label: "Pending" },
+  { value: "pending", label: STATUS_LABEL.pending },
   { value: "completed", label: "Completed" },
   { value: "failed", label: "Failed" },
 ];
@@ -81,6 +79,8 @@ function matches(row: HistoryRow, q: string) {
     row.fiatAmount ?? "",
     row.currency,
     STATUS_LABEL[row.status],
+    // The previous wording, so a search for "pending" still finds these.
+    row.status,
     row.txHash ?? "",
     row.orderId ?? "",
     row.accountName ?? "",
@@ -96,7 +96,7 @@ function matches(row: HistoryRow, q: string) {
 function Cell({ children, color }: { readonly children: React.ReactNode; readonly color?: string }) {
   return (
     <div style={{ color }} className="flex min-w-0 items-center p-[10px] max-[900px]:p-[4px]">
-      <span className="truncate font-[family-name:var(--font-sora)] text-[18px] leading-[23px] max-[1300px]:text-[16px] max-[900px]:text-[14px]">
+      <span className="truncate font-[family-name:var(--font-sora)] text-[18px] leading-[23px] max-[1300px]:text-[16px] max-[900px]:text-[14px] max-[720px]:text-[13px] max-[720px]:leading-[17px]">
         {children}
       </span>
     </div>
@@ -163,10 +163,10 @@ export function HistoryList({ notificationsView = false }: { readonly notificati
       )}
 
       {!notificationsView && (
-        <div className="flex flex-wrap items-center gap-[26px] max-[900px]:gap-[12px]">
+        <div className="flex flex-wrap items-center gap-[26px] max-[900px]:gap-[12px] max-[720px]:flex-nowrap max-[720px]:gap-[10px]">
           <label
             style={{ border: "1px solid #D7D6D6" }}
-            className="flex h-[70px] w-[450px] items-center gap-[6px] rounded-[20px] p-[20px] max-[900px]:h-[56px] max-[900px]:w-full"
+            className="flex h-[70px] w-[450px] items-center gap-[6px] rounded-[20px] p-[20px] max-[900px]:h-[56px] max-[900px]:w-full max-[720px]:h-[48px] max-[720px]:w-auto max-[720px]:min-w-0 max-[720px]:flex-1 max-[720px]:rounded-[14px] max-[720px]:p-[14px]"
           >
             <SearchIcon size={18} className="shrink-0 text-[#a5a2a2]" />
             <input
@@ -174,11 +174,11 @@ export function HistoryList({ notificationsView = false }: { readonly notificati
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search coin type, status etc"
               aria-label="Search transactions"
-              className="min-w-0 flex-1 bg-transparent font-[family-name:var(--font-sora)] text-[14px] leading-[18px] text-white outline-none placeholder:text-[#8d8c8c]"
+              className="min-w-0 flex-1 bg-transparent font-[family-name:var(--font-sora)] text-[14px] leading-[18px] text-white outline-none placeholder:text-[#8d8c8c] max-[720px]:text-[13px]"
             />
           </label>
 
-          <div ref={filterRef} className="relative">
+          <div ref={filterRef} className="relative shrink-0">
             {/* Inline border: globals.css has an unlayered
                 `button { background: none; border: 0 }` reset that beats
                 Tailwind's border and background utilities here. */}
@@ -188,7 +188,7 @@ export function HistoryList({ notificationsView = false }: { readonly notificati
               aria-expanded={filterOpen}
               aria-haspopup="listbox"
               style={{ border: "1px solid #D7D6D6" }}
-              className="flex h-[70px] min-w-[125px] items-center gap-[6px] rounded-[20px] p-[20px] font-[family-name:var(--font-sora)] text-[14px] leading-[18px] text-[#8d8c8c] max-[900px]:h-[56px]"
+              className="flex h-[70px] min-w-[125px] items-center gap-[6px] rounded-[20px] p-[20px] font-[family-name:var(--font-sora)] text-[14px] leading-[18px] text-[#8d8c8c] max-[900px]:h-[56px] max-[720px]:h-[48px] max-[720px]:min-w-[100px] max-[720px]:rounded-[14px] max-[720px]:p-[14px] max-[720px]:text-[13px]"
             >
               <FunnelIcon size={18} className="shrink-0 text-[#a5a2a2]" />
               {status === "all" ? "Filter" : STATUS_LABEL[status]}
@@ -196,7 +196,7 @@ export function HistoryList({ notificationsView = false }: { readonly notificati
             {filterOpen && (
               <ul
                 role="listbox"
-                className="absolute left-0 top-[78px] z-20 flex w-[200px] flex-col overflow-hidden rounded-[16px] border border-white/15 bg-[#242323] py-[6px] shadow-[0_18px_36px_rgba(0,0,0,0.5)]"
+                className="absolute left-0 top-[78px] z-20 flex w-[200px] flex-col overflow-hidden rounded-[16px] border border-white/15 bg-[#242323] py-[6px] shadow-[0_18px_36px_rgba(0,0,0,0.5)] max-[720px]:left-auto max-[720px]:right-0 max-[720px]:top-[56px] max-[720px]:w-[180px]"
               >
                 {FILTERS.map((option) => (
                   <li key={option.value}>
@@ -229,18 +229,24 @@ export function HistoryList({ notificationsView = false }: { readonly notificati
         </p>
       ) : (
         <>
-          {/* Wide: the six-column table. */}
-          <div className="flex min-w-0 flex-col max-[900px]:hidden">
-            <div style={GRID} className="items-center pb-[20px]">
+          {/* One table at every width. Below 720px it stops sharing the
+              panel's width and becomes wider than the screen, so this
+              wrapper scrolls it sideways — header and rows together, since
+              they're both inside it. */}
+          <div className="history-scroll flex min-w-0 flex-col overflow-x-auto overscroll-x-contain max-[720px]:pb-[14px]">
+            <div className="history-grid items-center pb-[20px] max-[720px]:pb-[12px]">
               {COLUMNS.map((column) => (
                 <Cell key={column.key} color="#A19D9D">
                   {column.label}
                 </Cell>
               ))}
             </div>
-            <div className="flex flex-col gap-[10px]">
+            <div className="flex flex-col gap-[10px] max-[720px]:gap-0">
               {visible.map((row) => (
-                <div key={row.id} style={GRID} className="items-center pb-[20px]">
+                <div
+                  key={row.id}
+                  className="history-grid items-center pb-[20px] max-[720px]:py-[14px] max-[720px]:pb-[14px]"
+                >
                   <Cell color="#FFFFFF">USDC</Cell>
                   <Cell color="#FFFFFF">{fmtUsdc(row.usdc)}</Cell>
                   <Cell color="#FFFFFF">{fmtRate(row)}</Cell>
@@ -251,40 +257,6 @@ export function HistoryList({ notificationsView = false }: { readonly notificati
               ))}
             </div>
           </div>
-
-          {/* Narrow: six columns can't stay legible, so each transaction
-              becomes a stacked card carrying the same six fields. */}
-          <ul className="hidden flex-col gap-[12px] max-[900px]:flex">
-            {visible.map((row) => (
-              <li
-                key={row.id}
-                className="flex flex-col gap-[10px] rounded-[20px] bg-[rgba(127,125,125,0.1)] p-[18px]"
-              >
-                <div className="flex items-baseline justify-between gap-[10px]">
-                  <span className="font-[family-name:var(--font-sora)] text-[17px] text-white">
-                    {fmtUsdc(row.usdc)} USDC
-                  </span>
-                  <span
-                    style={{ color: STATUS_COLOR[row.status] }}
-                    className="font-[family-name:var(--font-sora)] text-[15px]"
-                  >
-                    {STATUS_LABEL[row.status]}
-                  </span>
-                </div>
-                <div className="flex items-baseline justify-between gap-[10px]">
-                  <span className="font-[family-name:var(--font-sora)] text-[15px] text-[#d6d3d3]">
-                    {fmtAmount(row)}
-                  </span>
-                  <span className="font-[family-name:var(--font-sora)] text-[13px] text-[#a19d9d]">
-                    {fmtRate(row)}
-                  </span>
-                </div>
-                <span className="font-[family-name:var(--font-sora)] text-[13px] text-[#a19d9d]">
-                  {fmtDate(row.timestamp)}
-                </span>
-              </li>
-            ))}
-          </ul>
         </>
       )}
     </div>

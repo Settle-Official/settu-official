@@ -1,7 +1,8 @@
 "use client";
 
 import type { OfframpStep } from "@/components/TransactionProgressModal";
-import { ArrowRightIcon, CheckIcon, CloseIcon } from "./icons";
+import { CheckIcon, CloseIcon } from "./icons";
+import { ResultCard } from "./ResultCard";
 
 const STEP_KEYS: OfframpStep[] = [
   "initiating",
@@ -65,54 +66,32 @@ export function OfframpStatusPanel({
 
   if (isSuccess || isError) {
     return (
-      <div className="flex flex-col items-center gap-[50px] py-[60px]">
-        <div className="flex w-[414px] max-w-full flex-col items-center gap-[24px] rounded-[20px] bg-[#232222] px-[30px] py-[40px] text-center">
-          <span
-            className={`flex size-[82px] items-center justify-center rounded-full ${
-              isSuccess ? "bg-[#2fb457]" : "bg-[#b23a3e]"
-            }`}
-          >
-            {isSuccess ? (
-              <CheckIcon size={40} strokeWidth={2.4} className="text-white" />
-            ) : (
-              <CloseIcon size={36} strokeWidth={2.4} className="text-white" />
-            )}
-          </span>
-          <div className="flex flex-col gap-[12px]">
-            <h2 className="font-fraunces text-[26px] leading-[32px] text-white">
-              {isSuccess
-                ? `Done — ${receipt?.fiat ?? "your money"} is on its way`
-                : "Oops! Transaction failed"}
-            </h2>
-            <p className="font-[family-name:var(--font-sora)] text-[18px] leading-[28px] text-[#e6e2e2]">
-              {isSuccess
-                ? receipt
-                  ? `Sent to ${receipt.bankName} •••• ${receipt.accountNumber.slice(-3)}. It usually lands within minutes.`
-                  : "It usually lands within minutes."
-                : error ||
-                  "The transaction was cancelled during the initiating process"}
-            </p>
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={isSuccess ? onViewTransaction : onClose}
-          // Inline border: globals.css's unlayered `button { border: 0 }` reset
-          // beats any layered border-* utility.
-          style={{ border: "1px solid rgba(255,255,255,0.6)" }}
-          className="flex h-[64px] w-[396px] max-w-full items-center justify-center gap-[10px] rounded-[40px] font-[family-name:var(--font-sora)] text-[18px] text-white transition-[filter] hover:brightness-125 hover:[background-color:rgba(255,255,255,0.06)]"
-        >
-          {isSuccess ? "View Transaction" : "Try again"}
-          <ArrowRightIcon size={20} />
-        </button>
-      </div>
+      <ResultCard
+        // Always inside FlowModal now, which supplies the surrounding space.
+        compact
+        kind={isSuccess ? "success" : "failed"}
+        title={
+          isSuccess
+            ? `Done! ${receipt?.fiat ?? "your money"} is on its way`
+            : "Oops! Transaction failed"
+        }
+        body={
+          isSuccess
+            ? receipt
+              ? `Sent to ${receipt.bankName} •••• ${receipt.accountNumber.slice(-3)}. It usually lands within minutes.`
+              : "It usually lands within minutes."
+            : error || "The transaction was cancelled during the initiating process"
+        }
+        actionLabel={isSuccess ? "View transaction" : "Try again"}
+        onAction={isSuccess ? onViewTransaction : onClose}
+      />
     );
   }
 
   return (
-    <div className="flex flex-col items-center gap-[50px] py-[60px]">
-      <div className="flex w-[398px] max-w-full flex-col gap-[28px] rounded-[20px] bg-[#232222] px-[24px] py-[28px]">
-        <h2 className="font-[family-name:var(--font-sora)] text-[18px] leading-[23px] text-white">
+    <div className="flex flex-col items-center gap-[28px] py-[4px] max-[720px]:gap-[22px] max-[720px]:py-0">
+      <div className="flex w-[398px] max-w-full flex-col gap-[28px] rounded-[20px] bg-[#232222] px-[24px] py-[28px] max-[720px]:gap-[22px] max-[720px]:rounded-[14px] max-[720px]:px-[20px] max-[720px]:py-[24px]">
+        <h2 className="font-[family-name:var(--font-sora)] text-[18px] leading-[23px] text-white max-[720px]:text-[16px] max-[720px]:leading-[20px]">
           Processing Offramp
         </h2>
         <ol className="flex flex-col">
@@ -139,7 +118,7 @@ export function OfframpStatusPanel({
                   )}
                 </div>
                 <span
-                  className={`pb-[26px] font-[family-name:var(--font-sora)] text-[15px] leading-[24px] ${
+                  className={`pb-[26px] font-[family-name:var(--font-sora)] text-[15px] leading-[24px] max-[720px]:pb-[22px] max-[720px]:text-[14px] ${
                     done
                       ? "text-[#c9a962]"
                       : current
@@ -159,7 +138,7 @@ export function OfframpStatusPanel({
           type="button"
           onClick={onCancel}
           style={{ border: "1px solid rgba(255,255,255,0.6)" }}
-          className="flex h-[64px] w-[396px] max-w-full items-center justify-center gap-[8px] rounded-[40px] font-[family-name:var(--font-sora)] text-[18px] text-[#e07a7e] transition-[filter] hover:brightness-125 hover:[background-color:rgba(255,255,255,0.06)]"
+          className="flex h-[64px] w-[396px] max-w-full items-center justify-center gap-[8px] rounded-[40px] font-[family-name:var(--font-sora)] text-[18px] text-[#e07a7e] transition-[filter] hover:brightness-125 hover:[background-color:rgba(255,255,255,0.06)] max-[720px]:h-[58px] max-[720px]:w-full max-[720px]:text-[16px]"
         >
           Cancel
           <CloseIcon size={16} />
