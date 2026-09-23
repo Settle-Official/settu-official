@@ -114,16 +114,25 @@ export function buildWhatsAppUrl(input: SupportReport): string {
 }
 
 /**
- * Opens the user's mail client with the same report addressed to support.
+ * Opens Gmail's web composer with the report addressed to support.
  *
- * mailto rather than sending from the server because this app has no mail
- * provider configured — no credentials, no client library. Sending server
- * side would mean adding one, which is a deployment change rather than a UI
- * one.
+ * Gmail's compose URL rather than `mailto:`, which hands off to whatever the
+ * machine has registered as its mail handler — often something the user
+ * doesn't actually read.
+ *
+ * Client-side rather than sending from the server because this app has no
+ * mail provider configured: no credentials, no client library. Sending
+ * server side would mean adding one, which is a deployment change rather
+ * than a UI one.
  */
-export function buildMailtoUrl(input: SupportReport): string {
+export function buildEmailComposeUrl(input: SupportReport): string {
   const subject = `Settu support — ${categoryLabel(input.category)}`;
-  return `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(
-    subject,
-  )}&body=${encodeURIComponent(reportBody(input))}`;
+  const params = new URLSearchParams({
+    view: "cm",
+    fs: "1",
+    to: SUPPORT_EMAIL,
+    su: subject,
+    body: reportBody(input),
+  });
+  return `https://mail.google.com/mail/?${params.toString()}`;
 }

@@ -3,7 +3,7 @@
 import { useState, type FormEvent } from "react";
 import { useStellarWallet } from "@/hooks/useStellarWallet";
 import {
-  buildMailtoUrl,
+  buildEmailComposeUrl,
   buildWhatsAppUrl,
   PHONE_LINES,
   REPORT_CATEGORIES,
@@ -53,9 +53,9 @@ export function HelpPanel() {
       debitedWallet,
       walletAddress: wallet?.publicKey,
     };
-    const url = via === "whatsapp" ? buildWhatsAppUrl(report) : buildMailtoUrl(report);
-    // New tab, not a redirect: this hands off to WhatsApp or a mail client,
-    // and losing the page you were reporting about would be a poor trade.
+    const url = via === "whatsapp" ? buildWhatsAppUrl(report) : buildEmailComposeUrl(report);
+    // New tab, not a redirect: this hands off to WhatsApp or Gmail, and
+    // losing the page you were reporting about would be a poor trade.
     window.open(url, "_blank", "noopener,noreferrer");
     setSentVia(via);
   };
@@ -194,7 +194,7 @@ export function HelpPanel() {
             >
               {sentVia === "whatsapp"
                 ? "WhatsApp should have opened with your message ready to send."
-                : `Your mail app should have opened with a message to ${SUPPORT_EMAIL}.`}{" "}
+                : `Gmail should have opened with a message to ${SUPPORT_EMAIL}.`}{" "}
               If it didn&apos;t, check for a blocked popup, or reach us directly
               using the details alongside.
             </p>
