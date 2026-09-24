@@ -162,10 +162,10 @@ export function AppShell({ children }: { readonly children: ReactNode }) {
   const agentRoute = isActive(pathname, "/app/agent");
 
   return (
-    <div className="app-shell flex overflow-hidden gap-[23px] bg-[#191818] px-[20px] pb-[20px] pt-[28px] max-[1100px]:gap-0 max-[1100px]:px-[12px] max-[1100px]:pt-[12px] max-[720px]:px-[10px] max-[720px]:pb-0 max-[720px]:pt-[20px]">
+    <div className="app-shell flex overflow-hidden gap-[23px] bg-[#191818] px-[20px] pb-[20px] max-[1100px]:gap-0 max-[1100px]:px-[12px] max-[720px]:px-[10px] max-[720px]:pb-0">
       {/* Sidebar — sticky column on desktop, slide-in drawer below 1100px. */}
       <aside
-        className={`sticky top-[28px] flex h-[calc(100dvh-48px)] shrink-0 flex-col gap-[50px] self-start rounded-[20px] bg-[#1e1c1c] transition-[width] duration-300 max-[1100px]:hidden ${
+        className={`app-sidebar sticky flex shrink-0 flex-col gap-[50px] self-start rounded-[20px] bg-[#1e1c1c] transition-[width] duration-300 max-[1100px]:hidden ${
           collapsed ? "w-[88px]" : "w-[264px]"
         }`}
       >
