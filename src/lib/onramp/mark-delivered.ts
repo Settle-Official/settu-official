@@ -10,6 +10,7 @@ import {
   updateOnrampOrder,
   removePendingBridge,
   claimOnrampDeliveryRecording,
+  indexOnrampDelivered,
 } from "./onramp-store";
 import { notify } from "@/lib/notify/telegram";
 import { pushRecentTransaction, addVolume } from "@/lib/stats-store";
@@ -32,6 +33,10 @@ export async function markOnrampDelivered(
     stellarTxHash: opts.stellarTxHash,
   });
   await removePendingBridge(orderId);
+  // Permanent record for the landing page's transfer count. Idempotent (a
+  // sorted set keyed by order id), so it sits ahead of the claim guard and
+  // still lands if an earlier attempt took the claim and then failed.
+  await indexOnrampDelivered(orderId, Date.now());
 
   // Everything below is side effects that must fire exactly once per delivery.
   if (!(await claimOnrampDeliveryRecording(orderId))) return;

@@ -7,6 +7,7 @@ import {
   disconnectWallet,
   onWalletStateChange,
   hasStoredWalletSession,
+  peekStoredWallet,
   signTransaction as signWithWallet,
   type StellarWallet,
 } from "@/lib/stellar/wallet-adapter";
@@ -34,16 +35,24 @@ export function useStellarWallet() {
     // otherwise defer it to the Connect click so a first-time visitor doesn't
     // pay to download every wallet module before they've asked for one.
     if (hasStoredWalletSession()) {
+      // Show the stored session straight away so navigating between pages
+      // (landing → /app) doesn't flash "connect" while the kit's dynamic
+      // import loads; the restore below then confirms it, or clears it if
+      // the stored session can no longer sign.
+      const peeked = peekStoredWallet();
+      if (peeked) setWallet(peeked);
+
       (async () => {
         // Subscribe before restoring: the kit emits current state on
         // subscribe, so the other order lets that initial (still empty) event
         // clobber the session we just restored.
         await subscribe();
         const restored = await restoreWallet();
-        if (!cancelled && restored) setWallet(restored);
-      })().catch(() => {
+        if (!cancelled) setWallet(restored);
+      })().catch((err) => {
         // Kit failed to initialize — leave the UI disconnected rather than
         // blocking render; connect() surfaces the real error on click.
+        console.warn("[wallet] session restore failed", err);
       });
     }
 

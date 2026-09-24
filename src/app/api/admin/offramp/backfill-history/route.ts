@@ -1,10 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isAuthorisedAdmin } from "@/lib/admin/auth";
 import { getOrderMeta } from "@/lib/offramp/order-meta-store";
+import { recordTransaction } from "@/lib/offramp/transaction-history";
+import type { OfframpSourceChain } from "@/lib/offramp/transaction-history";
 import { getPayoutStatus } from "@/lib/offramp/payout-store";
+import { listOrderMetaIds } from "@/lib/offramp/order-meta-store";
 import { reconcilePayoutOrder } from "@/lib/offramp/settlement";
+import { findBurn } from "@/lib/offramp/burn-backstop";
 import {
   indexExistingOrder,
   listAllPaged,
+  listByAddress,
   updateTransactionByOrderId,
 } from "@/lib/offramp/transaction-history";
 
@@ -30,16 +36,14 @@ const LOST = new Set(["refunded", "expired"]);
  * Safe to run repeatedly — it only writes when the payout store disagrees
  * with the record, and it never moves a record back to pending.
  *
- * Auth: `Authorization: Bearer $ADMIN_API_SECRET` (required in production).
+ * Auth: `Authorization: Bearer $ADMIN_API_SECRET` or an admin console
+ * session. Fails closed — refused when ADMIN_API_SECRET is unset.
  * Paged via `?offset=&limit=` so a large store can be walked in chunks;
  * `?dryRun=1` reports what would change without writing.
  */
 export async function POST(request: NextRequest) {
-  const secret = process.env.ADMIN_API_SECRET;
-  if (secret) {
-    if (request.headers.get("authorization") !== `Bearer ${secret}`) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+  if (!isAuthorisedAdmin(request)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const url = new URL(request.url);
@@ -64,6 +68,9 @@ export async function POST(request: NextRequest) {
   // Records left with destinationAmount "0" because their order meta had
   // already expired — History can never show an amount for these.
   let amountUnrecoverable = 0;
+  // Orders that settled but have no permanent record at all — invisible in
+  // the user's History and never notified.
+  const created: string[] = [];
 
   for (const record of records) {
     const orderId = record.paycrestOrderId;
@@ -132,9 +139,51 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // Second pass: records that were never written, rather than written wrong.
+  // Attribution can fail at registration (slow Horizon, no client-supplied
+  // address), and the write is fire-and-forget, so a transfer can settle
+  // with nothing recorded. Those never appear in the loop above because it
+  // walks existing records.
+  for (const orderId of await listOrderMetaIds()) {
+    const meta = await getOrderMeta(orderId);
+    if (!meta?.senderAddress || meta.amountUsdc == null) continue;
+
+    const existing = await listByAddress(meta.senderAddress, { limit: 100 });
+    if (existing.some((r) => r.paycrestOrderId === orderId)) continue;
+
+    const payout = await getPayoutStatus(orderId);
+    const status = payout?.status;
+    if (!status || (!PAID.has(status) && !LOST.has(status))) continue;
+
+    // The record is keyed by the BURN hash, so it has to be found on-chain.
+    // payout.txHash is the settlement transaction on the destination side,
+    // not the burn — using it would write a record under an id that matches
+    // nothing, which is worse than having no record at all.
+    const found = await findBurn(meta).catch(() => null);
+    if (!found) continue;
+    const burnTxHash = found.burnTxHash;
+
+    created.push(orderId);
+    if (!dryRun) {
+      await recordTransaction({
+        id: burnTxHash,
+        sourceChain: (meta.sourceChain || "stellar") as OfframpSourceChain,
+        connectedAddress: meta.senderAddress,
+        amountUsdc: String(meta.amountUsdc),
+        burnTxHash,
+        destinationCurrency: meta.currency || "NGN",
+        destinationAmount: meta.payoutValue != null ? String(meta.payoutValue) : "0",
+        paycrestOrderId: orderId,
+        status: PAID.has(status) ? "completed" : "failed",
+      });
+    }
+  }
+
   return NextResponse.json({
     dryRun,
     live: useLive,
+    createdMissingRecords: created.length,
+    created,
     offset,
     limit,
     scanned: records.length,

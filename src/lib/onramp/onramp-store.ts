@@ -50,6 +50,12 @@ export interface OnrampRecord {
 // reaches a terminal state.
 const PENDING_BRIDGES_KEY = "onramp:pending-bridges";
 
+// Every delivered onramp, permanently: orderId scored by delivery time.
+// The per-order records expire after TTL_SECONDS, so they can't answer
+// "how many onramps have ever completed" — this can. A sorted set keyed by
+// order id, so recording the same delivery twice is a no-op.
+const DELIVERED_INDEX_KEY = "onramp:delivered";
+
 // Lifecycle ordering — prevents a retried/out-of-order event from regressing a
 // record. Bridge states rank above Paycrest's `settled` since they come after.
 const STATUS_RANK: Record<OnrampStatus, number> = {
@@ -77,6 +83,14 @@ const TERMINAL: ReadonlySet<OnrampStatus> = new Set([
 // resolution, after which it can move to delivered or refunded.
 export function isTerminal(status: OnrampStatus): boolean {
   return TERMINAL.has(status);
+}
+
+export async function indexOnrampDelivered(orderId: string, at: number): Promise<void> {
+  await redis.zadd(DELIVERED_INDEX_KEY, { score: at, member: orderId });
+}
+
+export async function countOnrampDelivered(): Promise<number> {
+  return (await redis.zcard(DELIVERED_INDEX_KEY)) ?? 0;
 }
 
 export async function getOnrampOrder(

@@ -1,0 +1,61 @@
+<svg preserveAspectRatio="none" overflow="visible" style="display: block;" width="1429" height="1013" viewBox="0 0 1429 1013" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="Group 17">
+<mask id="mask0_0_34" style="mask-type:alpha" maskUnits="userSpaceOnUse" x="0" y="0" width="1429" height="1013">
+<g id="Frame" clip-path="url(#clip0_0_34)">
+<g id="Clip path group">
+<mask id="mask1_0_34" style="mask-type:luminance" maskUnits="userSpaceOnUse" x="0" y="0" width="1429" height="1013">
+<g id="clip0_630_631">
+<path id="Vector" d="M1429 0H0V1013H1429V0Z" fill="white"/>
+</g>
+</mask>
+<g mask="url(#mask1_0_34)">
+<g id="Group">
+<path id="Vector_2" d="M12 52.5H1429" stroke="#E8E8E8"/>
+<path id="Vector_3" d="M12 132.5H1429" stroke="#E8E8E8"/>
+<path id="Vector_4" d="M12 212.5H1429" stroke="#E8E8E8"/>
+<path id="Vector_5" d="M12 292.5H1429" stroke="#E8E8E8"/>
+<path id="Vector_6" d="M12 372.5H1429" stroke="#E8E8E8"/>
+<path id="Vector_7" d="M12 452.5H1429" stroke="#E8E8E8"/>
+<path id="Vector_8" d="M12 532.5H1429" stroke="#E8E8E8"/>
+<path id="Vector_9" d="M12 612.5H1429" stroke="#E8E8E8"/>
+<path id="Vector_10" d="M12 692.5H1429" stroke="#E8E8E8"/>
+<path id="Vector_11" d="M12 772.5H1429" stroke="#E8E8E8"/>
+<path id="Vector_12" d="M12 852.5H1429" stroke="#E8E8E8"/>
+<path id="Vector_13" d="M12 932.5H1429" stroke="#E8E8E8"/>
+<path id="Vector_14" d="M12 1012.5H1429" stroke="#E8E8E8"/>
+<path id="Vector_15" d="M96.5 -44V1013" stroke="white"/>
+<path id="Vector_16" d="M198.5 -44V1013" stroke="white"/>
+<path id="Vector_17" d="M300.5 -44V1013" stroke="white"/>
+<path id="Vector_18" d="M402.5 -44V1013" stroke="white"/>
+<path id="Vector_19" d="M504.5 -44V1013" stroke="white"/>
+<path id="Vector_20" d="M606.5 -44V1013" stroke="white"/>
+<path id="Vector_21" d="M708.5 -44V1013" stroke="white"/>
+<path id="Vector_22" d="M810.5 -44V1013" stroke="white"/>
+<path id="Vector_23" d="M912.501 -44V1013" stroke="white"/>
+<path id="Vector_24" d="M1014.5 -44V1013" stroke="white"/>
+<path id="Vector_25" d="M1116.5 -44V1013" stroke="white"/>
+<path id="Vector_26" d="M1218.5 -44V1013" stroke="white"/>
+<path id="Vector_27" d="M1320.5 -44V1013" stroke="white"/>
+<path id="Vector_28" d="M1422.5 -44V1013" stroke="white"/>
+</g>
+</g>
+</g>
+</g>
+</mask>
+<g mask="url(#mask0_0_34)">
+<g id="Ellipse 24" filter="url(#filter0_f_0_34)">
+<ellipse cx="1012" cy="168.721" rx="147" ry="113.695" fill="#D9D9D9"/>
+</g>
+</g>
+</g>
+<defs>
+<filter id="filter0_f_0_34" x="715" y="-94.9739" width="594" height="527.391" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+<feFlood flood-opacity="0" result="BackgroundImageFix"/>
+<feBlend mode="normal" in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
+<feGaussianBlur stdDeviation="75" result="effect1_foregroundBlur_0_34"/>
+</filter>
+<clipPath id="clip0_0_34">
+<rect width="1429" height="1013" fill="white"/>
+</clipPath>
+</defs>
+</svg>

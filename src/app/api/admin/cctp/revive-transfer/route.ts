@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isAuthorisedAdmin } from "@/lib/admin/auth";
 import { reviveStuckTransfer } from "@/lib/cctp/revive";
 
 export const runtime = "nodejs";
@@ -12,15 +13,12 @@ export const maxDuration = 45;
  * `orderId` (from the original bridge_failed alert) to also un-stick the
  * owning order so the SSE stream can pick it back up.
  *
- * Auth: `Authorization: Bearer $ADMIN_API_SECRET`. Required in production.
+ * Auth: `Authorization: Bearer $ADMIN_API_SECRET` or an admin console
+ * session. Fails closed — refused when ADMIN_API_SECRET is unset.
  */
 export async function POST(request: NextRequest) {
-  const secret = process.env.ADMIN_API_SECRET;
-  if (secret) {
-    const auth = request.headers.get("authorization");
-    if (auth !== `Bearer ${secret}`) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+  if (!isAuthorisedAdmin(request)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const body = await request.json().catch(() => ({}));

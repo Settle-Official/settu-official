@@ -1,19 +1,8 @@
 import type { Metadata, Viewport } from "next";
-import { IBM_Plex_Mono, Space_Grotesk } from "next/font/google";
+import { IBM_Plex_Mono, Sora, Space_Grotesk } from "next/font/google";
 import "./globals.css";
-import { ThemeToggle, THEME_STORAGE_KEY } from "@/components/ThemeToggle";
-
-// Runs before first paint so a returning light-mode user never sees a
-// flash of the dark theme while React hydrates. Reads localStorage
-// directly (not via ThemeToggle's own effect, which runs too late for this)
-// — synchronous and tiny, the same pattern this file already uses for the
-// dev-only service-worker cleanup script below.
-const THEME_INIT_SCRIPT = `
-try {
-  var t = localStorage.getItem(${JSON.stringify(THEME_STORAGE_KEY)});
-  if (t === "light") document.documentElement.setAttribute("data-theme", "light");
-} catch (e) {}
-`;
+import "lenis/dist/lenis.css";
+import { SmoothScroll } from "@/components/SmoothScroll";
 
 const ibmPlexMono = IBM_Plex_Mono({
   subsets: ["latin"],
@@ -30,6 +19,17 @@ const spaceGrotesk = Space_Grotesk({
   variable: "--font-space-grotesk",
 });
 
+// Same config as the /app layout's Sora so next/font shares one file. It's
+// also needed here for the wallet picker modal: it mounts on <body>, outside
+// the /app layout div, and the kit writes its --swk-font-family onto <html>,
+// so --font-sora has to be defined on <html> for that var() to resolve.
+const sora = Sora({
+  subsets: ["latin"],
+  weight: ["400", "500", "600"],
+  variable: "--font-sora",
+  display: "swap",
+});
+
 export const metadata: Metadata = {
   title: "Settu - Swift & Seamless",
   description: "Wallet-first Web3 offramp flow for Stellar Blockchain",
@@ -39,28 +39,27 @@ export const metadata: Metadata = {
     statusBarStyle: "black-translucent",
     title: "Settu",
   },
-  icons: {
-    apple: "/icons/icon-192.png",
-  },
+  // Favicons and the Apple touch icon come from Next's file conventions:
+  // app/favicon.ico, app/icon.svg and app/apple-icon.png.
 };
 
 export const viewport: Viewport = {
   themeColor: "#C9A962",
+  // Required for env(safe-area-inset-*) to report anything but 0 — the app
+  // shell sits flush to the bottom edge on phones.
+  viewportFit: "cover",
 };
 
 export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en">
-      <head>
-        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
-      </head>
+    <html lang="en" className={sora.variable}>
       <body
         className={`${ibmPlexMono.className} ${ibmPlexMono.variable} ${spaceGrotesk.variable}`}
       >
         {children}
-        <ThemeToggle />
+        <SmoothScroll />
         <script
           dangerouslySetInnerHTML={{
             // Production only. Dev rebuilds change chunk filenames constantly,

@@ -13,7 +13,7 @@
 // so iOS evicting the backgrounded tab while the user approved in their wallet
 // dropped the connection on return.
 
-import type { ModuleInterface } from "@creit.tech/stellar-wallets-kit";
+import type { ModuleInterface, SwkAppTheme } from "@creit.tech/stellar-wallets-kit";
 import { isMobileBrowser } from "@/lib/platform";
 import { warmSharedAppKit } from "@/lib/wallet/appkit";
 import {
@@ -44,6 +44,58 @@ let walletConnectModuleRef: ModuleInterface | null = null;
 
 // Set when mobile paired through our own SignClient instead of the kit.
 let directSession: { address: string; topic: string } | null = null;
+
+/**
+ * The kit's picker modal on desktop, restyled to the rebuilt /app: the same
+ * warm charcoal cards, 20px corners, Sora face and gold accent as the
+ * dashboard surfaces. The kit copies each value onto `--swk-*` custom
+ * properties on <html>. The Settu logo above the title is added in
+ * globals.css, scoped by the `data-swk-skin` flag set in initKit.
+ */
+const KIT_THEME: SwkAppTheme = {
+  "background": "#1e1c1c",
+  "background-secondary": "#242323",
+  "foreground-strong": "#ffffff",
+  "foreground": "#e6e3e3",
+  "foreground-secondary": "#a19d9d",
+  "primary": "#c9a962",
+  "primary-foreground": "#1a1a1a",
+  "transparent": "rgba(0, 0, 0, 0)",
+  "lighter": "#2b2a2a",
+  "light": "#242323",
+  "light-gray": "rgba(201, 169, 98, 0.6)",
+  "gray": "#c9a962",
+  "danger": "#e07a7e",
+  "border": "rgba(255, 255, 255, 0.12)",
+  "shadow": "0 0 0 1px rgba(255, 255, 255, 0.08), 0 24px 48px rgba(0, 0, 0, 0.5)",
+  "border-radius": "20px",
+  "font-family": "var(--font-sora), Sora, system-ui, -apple-system, sans-serif",
+};
+
+/**
+ * Mobile keeps the picker's original styling on purpose: pointing the kit
+ * at globals.css tokens, square corners and the mono face.
+ */
+const MOBILE_KIT_THEME: SwkAppTheme = {
+  "background": "var(--surface)",
+  "background-secondary": "var(--bg)",
+  "foreground-strong": "var(--foreground)",
+  "foreground": "var(--foreground)",
+  "foreground-secondary": "var(--muted)",
+  "primary": "var(--accent)",
+  "primary-foreground": "var(--accent-contrast)",
+  "transparent": "rgba(0, 0, 0, 0)",
+  "lighter": "var(--surface-3)",
+  "light": "var(--bg-highlight)",
+  "light-gray": "var(--accent)",
+  "gray": "var(--accent-bright)",
+  "danger": "#e5484d",
+  "border": "var(--line)",
+  "shadow": "0 0 0 1px var(--line), 0 24px 48px rgba(0, 0, 0, 0.45)",
+  "border-radius": "0",
+  "font-family":
+    "var(--font-ibm-plex-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+};
 
 
 /**
@@ -156,7 +208,13 @@ async function initKit(): Promise<Kit> {
     if (walletConnectModule) modules.push(walletConnectModule);
   }
 
-  StellarWalletsKit.init({ modules, network: Networks.PUBLIC });
+  const mobile = isMobileBrowser();
+  if (!mobile) document.documentElement.dataset.swkSkin = "settu";
+  StellarWalletsKit.init({
+    modules,
+    network: Networks.PUBLIC,
+    theme: mobile ? MOBILE_KIT_THEME : KIT_THEME,
+  });
   return StellarWalletsKit;
 }
 
@@ -303,6 +361,26 @@ export function hasStoredWalletSession(): boolean {
   } catch {
     // localStorage blocked (Safari private mode) — nothing to restore.
     return false;
+  }
+}
+
+/**
+ * The persisted session as the kit wrote it, read synchronously — no kit
+ * import, no wallet prompt. Lets the UI show the connected state the instant
+ * a page mounts (e.g. landing → /app) instead of after the kit's large
+ * dynamic import lands; restoreWallet() then confirms or clears it. Key names
+ * are the kit's LocalStorageKeys, spelled out because importing them would
+ * pull the whole kit in at module scope.
+ */
+export function peekStoredWallet(): StellarWallet | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const publicKey = window.localStorage.getItem("@StellarWalletsKit/activeAddress");
+    const type = window.localStorage.getItem("@StellarWalletsKit/selectedModuleId");
+    if (!publicKey || !type) return null;
+    return { type, publicKey, isConnected: true };
+  } catch {
+    return null;
   }
 }
 

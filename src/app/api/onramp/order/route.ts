@@ -94,6 +94,18 @@ export async function POST(request: NextRequest) {
       ...(rate ? { rate } : {}),
     });
 
+    // The rate is what lets the caller record how much USDC this order buys.
+    // Paycrest does not always echo one back, and a caller (Agent Mode) may
+    // not have sent one, so fall back to the public rate for this corridor —
+    // best-effort: a missing rate costs a history figure, never the order.
+    let resolvedRate = order.rate ?? (rate ? String(rate) : undefined);
+    if (!resolvedRate) {
+      resolvedRate = await paycrest
+        .getRate("USDC", "1", currency)
+        .then((r) => String(r))
+        .catch(() => undefined);
+    }
+
     // Guaranteed per-transaction alert — fires even if webhooks aren't wired up.
     void alertRampEvent({
       direction: "onramp",
@@ -115,6 +127,14 @@ export async function POST(request: NextRequest) {
         id: order.id,
         status: order.status,
         providerAccount: order.providerAccount,
+        // Both are needed by the caller to record how much USDC the order
+        // actually buys. Without them the client stored an empty amount,
+        // which read back as 0 — the dashboard's Onramp tile sat at $0 and
+        // the history row showed no Worth and no Rate.
+        // Paycrest's `amount` on an amountIn:"fiat" order is the *crypto*
+        // figure, so it is the authoritative USDC amount when present.
+        ...(order.amount ? { usdcAmount: order.amount } : {}),
+        ...(resolvedRate ? { rate: resolvedRate } : {}),
       },
     });
   } catch (error: any) {

@@ -1,187 +1,184 @@
-# Settle
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="public/brand/settu-logo.svg">
+    <source media="(prefers-color-scheme: light)" srcset="public/brand/settu-logo-light.svg">
+    <img src="public/brand/settu-logo.svg" alt="Settu" width="360">
+  </picture>
+</p>
 
-Settle is a Next.js app that bridges fiat and **Stellar USDC** in both directions:
+<h3 align="center">Settu stablecoins and fiat, seamlessly.</h3>
 
-- **Offramp** — Stellar USDC → Base (via Allbridge) → fiat payout (via Paycrest)
-- **Onramp** — fiat (via Paycrest) → custodial Base hot wallet → Stellar USDC (via Allbridge), delivered to the user's Stellar address
+<p align="center">
+  Stablecoins in, cash out, in minutes. No P2P traders. No middlemen.<br>
+  Settu moves money between <b>USDC</b> and <b>your bank account</b>, in both directions.
+</p>
 
-Server-side state (order status, bridge progress, platform stats) is backed by **Upstash Redis**; the browser only keeps a local transaction-history cache.
+<p align="center">
+  <a href="https://www.settu.xyz"><b>settu.xyz</b></a> ·
+  <a href="https://www.settu.xyz/app">Open the app</a> ·
+  <a href="https://www.instagram.com/settu.official1">Instagram</a>
+</p>
 
-## Tech Stack
+---
 
-- Next.js 15 (App Router)
-- React 19 + TypeScript
-- Tailwind CSS v4
-- Stellar SDK + Stellar Wallets Kit (wallet discovery, signing, WalletConnect on mobile)
-- Allbridge Bridge Core SDK (Base ⇄ Stellar bridging)
-- viem (Base chain transfers, custodial hot wallet)
-- Upstash Redis (order/status stores)
-- Telegram Bot API (operational alerts + manual retry commands)
+## What Settu does
 
-## Features
+**Offramp: USDC → bank account**
+Send USDC from Stellar, Base, Ethereum, Arbitrum, Optimism, Avalanche, Polygon or Solana. Settu bridges it with Circle's CCTP, then pays out to a verified bank account through Paycrest. You see the rate and fees before you sign.
 
-### Offramp (Stellar USDC → fiat)
-- Connect Stellar wallet via Stellar Wallets Kit (Freighter, LOBSTR, xBull, Albedo, Hana, Ledger on desktop; Freighter/LOBSTR mobile over WalletConnect)
-- Get a USDC → fiat quote, verify recipient bank account
-- Build and sign the Stellar → Base bridge transaction (XDR)
-- Submit to Stellar Horizon, poll bridge status
-- Execute payout server-side (Base USDC transfer + Paycrest order)
-- Poll payout status via SSE stream
+**Onramp: bank transfer → Stellar USDC**
+Pay into a virtual account. Settu receives the settled USDC on Base and bridges it to your Stellar address, or any Stellar address you choose.
 
-### Onramp (fiat → Stellar USDC)
-- User pays fiat into a Paycrest-issued virtual account
-- Paycrest settles USDC into the platform's custodial Base hot wallet (Paycrest has no native Stellar support)
-- Server bridges Base → Stellar to the user's address once settled
-- Destination defaults to the connected wallet, but the user can opt into a different Stellar address via a checkbox in the form
-- **Hold-and-alert on failure**: if the bridge can't complete (e.g. hot wallet out of Base ETH for gas), funds stay put, the order is marked `bridge_failed`, and a Telegram alert asks for manual resolution — nothing is ever auto-refunded or silently retried
-- A backstop cron (`/api/cron/finalize-onramp`) and the open SSE session both watch in-flight bridges and flip orders to `delivered` once Allbridge confirms on Stellar
+**Settu Agent**
+Type what you want ("send 50 USDC to my GTBank account") and the agent turns it into a ready-to-confirm order. You still review and sign every transfer.
 
-### Operations (Telegram)
-- Rich per-transaction alerts for every offramp/onramp status change (bank details, amount, rate, payout, Stellar address)
-- Critical alerts for anything requiring manual action (e.g. `bridge_failed`)
-- A stuck onramp bridge can be retried directly from Telegram — no admin app needed — by sending `/retry <orderId> [amount]` to the configured chat (see [Manual Bridge Retry](#manual-bridge-retry) below)
+**Built to be trusted with money**
+- Every transfer is tracked server-side and survives a closed tab.
+- A stuck transfer is held and flagged, never silently retried or refunded. It's recovered from Telegram or the admin console.
+- A burn sweep runs every 5 minutes, so a USDC burn left mid-bridge is recovered while the user is still watching.
 
-## Getting Started
+## How it works
 
-### 1. Install
+```mermaid
+flowchart LR
+  subgraph Offramp
+    W[User wallet<br/>Stellar · EVM · Solana] -- USDC --> C1[Circle CCTP]
+    C1 --> B1[Base]
+    B1 --> P1[Paycrest order]
+    P1 --> Bank1[Bank account]
+  end
+  subgraph Onramp
+    Bank2[Bank transfer] --> P2[Paycrest]
+    P2 -- USDC --> HW[Settu hot wallet<br/>Base]
+    HW --> C2[Circle CCTP]
+    C2 --> S[Stellar address]
+  end
+```
+
+- **Base is the hub.** Paycrest settles and pays out on Base, so every other chain bridges through it with CCTP. USDC sent from Base itself skips the bridge.
+- **The onramp is custodial for a short window.** Paycrest has no native Stellar support, so onramp USDC briefly sits in Settu's Base hot wallet before it's bridged on. If that step fails (for example, the wallet runs low on gas), funds stay put, the order is marked `bridge_failed`, and a Telegram alert asks a human to step in.
+- **Allbridge is legacy.** It carried both bridge legs before the CCTP cutover. It's still wired in only so pre-cutover orders can finish.
+
+## Tech stack
+
+| Layer | What we use |
+| --- | --- |
+| App | Next.js 15 (App Router), React 19, TypeScript, Tailwind CSS v4 |
+| Wallets | Stellar Wallets Kit (desktop extensions), WalletConnect (mobile), Reown AppKit (EVM + Solana) |
+| Bridging | Circle CCTP V2 (Stellar, Solana and six EVM chains ⇄ Base), viem, Stellar SDK, Anchor |
+| Payouts | Paycrest (quotes, bank verification, payout and onramp orders) |
+| Agent | Vercel AI SDK + Gemini |
+| State | Upstash Redis: orders, bridge progress, history, notifications, stats |
+| Ops | Telegram alerts and `/retry`, admin recovery console, Vercel Cron, GitHub Actions |
+
+## Project map
+
+```
+src/
+  app/
+    page.tsx               landing page (/)
+    app/                   the product (/app): onramp, offramp, agent, history, help
+    admin/                 recovery console for stranded transfers
+    api/                   offramp, onramp, bridge, webhooks, cron, admin routes
+  components/
+    brand/                 SettuLogo, SettuMark, SettuLoader
+    app/                   app shell, flows, agent UI
+    landing/               landing-page sections
+  lib/
+    cctp/                  Circle CCTP: burns, attestations, mints, retries
+    offramp/  onramp/      order flows, settlement, agent resolvers
+    stellar/  evm/  solana/  wallet adapters and transaction builders
+    admin/  stats/  notifications/  ledger/
+public/brand/              logo and mark as SVG
+```
+
+## Getting started
 
 ```bash
 npm install
+cp .env.example .env.local   # fill in the values below
+npm run dev                  # http://localhost:3000
 ```
 
-### 2. Configure env
+Use `npm run dev:https` when testing on a phone. Mobile wallets connect over WalletConnect, which needs a secure origin.
 
-```bash
-cp .env.example .env.local
-```
+### Environment
 
-Set values in `.env.local`:
+`.env.example` documents every variable. The groups:
 
-**Paycrest**
-- `PAYCREST_API_KEY`
-- `PAYCREST_WEBHOOK_SECRET`
+| Area | Variables |
+| --- | --- |
+| Paycrest | `PAYCREST_API_KEY`, `PAYCREST_WEBHOOK_SECRET` |
+| Offramp (Base side) | `BASE_PRIVATE_KEY`, `BASE_RETURN_ADDRESS`, `NEXT_PUBLIC_BASE_RETURN_ADDRESS` |
+| Source chains | `NEXT_PUBLIC_OFFRAMP_SOURCE_CHAINS_ENABLED` (comma-separated allowlist, e.g. `base,arbitrum,solana`), plus `*_RPC_URL` for Base, Ethereum, Arbitrum, Optimism, Avalanche, Polygon and Solana |
+| Stellar | `STELLAR_HORIZON_URL`, `STELLAR_SOROBAN_RPC_URL`, `NEXT_PUBLIC_STELLAR_SOROBAN_RPC_URL` (optional) |
+| Onramp hot wallet | `ONRAMP_HOT_WALLET_ADDRESS`, `ONRAMP_HOT_WALLET_PRIVATE_KEY`, `ONRAMP_MIN_GAS_ETH` |
+| Storage | `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` |
+| Wallet connect | `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID`: add every origin you serve from (tunnels included) to the project's allowed domains, or connects fail with close code `3000` |
+| Agent | `GOOGLE_GENERATIVE_AI_API_KEY`, `AGENT_PARSE_MODEL` |
+| Alerts | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `TELEGRAM_WEBHOOK_SECRET` |
+| Admin + cron | `ADMIN_API_SECRET`, `ADMIN_DASHBOARD_PASSWORD`, `CRON_SECRET` |
+| Settu API | `NEXT_PUBLIC_API_BASE_URL`: the upcoming accounts backend (sign-up, wallet linking); live flows don't use it yet |
 
-**Offramp bridge (Stellar → Base)**
-- `BASE_PRIVATE_KEY`
-- `BASE_RETURN_ADDRESS` / `NEXT_PUBLIC_BASE_RETURN_ADDRESS`
-- `BASE_RPC_URL` (optional, defaults to `https://mainnet.base.org`)
-- `STELLAR_SOROBAN_RPC_URL` / `NEXT_PUBLIC_STELLAR_SOROBAN_RPC_URL` (optional)
-- `STELLAR_HORIZON_URL` (optional)
+> **The admin and cron routes fail closed.** If `ADMIN_API_SECRET` or `CRON_SECRET` is unset, they refuse every request. In production, `ADMIN_API_SECRET` must match the GitHub repo secret of the same name, because the burn-sweep workflow sends it.
 
-**Onramp bridge (Base → Stellar, custodial)**
-- `ONRAMP_HOT_WALLET_ADDRESS` / `ONRAMP_HOT_WALLET_PRIVATE_KEY` — platform-operated Base wallet; Paycrest delivers onramp USDC here, so it must be funded with a little Base ETH for gas
-- `ONRAMP_MIN_GAS_ETH` (optional, default `0.0005`) — refuses to bridge below this ETH balance rather than risk a stranded tx
+## Operations
 
-**Storage / stats**
-- `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`
-- `STATS_SEED_USERS` / `STATS_SEED_VOLUME` (seed values shown before real activity accumulates)
+### Recovering a stuck transfer
 
-**Telegram alerts + admin**
-- `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` — leave blank to disable alerts entirely
-- `TELEGRAM_WEBHOOK_SECRET` — verifies inbound Telegram commands (see below)
-- `ADMIN_API_SECRET` — protects the HTTP bridge-retry endpoint
+The recovery logic is idempotent and lock-guarded, so re-running a recovery on something already in flight is a safe no-op.
 
-**Cron**
-- `CRON_SECRET` — Vercel Cron sends this as a Bearer token to `/api/cron/finalize-onramp`
+- **Admin console:** open `/admin`, sign in with `ADMIN_DASHBOARD_PASSWORD`, and diagnose or recover offramps, backfill history, and read the audit log.
+- **Telegram:** after registering the webhook once, send `/retry <orderId> [amount]` in the ops chat to re-bridge an onramp.
 
-**Wallet connect**
-- `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` — from [dashboard.walletconnect.com](https://dashboard.walletconnect.com) (now also branded Reown). Required for mobile: phones have no browser extensions, so mobile wallets are only reachable over WalletConnect. Desktop extensions still work without it.
+  ```bash
+  curl -G "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
+    --data-urlencode "url=https://<deployment>/api/webhooks/telegram" \
+    --data-urlencode "secret_token=$TELEGRAM_WEBHOOK_SECRET"
+  ```
 
-  Add every origin the app is served from to that project's **allowed domains** — including tunnels used for mobile testing. An origin that isn't listed fails at connect time with WebSocket close code `3000 — origin not allowed`, which surfaces in the UI as a domain-allowlist message.
+- **HTTP:** call any `/api/admin/*` route with `Authorization: Bearer $ADMIN_API_SECRET`, for example:
 
-### 3. Run
+  ```bash
+  curl -X POST https://<deployment>/api/admin/onramp/retry-bridge \
+    -H "Authorization: Bearer $ADMIN_API_SECRET" \
+    -H "Content-Type: application/json" \
+    -d '{"orderId":"<orderId>"}'
+  ```
 
-```bash
-npm run dev
-```
+### Background jobs
 
-Open `http://localhost:3000`.
+| Job | Where | Cadence |
+| --- | --- | --- |
+| `/api/cron/finalize-onramp`: advances in-flight onramp bridges | Vercel Cron | daily |
+| `/api/admin/offramp/sweep-burns`: recovers stranded CCTP burns | GitHub Actions (`sweep-burns.yml`) | every 5 min |
 
-## Manual Bridge Retry
+Open SSE status streams also push in-flight transfers forward, so the jobs are a backstop rather than the main path.
 
-If an onramp bridge is stuck — most commonly because the hot wallet ran out of Base ETH for gas — fund the hot wallet, then retry the bridge for that order id. Both paths share the same lock-guarded, idempotent logic (`src/lib/onramp/retry-bridge.ts`), so retrying a bridge already in flight is a safe no-op.
+### One-off scripts
 
-**Via Telegram** (register once per deployment):
-
-```bash
-curl -G "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
-  --data-urlencode "url=https://<your-deployment>/api/webhooks/telegram" \
-  --data-urlencode "secret_token=$TELEGRAM_WEBHOOK_SECRET"
-```
-
-Then, in the configured chat:
-
-```
-/retry <orderId> [amount]
-```
-
-`amount` is only needed if the order never made it to `settled` in the store (so no USDC amount was persisted) — pass the settled USDC amount from the Paycrest webhook/dashboard in that case.
-
-**Via HTTP:**
-
-```bash
-curl -X POST https://<your-deployment>/api/admin/onramp/retry-bridge \
-  -H "Authorization: Bearer $ADMIN_API_SECRET" \
-  -H "Content-Type: application/json" \
-  -d '{"orderId":"<orderId>","amount":"<optional override>"}'
-```
-
-## API Routes
-
-### Offramp
-- `POST /api/offramp/quote`
-- `GET /api/offramp/currencies`
-- `GET /api/offramp/institutions/[currency]`
-- `POST /api/offramp/verify-account`
-- `POST /api/offramp/paycrest/order` — create the Paycrest payout order
-- `GET /api/offramp/paycrest/order/[orderId]`
-- `GET /api/offramp/status/[orderId]`
-- `GET /api/offramp/stream/[orderId]` — SSE status stream
-
-### Offramp bridge (Stellar → Base)
-- `POST /api/offramp/bridge/build-tx`
-- `GET /api/offramp/bridge/gas-fee-options`
-- `POST /api/offramp/bridge/submit-soroban`
-- `GET /api/offramp/bridge/status/[txHash]`
-- `GET /api/offramp/bridge/tx-status/[hash]`
-
-### Onramp
-- `POST /api/onramp/order` — create the Paycrest onramp order; persists the user's destination Stellar address
-- `GET /api/onramp/order/[orderId]`
-- `GET /api/onramp/stream/[orderId]` — SSE status stream, also drives fast-path bridge finalization
-- `GET /api/onramp/bridge/status/[txHash]`
-
-### Webhooks
-- `POST /api/webhooks/paycrest` — routes onramp vs. offramp by looking up which store the order lives in (Paycrest's payload has no reliable direction field)
-- `POST /api/webhooks/telegram` — inbound `/retry` command handling
-
-### Cron
-- `GET /api/cron/finalize-onramp` — backstop sweep of in-flight onramp bridges
-
-### Admin
-- `POST /api/admin/onramp/retry-bridge` — manually re-trigger a stuck onramp bridge
-
-### Misc
-- `GET/POST /api/stats` — platform stats (seeded + accumulated)
-
-## Storage Model
-
-- **Server (Upstash Redis)** is the source of truth for anything that survives a page close or webhook retry:
-  - Onramp order state + Base→Stellar bridge progress (`onramp:order:*`, `onramp:pending-bridges`)
-  - Offramp payout status (`payout:*`) and order metadata for alert enrichment (`paycrest:order-meta:*`)
-  - Platform stats (seeded values + real accumulated activity)
-- **Browser `localStorage`** (`stellaramp_transactions`, max 50 records, scoped by connected wallet) is a client-side history cache only — not authoritative.
+- `scripts/backfill-onramp-delivered.ts`: rebuilds the delivered-onramps index behind the landing-page stats. Run it once after the first deploy that includes it.
 
 ## Scripts
 
 ```bash
-npm run dev
-npm run build
-npm run start
+npm run dev        # local dev server
+npm run build      # production build
+npm run start      # serve the production build
 npm run lint
+npm test           # node --test over src/**/*.test.ts
 ```
 
-## Notes
+## Brand
 
-- Onramp is custodial by design between fiat settlement and Stellar delivery: Paycrest has no native Stellar support, so USDC always transits the platform's Base hot wallet before being bridged onward. The hold-and-alert failure policy exists specifically to keep that window safe — funds are never auto-refunded or blindly retried.
-- Keep `.env.local`, `.next`, and `node_modules` out of version control (already covered by `.gitignore`).
+The logo, mark and loader live in `src/components/brand/` as React components, and in `public/brand/` as SVGs.
+- Use `SettuLogo variant="light"` on light backgrounds.
+- Use `SettuLoader` for loading states.
+- Don't recolour or redraw the mark by hand. Its geometry is generated in `logo-geometry.ts`.
+
+---
+
+<p align="center">
+  <img src="public/brand/settu-mark.svg" alt="" width="28"><br>
+  <sub>Settu: stablecoins in, cash out, in minutes.</sub>
+</p>

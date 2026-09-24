@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useRouter } from "next/navigation";
 import {
   FormCard,
   type GasFeeOptions,
@@ -8,13 +9,13 @@ import {
 } from "@/components/FormCard";
 import { AgentPanel } from "@/components/AgentPanel";
 import { Header } from "@/components/Header";
-import { AnnouncementModal } from "@/components/AnnouncementModal";
 import { ProgressSteps } from "@/components/ProgressSteps";
 import { RecentTransactionsTable } from "@/components/RecentTransactionsTable";
 import { RightPanel, type PlatformStats } from "@/components/RightPanel";
 import { PlatformStatsCard } from "@/components/PlatformStatsCard";
 import { OnrampPanel } from "@/components/OnrampPanel";
 import { useStellarWallet } from "@/hooks/useStellarWallet";
+import { useWalletBar } from "@/components/app/WalletBar";
 import { useEvmWallet } from "@/hooks/useEvmWallet";
 import { useSolanaWallet } from "@/hooks/useSolanaWallet";
 import { Keypair } from "@solana/web3.js";
@@ -189,14 +190,14 @@ async function submitSoroban(signedXdr: string): Promise<string> {
     if (fetchErr?.name === "AbortError") {
       // Deliberately does not say "try again". By this point the wallet has
       // signed and the transaction may well have broadcast; retrying burns a
-      // second time. The burn backstop re-registers anything that landed
-      // without being recorded, so the honest instruction is to wait and
-      // check, not to repeat the transfer.
+      // second time. Recovery re-registers anything that landed without
+      // being recorded — from this order's own status poll within seconds,
+      // and from the sweep as a backstop — so the honest instruction is to
+      // wait and check, not to repeat the transfer.
       throw new Error(
         "We lost contact while submitting your transfer. It may still have gone through, " +
-          "so do NOT retry — that could send your USDC twice. Check your history in a few " +
-          "minutes; if it hasn't appeared, contact support with your wallet address and " +
-          "we'll recover it.",
+          "so do NOT retry — that could send your USDC twice. Check History in a few minutes; " +
+          "if it hasn't appeared, contact support with your wallet address and we'll recover it.",
       );
     }
     throw new Error(`Submit transaction network error: ${fetchErr.message}`);
@@ -358,6 +359,21 @@ async function registerBridgeTransfer(payload: {
   mintRecipient: string;
   amount: string;
   paycrestOrderId: string;
+  /**
+   * Who signed the burn, as a FALLBACK for attribution only.
+   *
+   * The server prefers Horizon's source_account, which is cryptographic
+   * proof and can't be forged by a modified client. But that lookup has a
+   * 5s timeout and public Horizon regularly takes longer, and when it
+   * returns null this field was absent — so `attributed` came out falsy and
+   * the permanent history record was silently never written. The transfer
+   * still bridged and paid out; it just vanished from the user's History
+   * and produced no completion notification.
+   *
+   * Unverified by definition, so the server only falls back to it when the
+   * chain lookup fails, which keeps the anti-spoofing intent intact.
+   */
+  connectedAddress?: string;
 }): Promise<void> {
   return registerWithBeaconFallback(
     "/api/offramp/bridge/register-transfer",
@@ -378,7 +394,21 @@ async function registerEvmTransfer(
   return registerWithBeaconFallback(endpoint, payload);
 }
 
-export function StellarampDashboard() {
+export interface StellarampDashboardProps {
+  /** Which surface to open on; the app shell routes give one per URL. */
+  readonly initialMode?: "offramp" | "onramp" | "agent";
+  /**
+   * Render only the working surface — no page chrome, header or mode tabs —
+   * because the app shell (sidebar + top bar) now provides those.
+   */
+  readonly embedded?: boolean;
+}
+
+export function StellarampDashboard({
+  initialMode = "offramp",
+  embedded = false,
+}: StellarampDashboardProps = {}) {
+  const router = useRouter();
   const {
     wallet,
     isConnected,
@@ -424,7 +454,7 @@ export function StellarampDashboard() {
   const activeUserAddress =
     sourceChain === "stellar" ? wallet?.publicKey : externalWallet.address;
 
-  const [mode, setMode] = useState<"offramp" | "onramp" | "agent">("offramp");
+  const [mode, setMode] = useState<"offramp" | "onramp" | "agent">(initialMode);
 
   // Which surface started the currently-running (or last-run) offramp —
   // decides whether TransactionProgressModal or AgentPanel narrates it.
@@ -432,6 +462,13 @@ export function StellarampDashboard() {
   const [offrampInitiator, setOfframpInitiator] = useState<"form" | "agent">(
     "form",
   );
+  // The same value, written synchronously. The state setter above is called
+  // immediately before handleExecuteTrade in the same event handler, so the
+  // already-captured closure inside it still sees the *previous* value —
+  // which recorded every agent-run offramp as initiator "form" and left the
+  // dashboard's "Withdraw by agent" tile permanently at $0. Rendering reads
+  // the state; anything written into a record reads this ref.
+  const offrampInitiatorRef = useRef<"form" | "agent">("form");
 
   // The shared top header reflects the external wallet only for an offramp
   // from a non-Stellar source; onramp is always the Stellar path. Agent Mode
@@ -782,6 +819,16 @@ export function StellarampDashboard() {
   const handleSourceChainChange = async (next: OfframpSourceChainKey) => {
     if (next === sourceChain) return;
 
+    // Switch first, tear down after. The teardown below can take seconds —
+    // disconnecting Stellar pulls in the wallet kit's dynamic import — and
+    // until `sourceChain` updates, handleConnect still routes to the *old*
+    // chain's provider, so a connect click in that window opened the wrong
+    // wallet picker entirely. `previous` keeps the teardown pointed at the
+    // chain we're leaving.
+    const previous = sourceChain;
+    setUserTransactions([]);
+    setSourceChain(next);
+
     // Close the shared sheet and tear down regardless of connection state. The
     // old code only cleaned up an already-connected wallet, so switching chains
     // mid-connect left that attempt running and both chains showed
@@ -793,9 +840,9 @@ export function StellarampDashboard() {
     }
 
     try {
-      if (sourceChain === "stellar") {
+      if (previous === "stellar") {
         await disconnect();
-      } else if (sourceChain === "solana") {
+      } else if (previous === "solana") {
         await solanaWallet.disconnect();
       } else {
         // Bumps the attempt counter, which abandons any pairing in flight.
@@ -806,8 +853,6 @@ export function StellarampDashboard() {
       // A teardown failure shouldn't block the switch — worst case a stale
       // session lingers in the other adapter until its own next connect.
     }
-    setUserTransactions([]);
-    setSourceChain(next);
   };
 
   const handleExecuteTrade = async (tradeData: {
@@ -897,6 +942,8 @@ export function StellarampDashboard() {
       userAddress: wallet.publicKey,
       amount: tradeData.amount,
       currency: "NGN",
+      kind: "offramp",
+      initiator: offrampInitiatorRef.current,
       beneficiary: tradeData.beneficiary,
       status: "pending",
     };
@@ -1135,6 +1182,7 @@ export function StellarampDashboard() {
         mintRecipient: settlementAddress,
         amount: tradeData.amount,
         paycrestOrderId: payoutOrderId,
+        connectedAddress: wallet?.publicKey,
       });
       new EventSource(`/api/offramp/bridge/stream/${stellarTxHash}`);
 
@@ -1224,6 +1272,7 @@ export function StellarampDashboard() {
 
   const handleFormInitiateOfframp = useCallback(
     (tradeData: Parameters<typeof handleExecuteTrade>[0]) => {
+      offrampInitiatorRef.current = "form";
       setOfframpInitiator("form");
       return handleExecuteTrade(tradeData);
     },
@@ -1232,6 +1281,7 @@ export function StellarampDashboard() {
 
   const handleAgentInitiateOfframp = useCallback(
     (tradeData: Parameters<typeof handleExecuteTrade>[0]) => {
+      offrampInitiatorRef.current = "agent";
       setOfframpInitiator("agent");
       return handleExecuteTrade(tradeData);
     },
@@ -1244,16 +1294,19 @@ export function StellarampDashboard() {
   // field Agent Mode's resolver includes for symmetry with offramp's
   // beneficiary shape. This just maps one to the other.
   const handleAgentInitiateOnramp = (order: ResolvedOnrampOrder) =>
-    createOnrampOrder({
-      fiatAmount: order.fiatAmount,
-      currency: order.currency,
-      userStellarAddress: order.destinationAddress,
-      refundAccount: {
-        institution: order.refundAccount.institution,
-        accountIdentifier: order.refundAccount.accountIdentifier,
-        accountName: order.refundAccount.accountName,
+    createOnrampOrder(
+      {
+        fiatAmount: order.fiatAmount,
+        currency: order.currency,
+        userStellarAddress: order.destinationAddress,
+        refundAccount: {
+          institution: order.refundAccount.institution,
+          accountIdentifier: order.refundAccount.accountIdentifier,
+          accountName: order.refundAccount.accountName,
+        },
       },
-    });
+      { initiator: "agent" },
+    );
 
   // Same invalidation the progress modal's own Cancel does (search for
   // `offrampFlowRef.current++` in this file to find it) — AgentPanel needs
@@ -1324,6 +1377,8 @@ export function StellarampDashboard() {
       userAddress: connectedAddress,
       amount: tradeData.amount,
       currency: "NGN",
+      kind: "offramp",
+      initiator: offrampInitiatorRef.current,
       beneficiary: tradeData.beneficiary,
       status: "pending",
     };
@@ -1648,6 +1703,8 @@ export function StellarampDashboard() {
       userAddress: connectedAddress,
       amount: tradeData.amount,
       currency: "NGN",
+      kind: "offramp",
+      initiator: offrampInitiatorRef.current,
       beneficiary: tradeData.beneficiary,
       status: "pending",
     };
@@ -2012,6 +2069,40 @@ export function StellarampDashboard() {
     return "Convert USDC to your bank account in minutes.";
   };
 
+  // Tell the app shell's top bar which wallet this screen is actually using
+  // — Stellar, or the EVM/Solana wallet the current source chain needs — so
+  // the pill shows and connects that one instead of always Stellar.
+  const { publish: publishWalletBar } = useWalletBar();
+  const handleConnectRef = useRef(handleConnect);
+  const handleDisconnectRef = useRef(handleDisconnect);
+  handleConnectRef.current = handleConnect;
+  handleDisconnectRef.current = handleDisconnect;
+  useEffect(() => {
+    if (!embedded) return;
+    publishWalletBar(
+      {
+        address: activeUserAddress,
+        isConnected: uiIsConnected,
+        isConnecting: uiIsConnecting,
+      },
+      {
+        connect: () => void handleConnectRef.current(),
+        disconnect: () => void handleDisconnectRef.current(),
+      },
+    );
+    return () => publishWalletBar(null);
+  }, [embedded, activeUserAddress, uiIsConnected, uiIsConnecting, publishWalletBar]);
+
+  // Leave a finished (done/failed) flow: shared by the legacy modal's close
+  // and the embedded form's in-page cards.
+  const closeOfframpFlow = () => {
+    setShowProgressModal(false);
+    setOfframpStep("idle");
+    setOfframpError(null);
+    setTradeState({});
+    setIsExecutingOfframp(false);
+  };
+
   const handlePricingUpdate = useCallback(
     (data: {
       amount: string;
@@ -2030,11 +2121,46 @@ export function StellarampDashboard() {
     [],
   );
 
+  // The agent screen is a pinned-input chat that has to fill the app
+  // shell's full remaining height (so its own message list — not the whole
+  // page — is what scrolls, with the input flush at the bottom). CSS
+  // height:100% doesn't reliably resolve through a chain of ancestors sized
+  // by flex-grow rather than an explicit height, so instead every wrapper
+  // down to AgentPanel gets flex-1 + min-h-0 to stretch via the same
+  // flex-grow mechanism the app shell itself uses. Every other embedded
+  // screen keeps its plain block layout — a scrolling form has no reason to
+  // fill exactly the viewport's remaining height.
+  const embeddedAgent = embedded && mode === "agent";
+
   return (
-    <main className="min-h-screen p-4">
-      <AnnouncementModal />
-      <section className="min-h-[88vh] border border-[var(--line-soft)] bg-[var(--bg)]">
-        <div className="flex flex-col gap-6 px-[2.6rem] py-8 max-[720px]:p-4">
+    <main
+      className={
+        embedded
+          ? embeddedAgent
+            ? "flex min-h-0 flex-1 flex-col"
+            : ""
+          : "min-h-screen p-4"
+      }
+    >
+      <section
+        className={
+          embedded
+            ? embeddedAgent
+              ? "flex min-h-0 flex-1 flex-col"
+              : ""
+            : "min-h-[88vh] border border-[var(--line-soft)] bg-[var(--bg)]"
+        }
+      >
+        <div
+          className={
+            embedded
+              ? embeddedAgent
+                ? "flex min-h-0 flex-1 flex-col gap-6"
+                : "flex flex-col gap-6"
+              : "flex flex-col gap-6 px-[2.6rem] py-8 max-[720px]:p-4"
+          }
+        >
+          {!embedded && (
           <Header
             subtitle={getSubtitle()}
             isConnected={
@@ -2072,6 +2198,7 @@ export function StellarampDashboard() {
             onConnect={handleConnect}
             onDisconnect={handleDisconnect}
           />
+          )}
 
           {/* Equal-width flex-1 tabs so all three always fit the viewport —
               a dropdown here tested badly (users on mobile didn't notice
@@ -2079,6 +2206,7 @@ export function StellarampDashboard() {
               down with smaller mobile padding/text/tracking is what
               actually fits, not fixed 150px-min-width buttons that only
               worked at sm and up. */}
+          {!embedded && (
           <div className="flex gap-1 sm:gap-2">
             {(["onramp", "offramp", "agent"] as const).map((m) => {
               const isActive = mode === m;
@@ -2113,8 +2241,24 @@ export function StellarampDashboard() {
               );
             })}
           </div>
+          )}
 
-          {mode === "onramp" ? (
+          {embedded && mode === "onramp" ? (
+            // The app shell's onramp screen: just the panel, which carries
+            // its own deposit-account and done/failed views. The legacy
+            // branch below keeps the old three-card grid for the
+            // (now unused) non-embedded dashboard.
+            <OnrampPanel
+              isConnected={isConnected}
+              isConnecting={isConnecting}
+              walletAddress={wallet?.publicKey}
+              onConnect={handleConnect}
+              onDelivered={handleOnrampDelivered}
+              onSettled={refreshStellarBalance}
+              usdcBalance={stellarUsdcBalanceRaw}
+              isLoadingBalance={isLoadingBalance}
+            />
+          ) : mode === "onramp" ? (
             <div className="grid grid-cols-[1fr_370px] gap-3 max-[1100px]:grid-cols-1">
               <div className="max-[1100px]:order-1">
                 <OnrampPanel
@@ -2136,6 +2280,64 @@ export function StellarampDashboard() {
                 />
               </div>
             </div>
+          ) : embedded && mode === "offramp" ? (
+            // The app shell's offramp screen: just the form, with the flow's
+            // processing/done/failed states rendered in its place rather than
+            // in the modal below.
+            <FormCard
+              isConnected={uiIsConnected}
+              isConnecting={uiIsConnecting}
+              isExecutingOfframp={isExecutingOfframp}
+              resetKey={formResetKey}
+              onConnect={handleConnect}
+              sourceChain={sourceChain}
+              onSourceChainChange={handleSourceChainChange}
+              walletAddress={activeUserAddress ?? null}
+              onInitiateOfframp={handleFormInitiateOfframp}
+              onPricingUpdate={handlePricingUpdate}
+              usdcBalance={
+                sourceChain === "stellar"
+                  ? stellarUsdcBalanceRaw
+                  : externalBalances
+                    ? Number(externalBalances.usdc)
+                    : null
+              }
+              isLoadingBalance={
+                sourceChain === "stellar"
+                  ? isLoadingBalance
+                  : externalWallet.isConnected && !externalBalances
+              }
+              flow={{
+                step: showProgressModal && offrampInitiator === "form" ? offrampStep : "idle",
+                error: offrampError,
+                failedAtStep: lastOfframpStepRef.current,
+                onCancel: handleCancelOfframpFlow,
+                onClose: closeOfframpFlow,
+                onViewTransaction: () => {
+                  closeOfframpFlow();
+                  router.push("/app/history");
+                },
+              }}
+            />
+          ) : embedded && mode === "agent" ? (
+            // The app shell's agent screen: just the chat, full height —
+            // no RightPanel/RecentTransactionsTable/ProgressSteps, which
+            // belong to the legacy tabbed layout below.
+            <AgentPanel
+              isConnected={uiIsConnected}
+              isConnecting={uiIsConnecting}
+              onConnect={handleConnect}
+              activeSourceChain={sourceChain}
+              sourceChainLabel={activeSourceChainLabel}
+              offrampStep={offrampStep}
+              offrampError={offrampError}
+              active={offrampInitiator === "agent"}
+              onCancelFlow={handleCancelOfframpFlow}
+              onInitiateOfframp={handleAgentInitiateOfframp}
+              onInitiateOnramp={handleAgentInitiateOnramp}
+              connectedStellarAddress={wallet?.publicKey ?? null}
+              onOnrampSettled={refreshStellarBalance}
+            />
           ) : (
             <>
               <div className="grid grid-cols-[1fr_370px] gap-3 max-[1100px]:grid-cols-1">
@@ -2241,19 +2443,13 @@ export function StellarampDashboard() {
 
 
       <TransactionProgressModal
-        isOpen={showProgressModal && offrampInitiator === "form"}
+        isOpen={showProgressModal && offrampInitiator === "form" && !embedded}
         currentStep={offrampStep}
         failedAtStep={lastOfframpStepRef.current}
         error={offrampError}
         sourceChainLabel={activeSourceChainLabel}
         onCancel={handleCancelOfframpFlow}
-        onClose={() => {
-          setShowProgressModal(false);
-          setOfframpStep("idle");
-          setOfframpError(null);
-          setTradeState({});
-          setIsExecutingOfframp(false);
-        }}
+        onClose={closeOfframpFlow}
       />
     </main>
   );

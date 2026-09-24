@@ -1,15 +1,8 @@
 @import "tailwindcss";
 
 /*
- * Theme tokens. Dark is the default/original look (unchanged values below).
- * Light mode ([data-theme="light"]) is a literal black<->white inversion of
- * every neutral (background/border/text) token, computed channel-wise
- * (255 - value) so relative lightness ordering between surfaces is
- * preserved. --accent/--accent-bright/--accent-contrast are deliberately
- * NOT part of that inversion — the gold accent stays the exact same color
- * in both themes, and --accent-contrast (the near-black text drawn on top
- * of accent-filled buttons) stays fixed too, since the accent's own
- * lightness never changes.
+ * Theme tokens. The product is dark-only — the light theme and its toggle
+ * were removed with the app redesign.
  */
 :root {
   --bg: #0a0a0a;
@@ -28,25 +21,6 @@
   --accent: #c9a962;
   --accent-bright: #f4e1ad;
   --accent-contrast: #0a0a0a;
-}
-
-[data-theme="light"] {
-  --bg: #ffffff;
-  --bg-highlight: #f2f2f2;
-  --surface: #efefef;
-  --surface-2: #f3f3f3;
-  --surface-3: #ebebeb;
-  --line: #cccccc;
-  --line-soft: #e0e0e0;
-  --line-dashed: #dddddd;
-  --line-strong: #d5d5d5;
-  /* Darker than a literal invert (#888/#999/#aaa) — gray text that reads
-     fine on black is noticeably harder to read on white, so these lean
-     toward near-black instead for actual legibility in light mode. */
-  --muted: #444444;
-  --muted-strong: #555555;
-  --muted-soft: #6b6b6b;
-  --foreground: #000000;
 }
 
 /* Custom scrollbar — every scrollable area in the app. Black track, gold
@@ -74,6 +48,44 @@
   box-sizing: border-box;
 }
 
+/* Stellar Wallets Kit picker (colors/fonts come from the theme passed to
+   StellarWalletsKit.init in lib/stellar/wallet-adapter.ts). Its full-screen
+   overlay is the first child of the kit's fixed shell; blurring through it
+   frosts the page behind the modal without putting a `filter` on the page
+   root, which would re-anchor every position:fixed element inside it. */
+section.stellar-wallets-kit > div:first-child {
+  background: rgba(0, 0, 0, 0.55) !important;
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+/* The picker's scrolling card: keep wheel/touch scrolling inside it instead
+   of chaining to the page once the wallet list reaches its end. */
+section.stellar-wallets-kit > section {
+  overscroll-behavior: contain;
+}
+/* Desktop-only Settu skin for the picker (flag set in wallet-adapter's
+   initKit); mobile keeps the kit's original layout. */
+html[data-swk-skin="settu"] section.stellar-wallets-kit > section {
+  /* The kit caps the card at 400px (as an !important Twind utility); the
+     logo row below needs the room back. */
+  max-height: min(480px, calc(100dvh - 48px)) !important;
+  /* The app's global scrollbar (track + arrow buttons) squares off the
+     card's rounded right edge; the cut-off last row already signals scroll. */
+  scrollbar-width: none;
+}
+html[data-swk-skin="settu"] section.stellar-wallets-kit > section::-webkit-scrollbar {
+  display: none;
+}
+/* Settu logo above the picker's header row, so it's clear which app is
+   asking to connect. The header is the card's first (sticky) child. */
+html[data-swk-skin="settu"] section.stellar-wallets-kit > section > div:first-child::before {
+  content: "";
+  display: block;
+  height: 28px;
+  margin: 20px auto 4px;
+  background: url("/brand/settu-logo.svg") center / contain no-repeat;
+}
+
 html,
 body {
   margin: 0;
@@ -87,11 +99,49 @@ body {
 }
 
 button {
-  font: inherit;
-  color: inherit;
   background: none;
   border: 0;
   cursor: pointer;
+}
+/* `font: inherit` and `color: inherit` belong in a layer, unlike the rest of
+   this reset.
+   Unlayered declarations beat every layered one regardless of specificity,
+   so while these sat above they silently defeated every text-size, font-weight
+   and text-colour utility on a button — the whole app rendered its buttons at
+   the inherited 16px in the inherited colour, no matter what was written on
+   them (a red "Cancel" came out white). In @layer base a button with no such
+   utility still inherits the page font and colour exactly as before, and one
+   that asks for a size or a colour now gets it.
+   The background/border lines above stay unlayered on purpose: code across
+   the app already works around them with inline styles, and un-suppressing
+   them would repaint buttons nobody has looked at. */
+@layer base {
+  button {
+    font: inherit;
+    color: inherit;
+  }
+}
+
+/* Offramp status panel: the in-progress step's dashed ring turns. */
+@keyframes landing-offramp-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.landing-offramp-spin {
+  animation: landing-offramp-spin 1.6s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .landing-offramp-spin {
+    animation: none;
+  }
+}
+
+/* Product UI headings — Fraunces with the same optical axes the landing
+   page uses (a static cut renders the wrong letterforms). */
+.font-fraunces {
+  font-family: var(--font-fraunces), serif;
+  font-variation-settings: "SOFT" 0, "WONK" 1;
 }
 
 .font-space-grotesk {
@@ -236,3 +286,240 @@ button {
   }
 }
 
+
+/* App drawer — it used to mount and unmount outright, so it appeared with
+   no transition at all. Kept in the tree and driven by a class instead, so
+   there is a "from" state to animate out of; the CSS keeps it inert and
+   unfocusable while closed. */
+.app-drawer {
+  visibility: hidden;
+  pointer-events: none;
+  transition: visibility 0s linear 0.28s;
+}
+.app-drawer.is-open {
+  visibility: visible;
+  pointer-events: auto;
+  transition: visibility 0s;
+}
+.app-drawer-scrim {
+  opacity: 0;
+  transition: opacity 0.28s ease-out;
+}
+.app-drawer.is-open .app-drawer-scrim {
+  opacity: 1;
+}
+.app-drawer-panel {
+  transform: translateX(-100%);
+  opacity: 0.6;
+  transition:
+    transform 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.28s ease-out;
+}
+.app-drawer.is-open .app-drawer-panel {
+  transform: translateX(0);
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-drawer,
+  .app-drawer-scrim,
+  .app-drawer-panel {
+    transition: none;
+  }
+}
+
+/* The /app shell is locked to exactly one viewport-height and never scrolls
+   itself, so it has to use the *dynamic* viewport. On Android Chrome 100vh
+   is the height with the browser toolbar retracted; while the toolbar is on
+   screen a 100vh shell runs under it and its bottom row is clipped with no
+   way to scroll to it. 100dvh tracks the toolbar; the 100vh line before it
+   is the fallback for anything without dvh support.
+   Unlayered on purpose — Tailwind's utilities live in a layer, so these win
+   over the h-* / pb-* classes on the same element. */
+.app-shell {
+  height: 100vh;
+  height: 100dvh;
+}
+@media (max-width: 720px) {
+  /* Phone: the shell sits flush to the bottom edge (pb-0), which on gesture
+     navigation puts the last row under the home indicator. */
+  .app-shell {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .app-drawer-panel {
+    padding-bottom: calc(40px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+/* Offramp fee breakdown. Same grid-rows 0fr → 1fr technique as the landing
+   FAQ: the panel grows and shrinks to its content height without measuring
+   it. Kept mounted so there is a "from" state to animate out of, and hidden
+   from assistive tech once the collapse has finished. */
+.fee-reveal {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows 0.32s ease-in-out,
+    opacity 0.22s ease-out,
+    visibility 0s linear 0.32s;
+  visibility: hidden;
+}
+.fee-reveal > div {
+  overflow: hidden;
+}
+.fee-reveal.is-open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  visibility: visible;
+  transition:
+    grid-template-rows 0.32s ease-in-out,
+    opacity 0.22s ease-out,
+    visibility 0s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .fee-reveal {
+    transition: none;
+  }
+}
+
+/* Agent chat bubble tail. The offsets can't be inline styles: the phone
+   bubble is smaller, so the tail has to shrink with it, and that needs a
+   media query. The -12px/-8px pull it 2px *under* the bubble — the path's
+   fill antialiases to nothing in its own last column, so a 1px overlap
+   cancels out and leaves the hairline gap it was meant to close. */
+.bubble-tail {
+  width: 14px;
+  height: 22px;
+}
+.bubble-tail.is-left {
+  left: -12px;
+}
+.bubble-tail.is-right {
+  right: -12px;
+  /* Mirrored so the point faces away from the bubble on both sides. */
+  transform: scaleX(-1);
+}
+@media (max-width: 720px) {
+  .bubble-tail {
+    width: 10px;
+    height: 16px;
+  }
+  .bubble-tail.is-left {
+    left: -8px;
+  }
+  .bubble-tail.is-right {
+    right: -8px;
+  }
+}
+
+/* Agent composer. Desktop wraps the field and the send button in one
+   bordered pill; the phone design separates them, so the wrapper loses its
+   border and the input carries its own. */
+.agent-composer {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+@media (max-width: 720px) {
+  .agent-composer {
+    border: 0;
+  }
+}
+
+/* Phones get overlay scrollbars, not the gold desktop ones. Declaring
+   ::-webkit-scrollbar at all opts a touch browser out of its own overlay
+   behaviour and into a permanent 10px classic bar, which on a 393px screen
+   is both ugly and a real bite out of the content width. */
+@media (max-width: 720px) {
+  * {
+    scrollbar-width: none;
+  }
+  ::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+  }
+}
+
+/* Transaction history table.
+   Wide: six fr-proportioned columns that share whatever width the panel has.
+   Narrow: six *fixed* columns wider than the screen, inside a horizontal
+   scroller — the design keeps the table on a phone rather than collapsing it
+   to cards, and lets the user swipe across to Status and Date. `max-content`
+   is what makes the row overflow (and what makes each row's rule run the
+   full scrolled width instead of stopping at the viewport edge). */
+.history-grid {
+  display: grid;
+  grid-template-columns: 125fr 110fr 140fr 180fr 128fr 155fr;
+  gap: clamp(12px, 2.2vw, 54px);
+  border-bottom: 1px solid #262424;
+}
+@media (max-width: 720px) {
+  .history-grid {
+    width: max-content;
+    grid-template-columns: 90px 80px 120px 130px 100px 120px;
+    gap: 18px;
+  }
+}
+
+/* The history table's horizontal scroller keeps its scrollbar on a phone —
+   it is the affordance that tells you the table goes on past Rate, so it is
+   the one place the rule above must not hide. Same gold-on-black bar the
+   rest of the app uses; the selectors outrank the `*` / bare-pseudo rules
+   in that media query, so no !important is needed. */
+.history-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--accent) var(--bg);
+}
+.history-scroll::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.history-scroll::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+.history-scroll::-webkit-scrollbar-thumb {
+  background: var(--accent);
+  border: 2px solid var(--bg);
+}
+.history-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-bright);
+}
+
+/* Settu loader. The sheen travels down the mark over most of the cycle —
+   slowly enough to read as flow down the ribbon, not a flash — then rests
+   briefly off-mark, so it has a rhythm rather than a treadmill. For SVG
+   elements, CSS px in a transform are user units: 400px carries the 110-unit
+   band fully across the 240-unit mark plus the skew's 41 units of lean. */
+@keyframes settu-sheen {
+  0% {
+    transform: translateY(0);
+  }
+  78%,
+  100% {
+    transform: translateY(400px);
+  }
+}
+@keyframes settu-breathe {
+  0%,
+  100% {
+    opacity: 0.86;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.settu-loader-sheen {
+  animation: settu-sheen 2.4s cubic-bezier(0.4, 0, 0.3, 1) infinite;
+}
+.settu-loader-mark {
+  animation: settu-breathe 2.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .settu-loader-sheen {
+    animation: none;
+    opacity: 0;
+  }
+  /* A slow change in brightness, not movement — acceptable under reduced
+     motion, and still tells the user something is happening. */
+  .settu-loader-mark {
+    animation-duration: 3.6s;
+  }
+}

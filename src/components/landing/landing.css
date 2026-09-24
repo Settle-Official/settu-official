@@ -1,0 +1,411 @@
+/* Fraunces is used with its SOFT/WONK variable axes everywhere it appears
+   (headlines, stat numbers, card titles) — a static weight cut renders
+   the wrong letterforms, so every heading needs this exact class rather
+   than just `font-[family-name:var(--font-fraunces)]`. */
+.landing-fraunces {
+  font-family: var(--font-fraunces), serif;
+  font-variation-settings: "SOFT" 0, "WONK" 1;
+}
+
+/* Driven by an IntersectionObserver (added when each section is built) —
+   toggling `is-visible` on is what actually reveals the section. */
+.landing-reveal {
+  opacity: 0;
+  transform: translateY(16px);
+  transition: opacity 0.6s ease-out, transform 0.6s ease-out;
+}
+.landing-reveal.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+@media (prefers-reduced-motion: reduce) {
+  .landing-reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}
+
+/* Hero coins — the two coins trade places every 4s (1.2s crossing). The
+   one crossing in front arcs up and grows, the other dips behind, both
+   spin a full turn on the way and settle with a slight overshoot; the
+   toggle between them flips 180° on each crossing. One 10.4s loop:
+     0–38.46%  hold           38.46–50%  cross over/under
+     50–88.46% hold (swapped) 88.46–100% cross back
+   Translate is in % of each coin's own box; the x distance is the gap
+   between the two crop boxes (481px of 900) plus 40px, over each coin's
+   width — the coins lean toward each other, so landing exactly on the
+   other's box puts them tighter against the toggle than at rest. The
+   crossing segments use an overshooting ease (the timing function on a
+   keyframe applies to the segment that starts there). */
+.landing-coins {
+  perspective: 1400px;
+}
+.landing-coin {
+  animation-duration: 10.4s;
+  animation-iteration-count: infinite;
+  animation-timing-function: cubic-bezier(0.34, 1.25, 0.64, 1);
+  will-change: transform;
+  backface-visibility: visible;
+  z-index: 2;
+}
+.landing-coin-usdc {
+  animation-name: landing-coin-usdc;
+}
+.landing-coin-bank {
+  animation-name: landing-coin-bank;
+}
+.landing-coin-toggle {
+  animation-name: landing-coin-toggle;
+  z-index: 2;
+}
+@keyframes landing-coin-usdc {
+  0%,
+  38.46% {
+    transform: translate(0, 0) scale(1) rotateY(0deg);
+    z-index: 3;
+    animation-timing-function: cubic-bezier(0.45, 0, 0.2, 1);
+  }
+  44.23% {
+    transform: translate(69.1%, -16%) scale(1.08) rotateY(180deg);
+    z-index: 3;
+    animation-timing-function: cubic-bezier(0.34, 1.25, 0.64, 1);
+  }
+  50%,
+  88.46% {
+    transform: translate(138.2%, 5.2%) scale(1) rotateY(360deg);
+    z-index: 1;
+    animation-timing-function: cubic-bezier(0.45, 0, 0.2, 1);
+  }
+  94.23% {
+    transform: translate(69.1%, 22%) scale(0.92) rotateY(540deg);
+    z-index: 1;
+    animation-timing-function: cubic-bezier(0.34, 1.25, 0.64, 1);
+  }
+  100% {
+    transform: translate(0, 0) scale(1) rotateY(720deg);
+    z-index: 1;
+  }
+}
+@keyframes landing-coin-bank {
+  0%,
+  38.46% {
+    transform: translate(0, 0) scale(1) rotateY(0deg);
+    z-index: 1;
+    animation-timing-function: cubic-bezier(0.45, 0, 0.2, 1);
+  }
+  44.23% {
+    transform: translate(-67.7%, 14%) scale(0.92) rotateY(-180deg);
+    z-index: 1;
+    animation-timing-function: cubic-bezier(0.34, 1.25, 0.64, 1);
+  }
+  50%,
+  88.46% {
+    transform: translate(-135.3%, -5.1%) scale(1) rotateY(-360deg);
+    z-index: 3;
+    animation-timing-function: cubic-bezier(0.45, 0, 0.2, 1);
+  }
+  94.23% {
+    transform: translate(-67.7%, -24%) scale(1.08) rotateY(-540deg);
+    z-index: 3;
+    animation-timing-function: cubic-bezier(0.34, 1.25, 0.64, 1);
+  }
+  100% {
+    transform: translate(0, 0) scale(1) rotateY(-720deg);
+    z-index: 3;
+  }
+}
+@keyframes landing-coin-toggle {
+  0%,
+  38.46% {
+    transform: rotate(0deg);
+    animation-timing-function: cubic-bezier(0.34, 1.3, 0.64, 1);
+  }
+  50%,
+  88.46% {
+    transform: rotate(180deg);
+    animation-timing-function: cubic-bezier(0.34, 1.3, 0.64, 1);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .landing-coin {
+    animation: none;
+  }
+}
+
+/* Hero floating dots — each one breathes (brightens and swells slightly)
+   on its own staggered cycle; per-dot duration/delay/base opacity are set
+   inline by HeroDots. The animation multiplies the base opacity so dim
+   dots stay dim relative to bright ones. */
+@keyframes landing-dot-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+    filter: brightness(0.75) blur(0.6px);
+  }
+  50% {
+    transform: scale(1.8);
+    filter: brightness(1.6) blur(0.3px);
+  }
+}
+.landing-dot {
+  animation-name: landing-dot-breathe;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+  will-change: transform, filter;
+}
+@media (prefers-reduced-motion: reduce) {
+  .landing-dot {
+    animation: none;
+    filter: blur(0.5px);
+  }
+}
+
+/* Hero light rays — the whole cluster breathes slowly, and each ray also
+   shimmers on its own offset cycle (delays set inline in HeroBeams) so the
+   three never brighten together. Opacity only: animating the blur filters
+   would re-rasterize every frame. */
+@keyframes landing-beams-breathe {
+  0%,
+  100% {
+    opacity: 0.82;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@keyframes landing-ray-shimmer {
+  0%,
+  100% {
+    opacity: 0.7;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.landing-beams {
+  animation: landing-beams-breathe 7s ease-in-out infinite;
+}
+.landing-ray {
+  animation: landing-ray-shimmer 5.5s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .landing-beams,
+  .landing-ray {
+    animation: none;
+  }
+}
+
+/* Trust-section connector: a dull base stroke with a gold stroke on top
+   that's revealed along the path as the section scrolls (dashoffset set
+   inline from scroll progress; pathLength="1" makes offset 1 → 0 the whole
+   sweep). Untransitioned so it tracks the (Lenis-smoothed) scroll 1:1. */
+.landing-trust-curve-base,
+.landing-trust-curve-gold {
+  fill: none;
+  stroke-width: 1;
+  stroke-linecap: round;
+}
+.landing-trust-curve-base {
+  stroke: #3a3a3a;
+}
+.landing-trust-curve-gold {
+  stroke: #c9a962;
+  stroke-dasharray: 1;
+}
+
+/* The callouts' position/opacity are set inline from scroll progress
+   (TrustSection's slideIn). No CSS transition here: Lenis (SmoothScroll)
+   already interpolates the scroll position every frame, and a transition
+   on top of that made the callouts and curve lag behind the page. */
+.landing-trust-reason {
+  will-change: transform, opacity;
+}
+
+/* How-it-works step cards lift on hover. Transform only (no shadow/blur
+   changes), so the translucent card over the dome glow stays cheap to
+   composite. */
+.landing-step-card {
+  transition:
+    transform 0.45s cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 0.45s ease-out;
+  will-change: transform;
+}
+.landing-step-card:hover {
+  transform: translateY(-12px);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+@media (prefers-reduced-motion: reduce) {
+  .landing-step-card {
+    transition: none;
+  }
+  .landing-step-card:hover {
+    transform: none;
+  }
+}
+
+/* FAQ accordion. The answer sits in a grid row that animates 0fr → 1fr, so
+   the card grows/shrinks smoothly without measuring content height. The
+   trigger's bottom rule and padding only exist while open, and animate in
+   step with the panel so the card doesn't jump when it toggles. */
+.landing-faq-item {
+  background: rgba(122, 104, 65, 0.2);
+  transition: background-color 0.25s ease-out;
+}
+.landing-faq-item:hover {
+  background: rgba(122, 104, 65, 0.34);
+}
+.landing-faq-trigger {
+  padding: 0;
+  border-bottom: 0.5px solid transparent;
+  transition:
+    padding 0.35s ease-in-out,
+    border-color 0.35s ease-in-out;
+}
+.landing-faq-trigger.is-open {
+  padding: 10px 0 20px;
+  border-bottom-color: #757373;
+}
+.landing-faq-icon path {
+  transform-origin: 12px 12px;
+  transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.landing-faq-icon.is-open path {
+  transform: rotate(45deg);
+}
+.landing-faq-panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows 0.35s ease-in-out,
+    opacity 0.25s ease-out;
+}
+.landing-faq-panel > div {
+  overflow: hidden;
+}
+.landing-faq-panel.is-open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .landing-faq-item,
+  .landing-faq-trigger,
+  .landing-faq-icon path,
+  .landing-faq-panel {
+    transition: none;
+  }
+}
+
+/* Footer wordmark — Figma fades each end into the background with two
+   495px gradient overlays on the 1440px row (solid to ~250px, clear by
+   ~498px). Same effect as a mask on the row, which also survives a
+   different background and works over the scrolling marquee track. Stops
+   are the overlay positions as a % of 1440. */
+.landing-footer-wordmark {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 17%,
+    black 35%,
+    black 65%,
+    transparent 83%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 17%,
+    black 35%,
+    black 65%,
+    transparent 83%
+  );
+}
+
+/* Supported-networks marquee — the track is the logo list duplicated once
+   (see StatsStrip), scrolled exactly half its own width so the loop seam is
+   invisible. The fade is a mask, not a gradient overlay, so it works over
+   any background without needing a matching solid color on each edge. */
+@keyframes landing-marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+.landing-marquee-track {
+  display: flex;
+  width: max-content;
+  animation: landing-marquee 24s linear infinite;
+}
+.landing-marquee-fade {
+  -webkit-mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent);
+  mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .landing-marquee-track {
+    animation: none;
+  }
+}
+
+/* Mobile menu — the panel used to mount and unmount outright, so it snapped
+   open with no transition. Same grid-rows 0fr→1fr technique as the FAQ
+   panel above: it animates to the content's own height without hard-coding
+   one. Kept in the tree when closed (hence the visibility/pointer-events
+   guard) because a transition needs something to transition from. */
+.landing-menu-panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(-6px);
+  transition:
+    grid-template-rows 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.22s ease-out,
+    transform 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+    visibility 0s linear 0.3s;
+}
+.landing-menu-panel.is-open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateY(0);
+  transition:
+    grid-template-rows 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.22s ease-out,
+    transform 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+    visibility 0s;
+}
+/* The inner wrapper is what actually clips during the row transition. */
+.landing-menu-panel > div { overflow: hidden; min-height: 0; }
+
+/* Hamburger → X. Three bars rather than two swapped SVG paths, so the
+   transition has something continuous to animate. */
+.landing-burger { position: relative; width: 22px; height: 16px; }
+.landing-burger span {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  border-radius: 2px;
+  background: currentColor;
+  transition:
+    transform 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.18s ease-out;
+}
+.landing-burger span:nth-child(1) { top: 0; }
+.landing-burger span:nth-child(2) { top: 7px; }
+.landing-burger span:nth-child(3) { top: 14px; }
+.landing-burger.is-open span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+.landing-burger.is-open span:nth-child(2) { opacity: 0; transform: scaleX(0.4); }
+.landing-burger.is-open span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-menu-panel,
+  .landing-burger span {
+    transition: none;
+  }
+}

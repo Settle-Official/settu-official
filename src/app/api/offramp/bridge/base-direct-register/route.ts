@@ -30,7 +30,12 @@ export async function POST(request: NextRequest) {
       destinationCurrency: destinationCurrency || "NGN",
       destinationAmount: destinationAmount || "0",
       paycrestOrderId,
-      status: "completed",
+      // Registration only means the USDC left the user's wallet, not that
+      // anyone was paid — this used to claim "completed" here, which made
+      // every Base offramp look settled the instant it started, including
+      // ones that later failed. The webhook and the status poll now move it
+      // to completed/failed once Paycrest says what actually happened.
+      status: "pending",
     });
 
     return NextResponse.json({ id: record.id });

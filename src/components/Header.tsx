@@ -1,3 +1,4 @@
+import { SettuLogo } from "@/components/brand/SettuLogo";
 import { AccountLink } from "@/components/auth/AccountLink";
 
 export interface HeaderProps {
@@ -36,9 +37,9 @@ export function Header({
   return (
     <header className="flex items-center justify-between gap-4 max-[720px]:items-start max-[720px]:flex-col">
       <div>
-        <h1 className="m-0 font-space-grotesk font-bold tracking-[-0.04em] leading-none">
-          <span className="text-[clamp(1.7rem,2.4vw,2.6rem)] text-[#C9A962]">$</span>
-          <span className="text-[clamp(1.7rem,2.4vw,2.6rem)]">ETTU</span>
+        {/* The logo's own label ("Settu") becomes the heading's name. */}
+        <h1 className="m-0 leading-none">
+          <SettuLogo className="h-[clamp(1.7rem,2.4vw,2.6rem)] w-auto" />
         </h1>
         <p className="mt-[0.35rem] mb-0 text-[0.88rem] text-[var(--muted)]">
           {subtitle}
