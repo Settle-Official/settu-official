@@ -335,17 +335,44 @@ button {
    is the fallback for anything without dvh support.
    Unlayered on purpose — Tailwind's utilities live in a layer, so these win
    over the h-* / pb-* classes on the same element. */
+/* Top padding lives here, not in Tailwind classes, so it can add the status
+   bar: installed to the home screen, iOS runs the app with a translucent
+   status bar (appleWebApp statusBarStyle "black-translucent") and draws the
+   page underneath it. In a browser tab the inset is 0, so nothing moves. */
 .app-shell {
   height: 100vh;
   height: 100dvh;
+  padding-top: calc(28px + env(safe-area-inset-top, 0px));
+}
+@media (max-width: 1100px) {
+  .app-shell {
+    padding-top: calc(12px + env(safe-area-inset-top, 0px));
+  }
+}
+/* Tablet drawer (the floating panel between phone and desktop widths) and
+   the desktop sidebar: both are sized off the viewport, so take the status
+   bar out of their height as well as adding it on top. */
+@media (min-width: 720px) and (max-width: 1100px) {
+  .app-drawer-panel {
+    top: calc(12px + env(safe-area-inset-top, 0px));
+    height: calc(100dvh - 24px - env(safe-area-inset-top, 0px));
+  }
+}
+.app-sidebar {
+  top: calc(28px + env(safe-area-inset-top, 0px));
+  height: calc(100dvh - 48px - env(safe-area-inset-top, 0px));
 }
 @media (max-width: 720px) {
   /* Phone: the shell sits flush to the bottom edge (pb-0), which on gesture
      navigation puts the last row under the home indicator. */
   .app-shell {
+    padding-top: calc(20px + env(safe-area-inset-top, 0px));
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }
+  /* Full-screen on phones, so its close button would sit under the status
+     bar too. */
   .app-drawer-panel {
+    padding-top: calc(40px + env(safe-area-inset-top, 0px));
     padding-bottom: calc(40px + env(safe-area-inset-bottom, 0px));
   }
 }
