@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isAuthorisedAdmin } from "@/lib/admin/auth";
 import { getOrderMeta } from "@/lib/offramp/order-meta-store";
 import { recordTransaction } from "@/lib/offramp/transaction-history";
 import type { OfframpSourceChain } from "@/lib/offramp/transaction-history";
@@ -35,16 +36,14 @@ const LOST = new Set(["refunded", "expired"]);
  * Safe to run repeatedly — it only writes when the payout store disagrees
  * with the record, and it never moves a record back to pending.
  *
- * Auth: `Authorization: Bearer $ADMIN_API_SECRET` (required in production).
+ * Auth: `Authorization: Bearer $ADMIN_API_SECRET` or an admin console
+ * session. Fails closed — refused when ADMIN_API_SECRET is unset.
  * Paged via `?offset=&limit=` so a large store can be walked in chunks;
  * `?dryRun=1` reports what would change without writing.
  */
 export async function POST(request: NextRequest) {
-  const secret = process.env.ADMIN_API_SECRET;
-  if (secret) {
-    if (request.headers.get("authorization") !== `Bearer ${secret}`) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+  if (!isAuthorisedAdmin(request)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const url = new URL(request.url);

@@ -15,16 +15,21 @@ export const maxDuration = 60;
  * open SSE session is the fast path); on Pro it can run every couple minutes.
  * Idempotent — safe at any cadence.
  *
- * Auth: Vercel cron sends `Authorization: Bearer $CRON_SECRET`. Required in
- * production; if CRON_SECRET is unset the call is allowed (local/dev).
+ * Auth: Vercel cron sends `Authorization: Bearer $CRON_SECRET`. Fails closed —
+ * refused when CRON_SECRET is unset, locally too.
  */
 export async function GET(request: NextRequest) {
   const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const auth = request.headers.get("authorization");
-    if (auth !== `Bearer ${secret}`) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+  // Fails closed: with no secret there is nothing to check a caller against,
+  // and an open endpoint lets anyone on the internet trigger the sweep. Vercel
+  // only sends the header once CRON_SECRET is set in the project, so it must
+  // be set there before this ships — or the daily run is refused.
+  if (!secret) {
+    console.error("[cron] CRON_SECRET is not set — refusing the finalize-onramp run");
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  if (request.headers.get("authorization") !== `Bearer ${secret}`) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const orderIds = await listPendingBridges();

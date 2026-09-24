@@ -3,8 +3,8 @@
  *
  * A shared password, exchanged once for a short-lived signed cookie. The
  * existing `Authorization: Bearer $ADMIN_API_SECRET` still works on every
- * admin route so curl and the cron are unaffected — this only adds a second
- * way in, for a human in a browser.
+ * admin route so curl and the sweep-burns GitHub Action are unaffected —
+ * this only adds a second way in, for a human in a browser.
  *
  * Known limitation, accepted deliberately: one shared password means the
  * audit log can record WHAT happened but not WHO did it. The confirm step
@@ -63,14 +63,21 @@ function cookieValid(value: string | undefined): boolean {
 
 /**
  * True when the request may act as an admin — by signed cookie (the
- * dashboard) or bearer token (curl, cron).
+ * dashboard) or bearer token (curl, the sweep-burns GitHub Action).
  *
- * When ADMIN_API_SECRET is unset, as in local dev, this stays open exactly
- * like the existing admin routes already do. Production must set it.
+ * Fails closed. With ADMIN_API_SECRET unset there is nothing to check a
+ * caller against and no key to verify a cookie with, so every request is
+ * refused. It used to allow everything in that case, copying the admin
+ * routes it sat beside — and with the variable unset in production, that
+ * left endpoints that move money (revive-transfer, retry-bridge, recover)
+ * open to the internet.
  */
 export function isAuthorisedAdmin(request: NextRequest): boolean {
   const secret = process.env.ADMIN_API_SECRET;
-  if (!secret) return true;
+  if (!secret) {
+    console.error("[admin] ADMIN_API_SECRET is not set — refusing all admin requests");
+    return false;
+  }
   if (request.headers.get("authorization") === `Bearer ${secret}`) return true;
   return cookieValid(request.cookies.get(COOKIE_NAME)?.value);
 }

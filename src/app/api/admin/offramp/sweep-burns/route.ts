@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isAuthorisedAdmin } from "@/lib/admin/auth";
 import { reconcileUnregisteredBurns } from "@/lib/offramp/burn-backstop";
 
 export const runtime = "nodejs";
@@ -12,15 +13,12 @@ export const maxDuration = 60;
  * The manual sibling of the daily cron's burn-backstop pass — run this when a
  * user reports "funds debited but the transfer failed". Safe to run
  * repeatedly (registration is idempotent). Scope: Stellar source only.
- * Auth: `Authorization: Bearer $ADMIN_API_SECRET` (required in production).
+ * Auth: `Authorization: Bearer $ADMIN_API_SECRET` or an admin console
+ * session. Fails closed — refused when ADMIN_API_SECRET is unset.
  */
 export async function POST(request: NextRequest) {
-  const secret = process.env.ADMIN_API_SECRET;
-  if (secret) {
-    const auth = request.headers.get("authorization");
-    if (auth !== `Bearer ${secret}`) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+  if (!isAuthorisedAdmin(request)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
