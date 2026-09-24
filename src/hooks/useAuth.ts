@@ -82,6 +82,20 @@ export function useAuth() {
     }
   }, []);
 
+  // Always reports success: the server is deliberately silent about whether an
+  // address is registered or already verified.
+  const resendVerification = useCallback(async (email: string) => {
+    setIsBusy(true);
+    try {
+      await api<void>("/auth/resend-verification", {
+        method: "POST",
+        body: { email },
+      });
+    } finally {
+      setIsBusy(false);
+    }
+  }, []);
+
   return {
     user,
     isAuthenticated: !!user,
@@ -91,6 +105,7 @@ export function useAuth() {
     signup,
     logout,
     refresh,
+    resendVerification,
   };
 }
 

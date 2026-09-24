@@ -1,12 +1,14 @@
 /**
  * Permanent audit log of real fund movements into wallets this platform
- * controls — separate from operational bridge-state records (which are
- * ephemeral and expire). This is a financial record meant to accumulate, so
- * entries have NO TTL, unlike every other Redis record in this codebase.
+ * controls — separate from operational bridge-state records, which expire.
+ *
+ * Mid-migration: writes go to Redis (authoritative) and then Postgres, while
+ * reads already come from Postgres. The Redis leg goes in phase two.
  */
 
 import { Redis } from "@upstash/redis";
 import { randomUUID } from "crypto";
+import { serviceFetch, serviceWrite } from "../api/server";
 import type { OfframpSourceChain } from "@/lib/offramp/transaction-history";
 
 const redis = new Redis({
@@ -38,25 +40,72 @@ export function buildLedgerEntry(
   return { ...fields, id: randomUUID(), recordedAt: Date.now() };
 }
 
+/** Snake-case wire shape. Exported so the round trip can be tested. */
+export interface LedgerEntryWire {
+  id: string;
+  direction: string;
+  wallet?: string;
+  chain: string;
+  asset: string;
+  amount: string;
+  tx_hash: string;
+  order_id?: string;
+  recorded_at: number;
+}
+
+export function toWire(entry: FundsLedgerEntry): LedgerEntryWire {
+  return {
+    id: entry.id,
+    direction: entry.direction,
+    ...(entry.wallet ? { wallet: entry.wallet } : {}),
+    chain: entry.chain,
+    asset: entry.asset,
+    amount: entry.amount,
+    tx_hash: entry.txHash,
+    ...(entry.orderId ? { order_id: entry.orderId } : {}),
+    recorded_at: entry.recordedAt,
+  };
+}
+
+export function fromWire(wire: LedgerEntryWire): FundsLedgerEntry {
+  return {
+    id: wire.id,
+    direction: wire.direction as FundsLedgerEntry["direction"],
+    ...(wire.wallet ? { wallet: wire.wallet as FundsLedgerEntry["wallet"] } : {}),
+    chain: wire.chain as FundsLedgerEntry["chain"],
+    asset: wire.asset as FundsLedgerEntry["asset"],
+    amount: wire.amount,
+    txHash: wire.tx_hash,
+    ...(wire.order_id ? { orderId: wire.order_id } : {}),
+    recordedAt: wire.recorded_at,
+  };
+}
+
+// Awaited on the burn-registration path, so the Postgres leg is tight and
+// swallowed: it must never delay or fail a burn that already landed on-chain.
+const WRITE_TIMEOUT_MS = 2_500;
+
 export async function recordLedgerEntry(
   fields: Omit<FundsLedgerEntry, "id" | "recordedAt">,
 ): Promise<FundsLedgerEntry> {
   const entry = buildLedgerEntry(fields);
   await redis.set(ENTRY_KEY(entry.id), entry); // no `ex` — permanent
   await redis.zadd(INDEX_KEY, { score: entry.recordedAt, member: entry.id });
+  // Second leg. Redis stays authoritative until the read flips, and the
+  // backfill repairs whatever a sleeping backend drops here.
+  await serviceWrite("/ledger/entries", toWire(entry), WRITE_TIMEOUT_MS);
   return entry;
 }
 
+// Reads Postgres, not Redis: one indexed query instead of a ZRANGE plus an
+// N+1 fan-out. Full history needs the backfill to have run.
 export async function listLedgerEntries(
-  opts: { limit?: number } = {},
+  opts: { limit?: number; offset?: number } = {},
 ): Promise<FundsLedgerEntry[]> {
   const limit = opts.limit ?? 100;
-  const ids = await redis.zrange<string[]>(INDEX_KEY, 0, limit - 1, {
-    rev: true,
-  });
-  if (ids.length === 0) return [];
-  const entries = await Promise.all(
-    ids.map((id) => redis.get<FundsLedgerEntry>(ENTRY_KEY(id))),
+  const offset = opts.offset ?? 0;
+  const { entries } = await serviceFetch<{ entries: LedgerEntryWire[] }>(
+    `/ledger/entries?limit=${limit}&offset=${offset}`,
   );
-  return entries.filter((e): e is FundsLedgerEntry => e !== null);
+  return entries.map(fromWire);
 }

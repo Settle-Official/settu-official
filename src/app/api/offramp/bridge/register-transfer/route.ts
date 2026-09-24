@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { registerOfframpBurn } from "@/lib/cctp/register-burn";
 import type { OfframpSourceChain } from "@/lib/offramp/transaction-history";
 
+// Registration already does a Horizon round trip and now a ledger write too.
+// The burn is on-chain by this point, so a 504 here strands real funds.
+export const maxDuration = 30;
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();

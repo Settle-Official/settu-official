@@ -14,6 +14,11 @@ import { RecentTransactionsTable } from "@/components/RecentTransactionsTable";
 import { RightPanel, type PlatformStats } from "@/components/RightPanel";
 import { PlatformStatsCard } from "@/components/PlatformStatsCard";
 import { OnrampPanel } from "@/components/OnrampPanel";
+import { ConnectWalletModal } from "@/components/wallet/ConnectWalletModal";
+import {
+  isUnlocked as isSettuUnlocked,
+  lockWallet as lockSettuWallet,
+} from "@/lib/settu-wallet/session";
 import { useStellarWallet } from "@/hooks/useStellarWallet";
 import { useEvmWallet } from "@/hooks/useEvmWallet";
 import { useSolanaWallet } from "@/hooks/useSolanaWallet";
@@ -397,6 +402,16 @@ export function StellarampDashboard() {
 
   const [sourceChain, setSourceChain] =
     useState<OfframpSourceChainKey>("stellar");
+  const [showConnect, setShowConnect] = useState(false);
+  // Re-read after unlock so the header and the wallet hooks agree.
+  const [settuUnlocked, setSettuUnlocked] = useState(false);
+
+  // The session expires on its own, so the header must not keep claiming it.
+  useEffect(() => {
+    const timer = setInterval(() => setSettuUnlocked(isSettuUnlocked()), 5000);
+    setSettuUnlocked(isSettuUnlocked());
+    return () => clearInterval(timer);
+  }, []);
 
   const isSolanaSource = sourceChain === "solana";
   const isEvmSource = sourceChain !== "stellar" && !isSolanaSource;
@@ -761,6 +776,15 @@ export function StellarampDashboard() {
   };
 
   const handleDisconnect = async () => {
+    // The Settu wallet serves every chain, so locking it is the disconnect
+    // whatever source is selected.
+    if (isSettuUnlocked()) {
+      lockSettuWallet();
+      setSettuUnlocked(false);
+      setUserTransactions([]);
+      return;
+    }
+
     // Disconnect whichever wallet is actually in use — a non-Stellar path
     // only applies to an offramp surface (FormCard or Agent Mode); onramp is
     // always Stellar.
@@ -781,6 +805,13 @@ export function StellarampDashboard() {
    */
   const handleSourceChainChange = async (next: OfframpSourceChainKey) => {
     if (next === sourceChain) return;
+
+    // The Settu wallet serves every chain from one key, so switching source
+    // is just a view change — tearing it down would lock it for no reason.
+    if (isSettuUnlocked()) {
+      setSourceChain(next);
+      return;
+    }
 
     // Close the shared sheet and tear down regardless of connection state. The
     // old code only cleaned up an already-connected wallet, so switching chains
@@ -2069,9 +2100,20 @@ export function StellarampDashboard() {
                 ? externalWallet.isConnected && !externalBalances
                 : isLoadingBalance
             }
-            onConnect={handleConnect}
+            onConnect={() => setShowConnect(true)}
             onDisconnect={handleDisconnect}
           />
+
+          {showConnect && (
+            <ConnectWalletModal
+              onSettuReady={() => {
+                setSettuUnlocked(true);
+                setShowConnect(false);
+              }}
+              onConnectExternal={handleConnect}
+              onClose={() => setShowConnect(false)}
+            />
+          )}
 
           {/* Equal-width flex-1 tabs so all three always fit the viewport —
               a dropdown here tested badly (users on mobile didn't notice
@@ -2121,7 +2163,7 @@ export function StellarampDashboard() {
                   isConnected={isConnected}
                   isConnecting={isConnecting}
                   walletAddress={wallet?.publicKey}
-                  onConnect={handleConnect}
+                  onConnect={() => setShowConnect(true)}
                   onDelivered={handleOnrampDelivered}
                   onSettled={refreshStellarBalance}
                 />
@@ -2148,7 +2190,7 @@ export function StellarampDashboard() {
                     <AgentPanel
                       isConnected={uiIsConnected}
                       isConnecting={uiIsConnecting}
-                      onConnect={handleConnect}
+                      onConnect={() => setShowConnect(true)}
                       activeSourceChain={sourceChain}
                       sourceChainLabel={activeSourceChainLabel}
                       offrampStep={offrampStep}
@@ -2167,7 +2209,7 @@ export function StellarampDashboard() {
                       isConnecting={uiIsConnecting}
                       isExecutingOfframp={isExecutingOfframp}
                       resetKey={formResetKey}
-                      onConnect={handleConnect}
+                      onConnect={() => setShowConnect(true)}
                       sourceChain={sourceChain}
                       onSourceChainChange={handleSourceChainChange}
                       walletAddress={activeUserAddress ?? null}
@@ -2197,7 +2239,7 @@ export function StellarampDashboard() {
                     quote={pricingState.quote}
                     isLoadingQuote={pricingState.isLoadingQuote}
                     currency={pricingState.currency}
-                    onConnect={handleConnect}
+                    onConnect={() => setShowConnect(true)}
                   />
                 </div>
                 <div className="col-start-1 max-[1100px]:order-3 max-[1100px]:col-auto">

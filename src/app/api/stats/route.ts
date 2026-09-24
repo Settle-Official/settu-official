@@ -1,23 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getStats, trackWallet, addVolume, pushRecentTransaction, type RecentTransactionEntry } from "@/lib/stats-store";
+import { getStats, trackWallet } from "@/lib/stats-store";
+import { createRateLimit, clientIp } from "@/lib/rate-limit";
+
+// Wallet connects are rare per person and this route is public, so the budget
+// only has to be generous enough for a real browser.
+const limiter = createRateLimit(20, 60_000);
+
+const MAX_ADDRESS_LENGTH = 128;
 
 export async function GET() {
-  const stats = await getStats();
-  return NextResponse.json(stats);
+  return NextResponse.json(await getStats());
 }
 
 export async function POST(request: NextRequest) {
-  const body = await request.json();
-  const { wallet, volume, transaction } = body;
+  if (!limiter.check(clientIp(request.headers))) {
+    return NextResponse.json({ error: "Too many requests" }, { status: 429 });
+  }
 
-  const tasks: Promise<unknown>[] = [];
+  // Only `wallet` is accepted. This route used to take `volume` and
+  // `transaction` too, which let anyone inflate the public counters.
+  const { wallet } = await request.json().catch(() => ({ wallet: undefined }));
+  if (typeof wallet === "string" && wallet.length <= MAX_ADDRESS_LENGTH) {
+    await trackWallet(wallet);
+  }
 
-  if (wallet) tasks.push(trackWallet(wallet));
-  if (typeof volume === "number" && volume > 0) tasks.push(addVolume(volume));
-  if (transaction) tasks.push(pushRecentTransaction(transaction as RecentTransactionEntry));
-
-  await Promise.all(tasks);
-
-  const stats = await getStats();
-  return NextResponse.json(stats);
+  return NextResponse.json(await getStats());
 }

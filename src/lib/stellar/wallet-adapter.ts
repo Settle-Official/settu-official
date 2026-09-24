@@ -21,6 +21,12 @@ import {
   signXdrViaWalletConnect,
   disconnectStellarWalletConnect,
 } from "./walletconnect";
+import {
+  isUnlocked,
+  lockWallet,
+  signWithSettuWallet,
+  unlockedAddress,
+} from "@/lib/settu-wallet/session";
 
 export interface StellarWallet {
   /** Kit module id of the connected wallet, e.g. "freighter" or "wallet_connect". */
@@ -308,6 +314,11 @@ export function hasStoredWalletSession(): boolean {
 
 /** Read a persisted session from kit state without prompting the wallet. */
 export async function restoreWallet(): Promise<StellarWallet | null> {
+  const settuAddress = unlockedAddress();
+  if (settuAddress) {
+    return { type: "settu", publicKey: settuAddress, isConnected: true };
+  }
+
   if (directSession) {
     return {
       type: "wallet_connect",
@@ -362,6 +373,9 @@ export async function signTransaction(
   xdr: string,
   address?: string,
 ): Promise<string> {
+  // A Settu wallet signs locally, with no wallet app and no relay involved.
+  if (isUnlocked()) return signWithSettuWallet(xdr);
+
   // A mobile session paired outside the kit has to sign through the same
   // session; the kit knows nothing about it and would fail to find a wallet.
   if (directSession) {
@@ -377,6 +391,12 @@ export async function signTransaction(
 }
 
 export async function disconnectWallet(): Promise<void> {
+  // Locking is the disconnect for a Settu wallet; the account keeps existing.
+  if (isUnlocked()) {
+    lockWallet();
+    return;
+  }
+
   if (directSession) {
     const { topic } = directSession;
     directSession = null;

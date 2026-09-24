@@ -1,13 +1,14 @@
 /**
  * Permanent, queryable record of every offramp transaction across every
- * source chain -- distinct from CctpTransferRecord (operational, TTL'd,
- * expires once its job is done) and funds-ledger.ts (deliberately only
- * logs entries where the platform itself custodies funds -- offramp
- * entries there carry no wallet, by design). This is the one place with
- * the full picture per transaction, permanently, across every chain.
+ * source chain -- distinct from CctpTransferRecord (operational, TTL'd) and
+ * funds-ledger.ts (only where the platform itself custodies funds).
+ *
+ * Mid-migration: writes go to Redis (authoritative) and then Postgres. Reads
+ * flip once the backfill has run; the Redis leg goes in phase two.
  */
 
 import { Redis } from "@upstash/redis";
+import { serviceWrite } from "../api/server";
 import type { EvmChainKey } from "@/lib/cctp/evm-chains";
 
 const redis = new Redis({
@@ -55,6 +56,62 @@ export function buildTransactionRecord(
   };
 }
 
+/** Snake-case wire shape. Exported so the round trip can be tested. */
+export interface TransactionWire {
+  id: string;
+  source_chain: string;
+  connected_address: string;
+  amount_usdc: string;
+  burn_tx_hash?: string;
+  mint_tx_hash?: string;
+  destination_currency: string;
+  destination_amount: string;
+  paycrest_order_id?: string;
+  status: string;
+  created_at: number;
+  updated_at: number;
+}
+
+export function toWire(record: OfframpTransactionRecord): TransactionWire {
+  return {
+    id: record.id,
+    source_chain: record.sourceChain,
+    connected_address: record.connectedAddress,
+    amount_usdc: record.amountUsdc,
+    ...(record.burnTxHash ? { burn_tx_hash: record.burnTxHash } : {}),
+    ...(record.mintTxHash ? { mint_tx_hash: record.mintTxHash } : {}),
+    destination_currency: record.destinationCurrency,
+    // The API validates this as a decimal; "" and undefined both mean zero.
+    destination_amount: record.destinationAmount || "0",
+    ...(record.paycrestOrderId ? { paycrest_order_id: record.paycrestOrderId } : {}),
+    status: record.status,
+    created_at: record.createdAt,
+    updated_at: record.updatedAt,
+  };
+}
+
+export function fromWire(wire: TransactionWire): OfframpTransactionRecord {
+  return {
+    id: wire.id,
+    sourceChain: wire.source_chain as OfframpSourceChain,
+    connectedAddress: wire.connected_address,
+    amountUsdc: wire.amount_usdc,
+    ...(wire.burn_tx_hash ? { burnTxHash: wire.burn_tx_hash } : {}),
+    ...(wire.mint_tx_hash ? { mintTxHash: wire.mint_tx_hash } : {}),
+    destinationCurrency: wire.destination_currency,
+    destinationAmount: wire.destination_amount,
+    ...(wire.paycrest_order_id ? { paycrestOrderId: wire.paycrest_order_id } : {}),
+    status: wire.status as OfframpTransactionRecord["status"],
+    createdAt: wire.created_at,
+    updatedAt: wire.updated_at,
+  };
+}
+
+// base-direct-register awaits this and 500s on failure, with the user's
+// transfer already settled on Base. The second leg must stay tight.
+const WRITE_TIMEOUT_MS = 2_500;
+const PATCH_TIMEOUT_MS = 8_000;
+
 export async function recordTransaction(
   fields: Omit<OfframpTransactionRecord, "status" | "createdAt" | "updatedAt"> & {
     status?: OfframpTransactionRecord["status"];
@@ -70,6 +127,9 @@ export async function recordTransaction(
   if (record.paycrestOrderId) {
     await redis.set(ORDER_INDEX_KEY(record.paycrestOrderId), record.id);
   }
+  // Second leg. Redis stays authoritative until the read flips, and the
+  // backfill repairs whatever a sleeping backend drops here.
+  await serviceWrite("/offramp/transactions", toWire(record), WRITE_TIMEOUT_MS);
   return record;
 }
 
@@ -114,6 +174,16 @@ export async function updateTransactionByOrderId(
   status: OfframpTransactionRecord["status"],
   patch: Partial<Pick<OfframpTransactionRecord, "mintTxHash" | "destinationAmount">> = {},
 ): Promise<void> {
+  // Postgres leg first and unconditionally: it addresses the row by order id
+  // directly, so it does not need the Redis index, and its no-regress guard
+  // lives in the WHERE clause rather than in a racing read-then-write.
+  await serviceWrite(
+    `/offramp/transactions/by-order/${encodeURIComponent(orderId)}`,
+    { status, ...toPatchWire(patch) },
+    PATCH_TIMEOUT_MS,
+    "PATCH",
+  );
+
   const id = await resolveIdByOrder(orderId);
   if (!id) return;
 
@@ -133,11 +203,39 @@ export async function updateTransactionByOrderId(
   } satisfies OfframpTransactionRecord);
 }
 
+// Only send keys that carry a value: the API COALESCEs absent ones, so an
+// explicit null would wipe a hash or payout figure written earlier.
+function toPatchWire(
+  patch: Partial<
+    Pick<
+      OfframpTransactionRecord,
+      "mintTxHash" | "destinationAmount" | "paycrestOrderId"
+    >
+  >,
+): Record<string, string> {
+  return {
+    ...(patch.mintTxHash ? { mint_tx_hash: patch.mintTxHash } : {}),
+    ...(patch.destinationAmount
+      ? { destination_amount: patch.destinationAmount }
+      : {}),
+    ...(patch.paycrestOrderId
+      ? { paycrest_order_id: patch.paycrestOrderId }
+      : {}),
+  };
+}
+
 export async function updateTransactionStatus(
   id: string,
   status: OfframpTransactionRecord["status"],
   patch: Partial<Pick<OfframpTransactionRecord, "mintTxHash" | "paycrestOrderId">> = {},
 ): Promise<void> {
+  await serviceWrite(
+    `/offramp/transactions/${encodeURIComponent(id)}`,
+    { status, ...toPatchWire(patch) },
+    PATCH_TIMEOUT_MS,
+    "PATCH",
+  );
+
   const existing = await redis.get<OfframpTransactionRecord>(ENTRY_KEY(id));
   if (!existing) return;
   const updated: OfframpTransactionRecord = {

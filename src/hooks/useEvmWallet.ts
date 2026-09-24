@@ -43,6 +43,14 @@ import {
   sendTransaction,
   signPersonalMessage,
 } from "@/lib/evm/walletconnect-adapter";
+import { unlockedMnemonic } from "@/lib/settu-wallet/session";
+import {
+  accountFromMnemonic as settuEvmAccount,
+  addressFromMnemonic as settuEvmAddress,
+  explainEvmError,
+  sendCalls as settuSendCalls,
+} from "@/lib/settu-wallet/evm";
+import { EVM_SOURCE_CHAINS, type EvmChainKey } from "@/lib/cctp/evm-chains";
 import {
   subscribeInjectedWallets,
   toChainIdHex,
@@ -60,6 +68,11 @@ type EvmTransport = "injected" | "walletconnect";
  * Stellar Wallets Kit path — only one of the two is ever connected at once.
  */
 export function useEvmWallet() {
+  // An unlocked Settu wallet is already this chain's wallet; the connect
+  // modal is only for people bringing an external one.
+  const settuPhrase = unlockedMnemonic();
+  const settuAddress = settuPhrase ? settuEvmAddress(settuPhrase) : null;
+
   const [address, setAddress] = useState<`0x${string}` | null>(null);
   const [transport, setTransport] = useState<EvmTransport | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
@@ -234,6 +247,10 @@ export function useEvmWallet() {
 
   const switchChain = useCallback(
     async (chainId: number) => {
+      // Nothing to switch: one key works on every chain, and the network is
+      // passed explicitly when sending.
+      if (settuPhrase) return;
+
       if (transport === "injected" && injectedRef.current) {
         try {
           await injectedRef.current.request({
@@ -261,7 +278,7 @@ export function useEvmWallet() {
       }
       throw new Error("No wallet connected");
     },
-    [transport],
+    [transport, settuPhrase],
   );
 
   // Proves control of the address for wallet linking. personal_sign, not
@@ -283,7 +300,7 @@ export function useEvmWallet() {
       }
       throw new Error("No wallet connected");
     },
-    [address, transport],
+    [address, transport, settuPhrase],
   );
 
   const signAndSendCalls = useCallback(
@@ -291,6 +308,28 @@ export function useEvmWallet() {
       calls: { to: `0x${string}`; data: `0x${string}` }[],
       chainId: number,
     ) => {
+      if (settuPhrase) {
+        const network = (Object.keys(EVM_SOURCE_CHAINS) as EvmChainKey[]).find(
+          (key) => EVM_SOURCE_CHAINS[key].chainId === chainId,
+        );
+        if (!network) throw new Error("That network isn't supported");
+        try {
+          return await settuSendCalls(
+            settuEvmAccount(settuPhrase),
+            calls,
+            network,
+            chainId,
+          );
+        } catch (error) {
+          throw new Error(
+            explainEvmError(
+              error,
+              EVM_SOURCE_CHAINS[network].nativeCurrencySymbol,
+            ),
+          );
+        }
+      }
+
       if (!address) throw new Error("No wallet connected");
       const hashes: string[] = [];
 
@@ -323,8 +362,8 @@ export function useEvmWallet() {
   );
 
   return {
-    address,
-    isConnected: !!address,
+    address: settuAddress ?? address,
+    isConnected: !!(settuAddress ?? address),
     transport,
     isConnecting,
     isConnectModalOpen,

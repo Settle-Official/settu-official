@@ -27,10 +27,12 @@ export function Header({
   onConnect,
   onDisconnect,
 }: Readonly<HeaderProps>) {
+  const shortened =
+    walletAddress && `${walletAddress.slice(0, 8)}...${walletAddress.slice(-4)}`;
   const buttonText = isConnecting
     ? "CONNECTING..."
-    : isConnected && walletAddress
-      ? `${walletAddress.slice(0, 8)}...${walletAddress.slice(-4)}`
+    : isConnected && shortened
+      ? shortened
       : "CONNECT WALLET";
 
   return (

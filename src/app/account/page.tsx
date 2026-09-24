@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { AuthPanel } from "@/components/auth/AuthPanel";
-import { LinkedWallets } from "@/components/auth/LinkedWallets";
+import { SettuWalletPanel } from "@/components/wallet/SettuWalletPanel";
+import { VerifyEmailNotice } from "@/components/auth/VerifyEmailNotice";
 import { useAuth } from "@/hooks/useAuth";
 
 export default function Account() {
@@ -22,19 +23,11 @@ export default function Account() {
               </p>
             </div>
 
-            {!user.email_verified && (
-              // Linking is blocked server-side until this is done, so say so
-              // rather than letting the attempt fail later with a stray error.
-              <div className="border border-[var(--accent)] p-3">
-                <p className="m-0 text-[0.75rem] text-[var(--accent)]">
-                  Verify your email to link a wallet. Check your inbox for the link.
-                </p>
-              </div>
-            )}
+            {!user.email_verified && <VerifyEmailNotice email={user.email} />}
 
             <div className="h-px bg-[var(--line)]" />
 
-            <LinkedWallets emailVerified={user.email_verified} />
+            {user.email_verified && <SettuWalletPanel />}
 
             <div className="h-px bg-[var(--line)]" />
 

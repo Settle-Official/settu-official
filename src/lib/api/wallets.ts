@@ -9,6 +9,8 @@ export interface LinkedWallet {
   address: string;
   earns_cashback: boolean;
   linked_at: string;
+  /** Settu-created, so it has sealed key material and can be unlocked here. */
+  is_settu_wallet: boolean;
 }
 
 interface Challenge {
@@ -41,6 +43,19 @@ export function submitSignature(nonce: string, signature: string) {
 
 export function unlinkWallet(id: string): Promise<void> {
   return api<void>(`/wallets/${id}`, { method: "DELETE" });
+}
+
+// Sealed key material for a Settu-created wallet. Opaque to the server, which
+// holds no wrap key and so cannot decrypt it.
+export function putKeyBlob(walletId: string, sealed: unknown) {
+  return api<{ sealed: unknown }>(`/wallets/${walletId}/key-blob`, {
+    method: "PUT",
+    body: { sealed },
+  });
+}
+
+export function getKeyBlob(walletId: string) {
+  return api<{ sealed: unknown }>(`/wallets/${walletId}/key-blob`);
 }
 
 export const CHAIN_LABEL: Record<ChainFamily, string> = {

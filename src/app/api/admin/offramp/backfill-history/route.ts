@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAdmin, recordOutcome } from "@/lib/admin/guard";
 import { getOrderMeta } from "@/lib/offramp/order-meta-store";
 import { getPayoutStatus } from "@/lib/offramp/payout-store";
 import { reconcilePayoutOrder } from "@/lib/offramp/settlement";
@@ -30,19 +31,27 @@ const LOST = new Set(["refunded", "expired"]);
  * Safe to run repeatedly — it only writes when the payout store disagrees
  * with the record, and it never moves a record back to pending.
  *
- * Auth: `Authorization: Bearer $ADMIN_API_SECRET` (required in production).
+ * Auth: a signed-in admin account. Log in, then send the session token as
+ * `Authorization: Bearer <token>`.
  * Paged via `?offset=&limit=` so a large store can be walked in chunks;
  * `?dryRun=1` reports what would change without writing.
  */
 export async function POST(request: NextRequest) {
-  const secret = process.env.ADMIN_API_SECRET;
-  if (secret) {
-    if (request.headers.get("authorization") !== `Bearer ${secret}`) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+  const url = new URL(request.url);
+
+  let audit;
+  try {
+    audit = await requireAdmin(request, "offramp.backfill_history", {
+      offset: url.searchParams.get("offset"),
+      limit: url.searchParams.get("limit"),
+      dryRun: url.searchParams.get("dryRun") === "1",
+    });
+  } catch {
+    // Fails closed: unset config, an unreachable API and a non-admin caller
+    // all land here, and none is a reason to run an admin action.
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const url = new URL(request.url);
   const offset = Math.max(0, Number(url.searchParams.get("offset") ?? 0) || 0);
   const limit = Math.min(200, Math.max(1, Number(url.searchParams.get("limit") ?? 100) || 100));
   const dryRun = url.searchParams.get("dryRun") === "1";
@@ -131,6 +140,12 @@ export async function POST(request: NextRequest) {
       });
     }
   }
+
+  recordOutcome(audit.auditId, "ok", {
+    scanned: records.length,
+    corrected: changes.length,
+    amountUnrecoverable,
+  });
 
   return NextResponse.json({
     dryRun,
