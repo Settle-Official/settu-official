@@ -18,7 +18,7 @@ import {
   normalizePayoutStatus,
 } from "./adapters/paycrest-adapter";
 import type { PayoutStatus } from "./types";
-import { pushRecentTransaction, addVolume, recordSettledTransaction } from "@/lib/stats-store";
+import { pushRecentTransaction, addVolume } from "@/lib/stats-store";
 import { formatFiat } from "@/lib/format/currency";
 import { updateTransactionByOrderId } from "./transaction-history";
 
@@ -55,9 +55,6 @@ export async function recordOfframpPayoutConfirmed(
     type: "offramp",
   });
   void addVolume(usdc);
-  // Counts the transaction and the fiat that actually landed, which is what
-  // the landing page's headline figures read.
-  void recordSettledTransaction(meta?.payoutValue);
 }
 
 /**

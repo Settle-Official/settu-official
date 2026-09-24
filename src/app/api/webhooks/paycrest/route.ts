@@ -12,7 +12,7 @@ import { notify, alertOfframpEvent, alertRampEvent } from "@/lib/notify/telegram
 import { PLATFORM_FEE_RATE } from "@/lib/offramp/fiat-conversion";
 import { getOrderMeta } from "@/lib/offramp/order-meta-store";
 import { updateTransactionByOrderId } from "@/lib/offramp/transaction-history";
-import { pushRecentTransaction, addVolume, recordSettledTransaction } from "@/lib/stats-store";
+import { pushRecentTransaction, addVolume } from "@/lib/stats-store";
 import { formatFiat } from "@/lib/format/currency";
 
 // Needs Node's crypto and the raw request body; keep off the edge runtime.
@@ -202,9 +202,6 @@ export async function POST(request: NextRequest) {
           type: "offramp",
         });
         void addVolume(usdcAmount);
-        // Same claim guard as the stats push above, so a redelivered
-        // webhook can't inflate the count or the fiat total.
-        void recordSettledTransaction(payoutValue);
       }
     }
 

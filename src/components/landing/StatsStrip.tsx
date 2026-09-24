@@ -1,5 +1,5 @@
 import Image from "next/image";
-import { getStats } from "@/lib/stats-store";
+import { getLandingStats } from "@/lib/stats/landing-stats";
 
 /** ₦16,926,377 -> "₦16.9M+". Rounded down, so the claim is never overstated. */
 function compactNaira(amount: number): string {
@@ -25,19 +25,20 @@ const LOGOS = [
 ];
 
 /**
- * Server component: the figures are read at request time from the same
- * counters the settlement path writes, rather than hardcoded. Previously
- * this claimed ₦480M and 6,200 transfers, which the Paycrest export puts at
- * ₦16.9M and 296 — a live read is the only way that stays honest.
+ * Server component: the figures are read from the durable transaction
+ * records (see lib/stats/landing-stats.ts), rather than hardcoded. They once
+ * claimed ₦480M and 6,200 transfers, which the Paycrest export puts at
+ * ₦16.9M and 296 — reading what actually settled is the only way that stays
+ * honest. The page regenerates every 5 minutes (app/page.tsx).
  */
 export async function StatsStrip() {
-  const { totalVolumeNgn, totalTransactions } = await getStats();
+  const { settledNgn, transfers } = await getLandingStats();
   const STATS = [
     {
-      value: compactNaira(totalVolumeNgn),
+      value: compactNaira(settledNgn),
       caption: "Settled to Nigerian banks",
     },
-    { value: compactCount(totalTransactions), caption: "Transfers completed" },
+    { value: compactCount(transfers), caption: "Transfers completed" },
     // Median across 295 settled orders in the export is 3.8 min. The old
     // "< 90 sec" was not survivable: only 1.4% of real payouts landed that
     // fast, while 65% land inside five minutes.
