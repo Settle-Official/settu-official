@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { IBM_Plex_Mono, Space_Grotesk } from "next/font/google";
+import { IBM_Plex_Mono, Sora, Space_Grotesk } from "next/font/google";
 import "./globals.css";
 import "lenis/dist/lenis.css";
 import { SmoothScroll } from "@/components/SmoothScroll";
@@ -17,6 +17,17 @@ const spaceGrotesk = Space_Grotesk({
   weight: ["300", "400", "500", "600", "700"],
   display: "swap",
   variable: "--font-space-grotesk",
+});
+
+// Same config as the /app layout's Sora so next/font shares one file. It's
+// also needed here for the wallet picker modal: it mounts on <body>, outside
+// the /app layout div, and the kit writes its --swk-font-family onto <html>,
+// so --font-sora has to be defined on <html> for that var() to resolve.
+const sora = Sora({
+  subsets: ["latin"],
+  weight: ["400", "500", "600"],
+  variable: "--font-sora",
+  display: "swap",
 });
 
 export const metadata: Metadata = {
@@ -43,7 +54,7 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en">
+    <html lang="en" className={sora.variable}>
       <body
         className={`${ibmPlexMono.className} ${ibmPlexMono.variable} ${spaceGrotesk.variable}`}
       >

@@ -63,6 +63,28 @@ section.stellar-wallets-kit > div:first-child {
 section.stellar-wallets-kit > section {
   overscroll-behavior: contain;
 }
+/* Desktop-only Settu skin for the picker (flag set in wallet-adapter's
+   initKit); mobile keeps the kit's original layout. */
+html[data-swk-skin="settu"] section.stellar-wallets-kit > section {
+  /* The kit caps the card at 400px (as an !important Twind utility); the
+     logo row below needs the room back. */
+  max-height: min(480px, calc(100dvh - 48px)) !important;
+  /* The app's global scrollbar (track + arrow buttons) squares off the
+     card's rounded right edge; the cut-off last row already signals scroll. */
+  scrollbar-width: none;
+}
+html[data-swk-skin="settu"] section.stellar-wallets-kit > section::-webkit-scrollbar {
+  display: none;
+}
+/* Settu logo above the picker's header row, so it's clear which app is
+   asking to connect. The header is the card's first (sticky) child. */
+html[data-swk-skin="settu"] section.stellar-wallets-kit > section > div:first-child::before {
+  content: "";
+  display: block;
+  height: 28px;
+  margin: 20px auto 4px;
+  background: url("/brand/settu-logo.svg") center / contain no-repeat;
+}
 
 html,
 body {

@@ -46,13 +46,37 @@ let walletConnectModuleRef: ModuleInterface | null = null;
 let directSession: { address: string; topic: string } | null = null;
 
 /**
- * The kit's picker modal, restyled to the app. The kit copies each value
- * onto `--swk-*` custom properties, so pointing them at globals.css tokens
- * (rather than literal colors) keeps the modal in step with the light/dark
- * toggle for free. Square corners, 1px outlines and the mono face match the
- * dashboard's own surfaces; the gold accent carries hover/active states.
+ * The kit's picker modal on desktop, restyled to the rebuilt /app: the same
+ * warm charcoal cards, 20px corners, Sora face and gold accent as the
+ * dashboard surfaces. The kit copies each value onto `--swk-*` custom
+ * properties on <html>. The Settu logo above the title is added in
+ * globals.css, scoped by the `data-swk-skin` flag set in initKit.
  */
 const KIT_THEME: SwkAppTheme = {
+  "background": "#1e1c1c",
+  "background-secondary": "#242323",
+  "foreground-strong": "#ffffff",
+  "foreground": "#e6e3e3",
+  "foreground-secondary": "#a19d9d",
+  "primary": "#c9a962",
+  "primary-foreground": "#1a1a1a",
+  "transparent": "rgba(0, 0, 0, 0)",
+  "lighter": "#2b2a2a",
+  "light": "#242323",
+  "light-gray": "rgba(201, 169, 98, 0.6)",
+  "gray": "#c9a962",
+  "danger": "#e07a7e",
+  "border": "rgba(255, 255, 255, 0.12)",
+  "shadow": "0 0 0 1px rgba(255, 255, 255, 0.08), 0 24px 48px rgba(0, 0, 0, 0.5)",
+  "border-radius": "20px",
+  "font-family": "var(--font-sora), Sora, system-ui, -apple-system, sans-serif",
+};
+
+/**
+ * Mobile keeps the picker's original styling on purpose: pointing the kit
+ * at globals.css tokens, square corners and the mono face.
+ */
+const MOBILE_KIT_THEME: SwkAppTheme = {
   "background": "var(--surface)",
   "background-secondary": "var(--bg)",
   "foreground-strong": "var(--foreground)",
@@ -184,7 +208,13 @@ async function initKit(): Promise<Kit> {
     if (walletConnectModule) modules.push(walletConnectModule);
   }
 
-  StellarWalletsKit.init({ modules, network: Networks.PUBLIC, theme: KIT_THEME });
+  const mobile = isMobileBrowser();
+  if (!mobile) document.documentElement.dataset.swkSkin = "settu";
+  StellarWalletsKit.init({
+    modules,
+    network: Networks.PUBLIC,
+    theme: mobile ? MOBILE_KIT_THEME : KIT_THEME,
+  });
   return StellarWalletsKit;
 }
 
