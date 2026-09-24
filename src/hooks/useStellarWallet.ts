@@ -6,6 +6,7 @@ import {
   restoreWallet,
   disconnectWallet,
   onWalletStateChange,
+  onWalletConnectionChange,
   hasStoredWalletSession,
   peekStoredWallet,
   signTransaction as signWithWallet,
@@ -27,6 +28,17 @@ export function useStellarWallet() {
       setWallet(next),
     );
   }, []);
+
+  // Another instance (the sidebar, the current screen) connected or
+  // disconnected: follow it, and start tracking kit state if it connected.
+  useEffect(
+    () =>
+      onWalletConnectionChange((next) => {
+        setWallet(next);
+        if (next) void subscribe().catch(() => {});
+      }),
+    [subscribe],
+  );
 
   useEffect(() => {
     let cancelled = false;
