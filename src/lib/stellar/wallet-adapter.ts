@@ -16,6 +16,7 @@
 import type { ModuleInterface, SwkAppTheme } from "@creit.tech/stellar-wallets-kit";
 import { isMobileBrowser } from "@/lib/platform";
 import { warmSharedAppKit } from "@/lib/wallet/appkit";
+import { getSignClient } from "@/lib/wallet/sign-client";
 import {
   connectStellarViaWalletConnect,
   signXdrViaWalletConnect,
@@ -44,6 +45,68 @@ let walletConnectModuleRef: ModuleInterface | null = null;
 
 // Set when mobile paired through our own SignClient instead of the kit.
 let directSession: { address: string; topic: string } | null = null;
+
+// The direct session's address + topic, persisted so a page that mounts later
+// (sidebar connect → offramp screen), a reload, or iOS evicting the tab while
+// the user is in their wallet can pick the session back up. WalletConnect
+// keeps the session itself under the SignClient's own storage; this is just
+// the pointer to it. Kept out of the kit's "@StellarWalletsKit/" namespace so
+// finding it never boots the kit on a phone.
+const DIRECT_SESSION_KEY = "settu:stellar-wc-session";
+
+function readStoredDirectSession(): { address: string; topic: string } | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(DIRECT_SESSION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (typeof parsed?.address !== "string" || typeof parsed?.topic !== "string") {
+      return null;
+    }
+    return { address: parsed.address, topic: parsed.topic };
+  } catch {
+    return null;
+  }
+}
+
+function setDirectSession(session: { address: string; topic: string } | null) {
+  directSession = session;
+  try {
+    if (session) {
+      window.localStorage.setItem(DIRECT_SESSION_KEY, JSON.stringify(session));
+    } else {
+      window.localStorage.removeItem(DIRECT_SESSION_KEY);
+    }
+  } catch {
+    // Storage blocked (Safari private mode): the session still works for this
+    // page, it just won't survive a reload.
+  }
+}
+
+function directWallet(session: { address: string }): StellarWallet {
+  return { type: "wallet_connect", publicKey: session.address, isConnected: true };
+}
+
+/**
+ * Every useStellarWallet() instance keeps its own state, and several are
+ * mounted at once (sidebar, the current screen, notifications…). Connecting or
+ * disconnecting in one has to reach the rest, or the screen you navigate to
+ * still thinks no wallet is connected.
+ */
+const walletListeners = new Set<(wallet: StellarWallet | null) => void>();
+
+function broadcastWallet(wallet: StellarWallet | null) {
+  walletListeners.forEach((listener) => listener(wallet));
+}
+
+export function onWalletConnectionChange(
+  listener: (wallet: StellarWallet | null) => void,
+): () => void {
+  walletListeners.add(listener);
+  return () => {
+    walletListeners.delete(listener);
+  };
+}
 
 /**
  * The kit's picker modal on desktop, restyled to the rebuilt /app: the same
@@ -259,12 +322,10 @@ export async function connectWallet(): Promise<StellarWallet> {
   if (onMobile) {
     try {
       const session = await connectStellarViaWalletConnect();
-      directSession = session;
-      return {
-        type: "wallet_connect",
-        publicKey: session.address,
-        isConnected: true,
-      };
+      setDirectSession(session);
+      const wallet = directWallet(session);
+      broadcastWallet(wallet);
+      return wallet;
     } catch (error: any) {
       throw new Error(explainConnectError(error));
     }
@@ -288,6 +349,7 @@ export async function connectWallet(): Promise<StellarWallet> {
 
   const wallet = toWallet(kit, address);
   if (!wallet) throw new Error("Wallet did not return an address");
+  broadcastWallet(wallet);
   return wallet;
 }
 
@@ -351,6 +413,7 @@ function explainConnectError(error: any): string {
  */
 export function hasStoredWalletSession(): boolean {
   if (typeof window === "undefined") return false;
+  if (directSession || readStoredDirectSession()) return true;
   try {
     for (let i = 0; i < window.localStorage.length; i++) {
       if (window.localStorage.key(i)?.startsWith("@StellarWalletsKit/")) {
@@ -374,6 +437,8 @@ export function hasStoredWalletSession(): boolean {
  */
 export function peekStoredWallet(): StellarWallet | null {
   if (typeof window === "undefined") return null;
+  const direct = directSession ?? readStoredDirectSession();
+  if (direct) return directWallet(direct);
   try {
     const publicKey = window.localStorage.getItem("@StellarWalletsKit/activeAddress");
     const type = window.localStorage.getItem("@StellarWalletsKit/selectedModuleId");
@@ -386,12 +451,26 @@ export function peekStoredWallet(): StellarWallet | null {
 
 /** Read a persisted session from kit state without prompting the wallet. */
 export async function restoreWallet(): Promise<StellarWallet | null> {
-  if (directSession) {
-    return {
-      type: "wallet_connect",
-      publicKey: directSession.address,
-      isConnected: true,
-    };
+  if (directSession) return directWallet(directSession);
+
+  // A direct session from an earlier page load: adopt it only if WalletConnect
+  // still holds it (the wallet may have ended it meanwhile, and a dead topic
+  // fails at signing time with "No matching key"). Never falls through to the
+  // kit — this is the phone path, where booting the kit is what hangs.
+  const stored = readStoredDirectSession();
+  if (stored) {
+    try {
+      const client = await getSignClient();
+      if (client.session.keys.includes(stored.topic)) {
+        directSession = stored;
+        return directWallet(stored);
+      }
+    } catch {
+      // No project id, or the client failed to start: treat as no session.
+    }
+    setDirectSession(null);
+    broadcastWallet(null);
+    return null;
   }
 
   try {
@@ -427,7 +506,7 @@ export async function onWalletStateChange(
   // A directly paired session isn't the kit's, so it has no state to report —
   // and booting it here would stand up a second SignClient on the same storage,
   // which is how the wallet's signature response goes missing.
-  if (directSession) return () => {};
+  if (directSession || readStoredDirectSession()) return () => {};
 
   const kit = await getKit();
   const { KitEventType } = await import("@creit.tech/stellar-wallets-kit");
@@ -455,12 +534,14 @@ export async function signTransaction(
 }
 
 export async function disconnectWallet(): Promise<void> {
-  if (directSession) {
-    const { topic } = directSession;
-    directSession = null;
-    await disconnectStellarWalletConnect(topic);
+  const direct = directSession ?? readStoredDirectSession();
+  if (direct) {
+    setDirectSession(null);
+    broadcastWallet(null);
+    await disconnectStellarWalletConnect(direct.topic);
     return;
   }
   const kit = await getKit();
   await kit.disconnect();
+  broadcastWallet(null);
 }
