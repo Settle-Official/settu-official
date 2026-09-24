@@ -1,3 +1,5 @@
+import { SettuLogo } from "@/components/brand/SettuLogo";
+
 const LINKS = [
   { label: "How it works", href: "#how-it-works" },
   { label: "Security", href: "#security" },
@@ -39,22 +41,19 @@ export function Footer() {
       {/* Oversized wordmark on the same seamless marquee as the chain logos
           (four copies, track slides -50%), fading into the background at
           both ends via the mask. Slowed right down — it's 300px type. */}
-      <div
-        className="landing-footer-wordmark w-full overflow-hidden"
-        aria-label="$ETTU"
-      >
+      <div className="landing-footer-wordmark w-full overflow-hidden">
         <div
           className="landing-marquee-track gap-[160px]"
           style={{ animationDuration: "48s" }}
         >
           {Array.from({ length: 4 }, (_, i) => (
-            <span
-              key={i}
-              aria-hidden={i > 0}
-              className="shrink-0 whitespace-nowrap font-[family-name:var(--font-inter)] text-[300px] font-semibold leading-[363px] max-[720px]:text-[100px] max-[720px]:leading-[121px]"
-            >
-              <span className="text-[#c9a962]">$</span>
-              <span className="text-white">ETTU</span>
+            // The first copy is the one screen readers get; the other three
+            // only exist to make the loop seamless.
+            <span key={i} className="shrink-0" aria-hidden={i > 0}>
+              <SettuLogo
+                decorative={i > 0}
+                className="h-[260px] w-auto max-[720px]:h-[87px]"
+              />
             </span>
           ))}
         </div>

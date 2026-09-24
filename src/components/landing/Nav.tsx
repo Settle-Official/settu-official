@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useStellarWallet } from "@/hooks/useStellarWallet";
+import { SettuLogo } from "@/components/brand/SettuLogo";
 
 const NAV_LINKS = [
   { label: "How it works", href: "#how-it-works" },
@@ -36,9 +37,11 @@ export function Nav() {
 
   return (
     <nav className="relative z-10 mx-auto mt-[20px] flex h-[72px] w-[890px] max-w-[calc(100%-32px)] items-center justify-between rounded-[40px] border border-white/15 bg-[#FFFFFF1A] py-[10px] px-[20px] shadow-[inset_0_1px_0_0_rgba(255,255,255,0.25),0_8px_32px_rgba(0,0,0,0.25)] backdrop-blur-xl max-[720px]:h-[70px] max-[720px]:max-w-[calc(100%-20px)]">
-      <div className="flex w-[120px] items-center gap-[4px] p-[10px]">
-        <span className="landing-fraunces text-[24px] font-semibold text-[#c9a962]">$</span>
-        <span className="font-[family-name:var(--font-inter)] text-[24px] text-white">ETTU</span>
+      {/* 120px wide on purpose: it balances the right-hand button so the
+          centre links sit on the true centre. At 25px tall the lockup is
+          98px wide, which fits with the padding. */}
+      <div className="flex w-[120px] items-center p-[10px]">
+        <SettuLogo className="h-[25px] w-auto" />
       </div>
       <div className="flex items-center gap-[50px] max-[720px]:hidden">
         {NAV_LINKS.map((link) => (

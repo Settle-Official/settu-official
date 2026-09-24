@@ -28,9 +28,8 @@ export const metadata: Metadata = {
     statusBarStyle: "black-translucent",
     title: "Settu",
   },
-  icons: {
-    apple: "/icons/icon-192.png",
-  },
+  // Favicons and the Apple touch icon come from Next's file conventions:
+  // app/favicon.ico, app/icon.svg and app/apple-icon.png.
 };
 
 export const viewport: Viewport = {

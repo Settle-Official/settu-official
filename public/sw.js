@@ -1,4 +1,6 @@
-const CACHE = "stellaramp-v2";
+// Bumped for the new logo: activate() purges every cache not named here, so
+// an installed app's offline fallback stops serving the old manifest/icons.
+const CACHE = "stellaramp-v3";
 const PRECACHE = ["/", "/manifest.json"];
 
 self.addEventListener("install", (event) => {

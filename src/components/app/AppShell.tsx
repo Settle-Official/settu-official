@@ -8,6 +8,8 @@ import { useWalletBar } from "./WalletBar";
 import { useAgentUnread } from "./AgentUnread";
 import { useScreenBack } from "./ScreenBack";
 import { useNotifications } from "./Notifications";
+import { SettuLogo } from "@/components/brand/SettuLogo";
+import { SettuMark } from "@/components/brand/SettuMark";
 import {
   ArrowLeftIcon,
   BellIcon,
@@ -119,14 +121,23 @@ export function AppShell({ children }: { readonly children: ReactNode }) {
     </nav>
   );
 
+  // Collapsed, the rail is 88px — too narrow for the mark and the 40px toggle
+  // side by side — so the mark sits above the toggle instead.
   const brand = (
-    <div className="flex h-[60px] items-center justify-between px-[20px] py-[10px]">
-      {!collapsed && (
-        <Link href="/app" className="font-[family-name:var(--font-inter)] text-[24px] font-semibold leading-[29px]">
-          <span className="text-[#c9a962]">$</span>
-          <span className="text-white">ETTU</span>
-        </Link>
-      )}
+    <div
+      className={
+        collapsed
+          ? "flex flex-col items-center gap-[12px] py-[14px]"
+          : "flex h-[60px] items-center justify-between px-[20px] py-[10px]"
+      }
+    >
+      <Link href="/app" aria-label="Settu — overview">
+        {collapsed ? (
+          <SettuMark decorative className="h-[34px] w-auto" />
+        ) : (
+          <SettuLogo decorative className="h-[26px] w-auto" />
+        )}
+      </Link>
       <button
         type="button"
         onClick={() => {
@@ -180,10 +191,7 @@ export function AppShell({ children }: { readonly children: ReactNode }) {
               keeps the narrower floating panel. */}
           <aside className="app-drawer-panel absolute left-[12px] top-[12px] flex h-[calc(100dvh-24px)] w-[264px] flex-col gap-[30px] rounded-[20px] bg-[#1e1c1c] shadow-[0_24px_48px_rgba(0,0,0,0.5)] max-[720px]:inset-0 max-[720px]:h-full max-[720px]:w-full max-[720px]:gap-[30px] max-[720px]:rounded-none max-[720px]:py-[40px]">
             <div className="flex h-[60px] items-center justify-between px-[20px] py-[10px] max-[720px]:h-[61px] max-[720px]:border-b max-[720px]:border-[#242323]">
-              <span className="font-[family-name:var(--font-inter)] text-[24px] font-semibold leading-[29px]">
-                <span className="text-[#c9a962]">$</span>
-                <span className="text-white">ETTU</span>
-              </span>
+              <SettuLogo className="h-[26px] w-auto" />
               <button
                 type="button"
                 onClick={() => setDrawerOpen(false)}
@@ -228,10 +236,7 @@ export function AppShell({ children }: { readonly children: ReactNode }) {
           </div>
 
           {/* Phone-only wordmark + menu. */}
-          <span className="hidden font-[family-name:var(--font-inter)] text-[24px] font-semibold leading-[29px] max-[720px]:inline">
-            <span className="text-[#c9a962]">$</span>
-            <span className="text-white">ETTU</span>
-          </span>
+          <SettuLogo className="hidden h-[26px] w-auto max-[720px]:block" />
           <button
             type="button"
             onClick={() => setDrawerOpen(true)}

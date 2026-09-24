@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { SettuLogo } from "@/components/brand/SettuLogo";
 
 const REASONS = [
   {
@@ -104,9 +105,8 @@ export function TrustSection() {
       className="relative flex flex-col items-center gap-[30px] overflow-hidden bg-[#121212] p-[100px] max-[720px]:gap-[40px] max-[720px]:p-[20px]"
     >
       <div className="flex w-[890px] max-w-full flex-col items-center gap-[20px] text-center">
-        <div className="flex items-center justify-center text-[36px] leading-[44px] font-semibold">
-          <span className="landing-fraunces text-[#c9a962]">$</span>
-          <span className="font-[family-name:var(--font-inter)] text-white">ETTU</span>
+        <div className="flex items-center justify-center">
+          <SettuLogo className="h-[40px] w-auto" />
         </div>
         <div className="flex flex-col gap-[14px] max-[720px]:items-center max-[720px]:gap-[10px]">
           <h2 className="landing-fraunces text-[36px] leading-[44px] text-[#e5dfdf] max-[720px]:w-[272px] max-[720px]:text-[26px] max-[720px]:leading-[32px] max-[720px]:text-white">
