@@ -460,3 +460,44 @@ button {
 .history-scroll::-webkit-scrollbar-thumb:hover {
   background: var(--accent-bright);
 }
+
+/* Settu loader. The sheen travels down the mark over most of the cycle —
+   slowly enough to read as flow down the ribbon, not a flash — then rests
+   briefly off-mark, so it has a rhythm rather than a treadmill. For SVG
+   elements, CSS px in a transform are user units: 400px carries the 110-unit
+   band fully across the 240-unit mark plus the skew's 41 units of lean. */
+@keyframes settu-sheen {
+  0% {
+    transform: translateY(0);
+  }
+  78%,
+  100% {
+    transform: translateY(400px);
+  }
+}
+@keyframes settu-breathe {
+  0%,
+  100% {
+    opacity: 0.86;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.settu-loader-sheen {
+  animation: settu-sheen 2.4s cubic-bezier(0.4, 0, 0.3, 1) infinite;
+}
+.settu-loader-mark {
+  animation: settu-breathe 2.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .settu-loader-sheen {
+    animation: none;
+    opacity: 0;
+  }
+  /* A slow change in brightness, not movement — acceptable under reduced
+     motion, and still tells the user something is happening. */
+  .settu-loader-mark {
+    animation-duration: 3.6s;
+  }
+}
