@@ -35,6 +35,8 @@ import { createOnrampOrder } from "@/lib/onramp/client";
 import type { ResolvedOnrampOrder } from "@/lib/offramp/agent-onramp-resolver";
 import * as StellarSdk from "@stellar/stellar-sdk";
 import { closeSheet } from "@/lib/wallet/appkit";
+import { isMobileBrowser } from "@/lib/platform";
+import { sourceChainOptions } from "@/lib/offramp/source-chain-options";
 
 /** Run a promise with a timeout. Rejects with a clear message on expiry. */
 function withTimeout<T>(
@@ -404,6 +406,8 @@ export interface StellarampDashboardProps {
   readonly embedded?: boolean;
 }
 
+const SOURCE_CHAIN_KEY = "settu:offramp-source-chain";
+
 export function StellarampDashboard({
   initialMode = "offramp",
   embedded = false,
@@ -427,6 +431,43 @@ export function StellarampDashboard({
 
   const [sourceChain, setSourceChain] =
     useState<OfframpSourceChainKey>("stellar");
+
+  // Phones only: keep the offramp's source chain across a remount (sidebar →
+  // another screen → back) and a reload, or the restored EVM/Solana wallet is
+  // hidden behind a Stellar "Connect Wallet". It also rides in the URL
+  // (?source=solana) because Phantom has no WalletConnect: AppKit reopens
+  // this exact URL inside Phantom's in-app browser, a fresh page that would
+  // otherwise land on Stellar. Desktop keeps its current behaviour.
+  const sourceRestoredRef = useRef(false);
+  useEffect(() => {
+    if (initialMode !== "offramp" || !isMobileBrowser()) return;
+    const valid = new Set<string>(sourceChainOptions().map((o) => o.code));
+    let saved = new URLSearchParams(window.location.search).get("source");
+    if (!saved) {
+      try {
+        saved = window.localStorage.getItem(SOURCE_CHAIN_KEY);
+      } catch {
+        // Storage blocked: start on Stellar.
+      }
+    }
+    if (saved && valid.has(saved)) {
+      setSourceChain(saved as OfframpSourceChainKey);
+    }
+    sourceRestoredRef.current = true;
+  }, [initialMode]);
+  useEffect(() => {
+    if (initialMode !== "offramp" || !isMobileBrowser()) return;
+    if (!sourceRestoredRef.current) return;
+    try {
+      window.localStorage.setItem(SOURCE_CHAIN_KEY, sourceChain);
+    } catch {
+      // Storage blocked: the URL below still carries it.
+    }
+    const url = new URL(window.location.href);
+    if (sourceChain === "stellar") url.searchParams.delete("source");
+    else url.searchParams.set("source", sourceChain);
+    window.history.replaceState(window.history.state, "", url);
+  }, [sourceChain, initialMode]);
 
   const isSolanaSource = sourceChain === "solana";
   const isEvmSource = sourceChain !== "stellar" && !isSolanaSource;

@@ -2,6 +2,34 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import { isMobileBrowser } from "@/lib/platform";
+import { getSignClient } from "@/lib/wallet/sign-client";
+
+// Phones only: the WalletConnect session's address + topic, so the wallet
+// survives a remount (moving between screens) or a reload. WalletConnect
+// keeps the session itself in the SignClient's storage; this is the pointer
+// back to it. Desktop keeps its current behaviour.
+const WC_SESSION_KEY = "settu:evm-wc-session";
+
+function saveWcSession(session: { address: string; topic: string } | null) {
+  try {
+    if (session) window.localStorage.setItem(WC_SESSION_KEY, JSON.stringify(session));
+    else window.localStorage.removeItem(WC_SESSION_KEY);
+  } catch {
+    // Storage blocked: the session just won't outlive this page.
+  }
+}
+
+function readWcSession(): { address: `0x${string}`; topic: string } | null {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(WC_SESSION_KEY) ?? "null");
+    if (typeof parsed?.address !== "string" || typeof parsed?.topic !== "string") {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
 
 // The Stellar wallet path bounds its own sign step at 150s (signWithTimeout
 // in StellarampDashboard.tsx) after a confirmed real-world incident: a
@@ -92,6 +120,34 @@ export function useEvmWallet() {
     setTransport(null);
     topicRef.current = null;
     injectedRef.current = null;
+  }, []);
+
+  // Pick a phone's WalletConnect session back up, but only if the SignClient
+  // still holds it: the wallet may have ended it meanwhile, and a dead topic
+  // fails at signing time with "No matching key".
+  useEffect(() => {
+    if (!isMobileBrowser()) return;
+    const stored = readWcSession();
+    if (!stored) return;
+    let cancelled = false;
+    (async () => {
+      const client = await getSignClient();
+      if (cancelled) return;
+      if (!client.session.keys.includes(stored.topic)) {
+        saveWcSession(null);
+        return;
+      }
+      // A connect started meanwhile wins.
+      if (topicRef.current || injectedRef.current) return;
+      topicRef.current = stored.topic;
+      setAddress(stored.address);
+      setTransport("walletconnect");
+    })().catch(() => {
+      // No project id, or the client failed to start: stay disconnected.
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // --- injected (EIP-1193) account/chain change handling -------------------
@@ -201,6 +257,7 @@ export function useEvmWallet() {
       topicRef.current = session.topic;
       setAddress(session.address);
       setTransport("walletconnect");
+      if (isMobileBrowser()) saveWcSession(session);
       setIsConnectModalOpen(false);
     } catch (err: any) {
       if (attemptRef.current === attempt) {
@@ -227,6 +284,7 @@ export function useEvmWallet() {
         await disconnectEvmSession(topicRef.current);
       }
     } finally {
+      if (transport === "walletconnect") saveWcSession(null);
       clearConnection();
       setError(null);
     }
