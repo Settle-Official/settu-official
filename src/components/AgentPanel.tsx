@@ -990,7 +990,10 @@ function ChatBubble({ side, tone, stepKind, children }: ChatBubbleProps) {
         // looks like inconsistent text, and the design sets every bubble the
         // same.
         className={`relative max-w-[70%] break-words rounded-[20px] px-[24px] py-[16px] font-[family-name:var(--font-sora)] leading-[26px] max-[720px]:max-w-[78%] max-[720px]:rounded-[14px] max-[720px]:px-[15px] max-[720px]:py-[13px] max-[720px]:text-[14.5px] max-[720px]:leading-[21px] ${
-          left ? "rounded-bl-none" : "rounded-br-none"
+          // Repeated at the phone breakpoint: its rounded-[14px] resets all
+          // four corners, which re-rounds the tail's corner and opens the gap
+          // squaring it off was there to close.
+          left ? "rounded-bl-none max-[720px]:rounded-bl-none" : "rounded-br-none max-[720px]:rounded-br-none"
         } ${tone === "narration" ? "text-[15px]" : "text-[18px]"}`}
       >
         {children}
