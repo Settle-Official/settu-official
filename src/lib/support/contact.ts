@@ -47,7 +47,7 @@ export const TELEGRAM_SUPPORT = {
 export const SOCIAL_LINKS: readonly SocialLink[] = [
   { label: "X", href: "https://x.com/settu_official1" },
   { label: "LinkedIn", href: "https://www.linkedin.com/" },
-  { label: "Instagram", href: "https://www.instagram.com/" },
+  { label: "Instagram", href: "https://www.instagram.com/settu.official1" },
 ];
 
 export type ReportCategory =
