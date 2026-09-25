@@ -59,7 +59,7 @@ export function Faq() {
       <div className="flex flex-col items-center gap-[20px] text-center">
         <span
           style={{ "--glass-tint": "rgba(255,255,255,0.1)" } as CSSProperties}
-          className="liquid-glass relative rounded-[20px] px-[20px] py-[4px] font-[family-name:var(--font-inter)] text-[18px] leading-[28px] text-white"
+          className="liquid-glass is-subtle relative rounded-[20px] px-[20px] py-[4px] font-[family-name:var(--font-inter)] text-[18px] leading-[28px] text-white"
         >
           FAQ
         </span>
@@ -88,7 +88,7 @@ export function Faq() {
                 if (window.getSelection()?.toString()) return;
                 setOpenIndex(open ? null : i);
               }}
-              className="landing-faq-item liquid-glass relative w-[648px] max-w-full cursor-pointer rounded-[20px] px-[20px] py-[30px] max-[720px]:py-[16px]"
+              className="landing-faq-item liquid-glass is-subtle relative w-[648px] max-w-full cursor-pointer rounded-[20px] px-[20px] py-[30px] max-[720px]:py-[16px]"
             >
               <h3>
                 <button

@@ -627,3 +627,20 @@ button {
   );
   pointer-events: none;
 }
+
+/* A quieter glass for secondary surfaces (the landing FAQ): same rim, sheen
+   and blur, turned down, so a stack of them doesn't compete with the
+   headline surfaces. */
+.liquid-glass.is-subtle {
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  backdrop-filter: blur(16px) saturate(140%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    0 4px 16px rgba(0, 0, 0, 0.16);
+}
+.liquid-glass.is-subtle::before {
+  opacity: 0.4;
+}
+.liquid-glass.is-subtle::after {
+  opacity: 0.35;
+}
