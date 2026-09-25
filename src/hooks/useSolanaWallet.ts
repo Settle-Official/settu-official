@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { VersionedTransaction, Keypair } from "@solana/web3.js";
 import bs58 from "bs58";
 import {
@@ -10,6 +10,18 @@ import {
   getSolanaProvider,
   subscribeSolanaAccount,
 } from "@/lib/wallet/appkit";
+
+// AppKit's own record of which chains are connected (SafeLocalStorageKeys
+// .CONNECTED_NAMESPACES in @reown/appkit-common), read without loading AppKit.
+function hasStoredSolanaConnection(): boolean {
+  try {
+    return (window.localStorage.getItem("@appkit/connected_namespaces") ?? "")
+      .split(",")
+      .includes("solana");
+  } catch {
+    return false;
+  }
+}
 
 /**
  * One Solana wallet, via Reown AppKit.
@@ -25,27 +37,42 @@ export function useSolanaWallet() {
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Restore an existing connection and follow connects/disconnects made inside
-  // AppKit's own UI, which this hook never sees otherwise.
-  useEffect(() => {
-    let cancelled = false;
-    let unsubscribe: (() => void) | undefined;
-
-    (async () => {
-      const existing = await getSolanaAddress();
-      if (!cancelled && existing) setAddress(existing);
-      unsubscribe = await subscribeSolanaAccount((next) => {
-        if (!cancelled) setAddress(next);
-      });
-    })().catch(() => {
-      // AppKit failed to initialise; connect() surfaces the real error on click.
+  // Follow connects/disconnects made inside AppKit's own UI, which this hook
+  // never sees otherwise. Idempotent: the restore path and connect() both
+  // call it.
+  const unsubscribeRef = useRef<(() => void) | null>(null);
+  const unmountedRef = useRef(false);
+  const follow = useCallback(async () => {
+    if (unsubscribeRef.current) return;
+    const unsubscribe = await subscribeSolanaAccount((next) => {
+      if (!unmountedRef.current) setAddress(next);
     });
+    if (unmountedRef.current || unsubscribeRef.current) unsubscribe();
+    else unsubscribeRef.current = unsubscribe;
+  }, []);
+
+  // Restore an existing connection. This hook is mounted app-wide, and
+  // starting AppKit is a large download plus a relay connection, so only do
+  // it when AppKit recorded a Solana connection; otherwise it waits for a
+  // connect click.
+  useEffect(() => {
+    unmountedRef.current = false;
+    if (hasStoredSolanaConnection()) {
+      (async () => {
+        const existing = await getSolanaAddress();
+        if (!unmountedRef.current && existing) setAddress(existing);
+        await follow();
+      })().catch(() => {
+        // AppKit failed to initialise; connect() surfaces the real error on click.
+      });
+    }
 
     return () => {
-      cancelled = true;
-      unsubscribe?.();
+      unmountedRef.current = true;
+      unsubscribeRef.current?.();
+      unsubscribeRef.current = null;
     };
-  }, []);
+  }, [follow]);
 
   const connect = useCallback(async () => {
     setIsConnecting(true);
@@ -53,6 +80,7 @@ export function useSolanaWallet() {
     try {
       const connected = await connectSolana();
       setAddress(connected);
+      void follow().catch(() => {});
       return connected;
     } catch (err: any) {
       const message = err?.message || "Failed to connect wallet";
@@ -65,7 +93,7 @@ export function useSolanaWallet() {
     } finally {
       setIsConnecting(false);
     }
-  }, []);
+  }, [follow]);
 
   const disconnect = useCallback(async () => {
     try {

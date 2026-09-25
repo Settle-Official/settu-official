@@ -9,7 +9,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { useStellarWallet } from "@/hooks/useStellarWallet";
+import { useActiveWallet } from "./ActiveWallet";
 import { enabledOfframpChainLabels } from "@/lib/cctp/evm-chains";
 import { fiatSymbol } from "@/lib/format/currency";
 import { useWalletHistory, type HistoryRow } from "./useWalletHistory";
@@ -193,8 +193,10 @@ const NotificationsContext = createContext<NotificationsValue>({
  * Notification page consumes this rather than fetching again.
  */
 export function NotificationsProvider({ children }: { readonly children: ReactNode }) {
-  const { wallet } = useStellarWallet();
-  const address = wallet?.publicKey;
+  // The last-used wallet, whatever its chain: history is recorded under the
+  // address a transfer was paid from.
+  const { active } = useActiveWallet();
+  const address = active.isConnected ? active.address : undefined;
   const { rows } = useWalletHistory(address);
   const [readIds, setReadIds] = useState<readonly string[]>([]);
   // The cached copy paints first. Reading it in an effect rather than in

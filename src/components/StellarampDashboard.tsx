@@ -16,8 +16,7 @@ import { PlatformStatsCard } from "@/components/PlatformStatsCard";
 import { OnrampPanel } from "@/components/OnrampPanel";
 import { useStellarWallet } from "@/hooks/useStellarWallet";
 import { useWalletBar } from "@/components/app/WalletBar";
-import { useEvmWallet } from "@/hooks/useEvmWallet";
-import { useSolanaWallet } from "@/hooks/useSolanaWallet";
+import { useActiveWallet } from "@/components/app/ActiveWallet";
 import { Keypair } from "@solana/web3.js";
 import {
   EVM_SOURCE_CHAINS,
@@ -26,7 +25,6 @@ import {
 } from "@/lib/cctp/evm-chains";
 import { TransactionStorage, Transaction } from "@/lib/transaction-storage";
 import { ErrorToast } from "@/components/ErrorToast";
-import { EvmConnectModal } from "@/components/EvmConnectModal";
 import {
   TransactionProgressModal,
   type OfframpStep,
@@ -426,11 +424,17 @@ export function StellarampDashboard({
   // WalletConnect) and Solana (Wallet Standard). Only one wallet of the three
   // is ever connected at a time; switching the source-chain dropdown tears
   // the others down (see handleSourceChainChange).
-  const evmWallet = useEvmWallet();
-  const solanaWallet = useSolanaWallet();
-
-  const [sourceChain, setSourceChain] =
-    useState<OfframpSourceChainKey>("stellar");
+  // Shared with the whole app shell (see ActiveWallet.tsx), so the wallet and
+  // the chosen source chain survive leaving this screen. Onramp only ever
+  // uses Stellar, whatever the offramp last used.
+  const {
+    evm: evmWallet,
+    solana: solanaWallet,
+    sourceChain: sharedSourceChain,
+    setSourceChain,
+  } = useActiveWallet();
+  const sourceChain: OfframpSourceChainKey =
+    initialMode === "onramp" ? "stellar" : sharedSourceChain;
 
   // Phones only: keep the offramp's source chain across a remount (sidebar →
   // another screen → back) and a reload, or the restored EVM/Solana wallet is
@@ -2461,27 +2465,6 @@ export function StellarampDashboard({
       </section>
 
       <ErrorToast message={toastError} onDismiss={() => setToastError(null)} />
-
-      <EvmConnectModal
-        open={evmWallet.isConnectModalOpen}
-        injectedWallets={evmWallet.injectedWallets}
-        pairingUri={evmWallet.pairingUri}
-        isConnecting={evmWallet.isConnecting}
-        error={evmWallet.error}
-        onPickInjected={(rdns) => {
-          void evmWallet.connectInjected(rdns).catch((e: any) => {
-            setToastError(e?.message || "Failed to connect wallet");
-          });
-        }}
-        onPickWalletConnect={() => {
-          void evmWallet.connectWalletConnect().catch((e: any) => {
-            setToastError(e?.message || "Failed to connect wallet");
-          });
-        }}
-        onClose={evmWallet.closeConnect}
-      />
-
-
 
       <TransactionProgressModal
         isOpen={showProgressModal && offrampInitiator === "form" && !embedded}
