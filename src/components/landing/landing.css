@@ -428,6 +428,19 @@
     0 10px 36px rgba(0, 0, 0, 0.32),
     0 2px 6px rgba(0, 0, 0, 0.18);
 }
+/* Scrolled: page content, not hero art, passes underneath, so the glass
+   frosts over: a smoky tint and a stronger blur keep the links legible. */
+.liquid-glass.is-scrolled {
+  background: rgba(18, 18, 18, 0.55);
+  -webkit-backdrop-filter: blur(30px) saturate(170%) brightness(1.05);
+  backdrop-filter: blur(30px) saturate(170%) brightness(1.05);
+}
+.liquid-glass {
+  transition:
+    background-color 0.3s ease,
+    -webkit-backdrop-filter 0.3s ease,
+    backdrop-filter 0.3s ease;
+}
 /* The rim: a 1px gradient ring, masked to the border box's edge. */
 .liquid-glass::before {
   content: "";
@@ -468,5 +481,13 @@
     rgba(255, 255, 255, 0) 60%
   );
   pointer-events: none;
+}
+
+/* The nav is fixed over the page, so an in-page link (How it works, FAQ…)
+   has to stop short of it or the section heading lands underneath. Lenis
+   reads scroll-margin-top when it scrolls to an anchor. */
+#landing-root section[id],
+#landing-root footer[id] {
+  scroll-margin-top: calc(112px + env(safe-area-inset-top, 0px));
 }
 

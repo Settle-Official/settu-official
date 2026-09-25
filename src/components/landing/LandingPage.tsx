@@ -1,5 +1,6 @@
 import { Fraunces, Sora, Inter } from "next/font/google";
 import { Hero } from "./Hero";
+import { Nav } from "./Nav";
 import { StatsStrip } from "./StatsStrip";
 import { HowItWorks } from "./HowItWorks";
 import { TrustSection } from "./TrustSection";
@@ -38,6 +39,7 @@ export function LandingPage() {
       className={`${fraunces.variable} ${sora.variable} ${inter.variable} min-h-screen bg-[#121212] text-white font-[family-name:var(--font-sora)]`}
     >
       <LandingScale targetId="landing-root" />
+      <Nav />
       <Hero />
       <StatsStrip />
       <HowItWorks />

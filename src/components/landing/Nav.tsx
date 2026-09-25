@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useStellarWallet } from "@/hooks/useStellarWallet";
 import { SettuLogo } from "@/components/brand/SettuLogo";
 
@@ -14,6 +14,16 @@ const NAV_LINKS = [
 export function Nav() {
   const { wallet, isConnected, isConnecting, connect, disconnect } = useStellarWallet();
   const [menuOpen, setMenuOpen] = useState(false);
+  // Once the page moves, content scrolls under the fixed nav, and the clear
+  // glass that suits the hero art lets it read through. Scrolled, the glass
+  // frosts over (see .liquid-glass.is-scrolled).
+  const [scrolled, setScrolled] = useState(false);
+  useEffect(() => {
+    const update = () => setScrolled(window.scrollY > 8);
+    update();
+    window.addEventListener("scroll", update, { passive: true });
+    return () => window.removeEventListener("scroll", update);
+  }, []);
 
   const buttonLabel = isConnecting
     ? "Connecting…"
@@ -37,9 +47,13 @@ export function Nav() {
 
   return (
     <nav
-      // Clears the status bar when installed to the home screen (see .app-shell).
-      style={{ marginTop: "calc(20px + env(safe-area-inset-top, 0px))" }}
-      className="liquid-glass relative z-10 mx-auto flex h-[72px] w-[890px] max-w-[calc(100%-32px)] items-center justify-between rounded-[40px] py-[10px] px-[20px] max-[720px]:h-[70px] max-[720px]:max-w-[calc(100%-20px)]">
+      // Fixed, and rendered by LandingPage outside every section: the hero
+      // (and others) are their own stacking contexts, so inside one even
+      // z-50 lost to later sections, which painted over the glass. The
+      // hero keeps a spacer in its place. The top offset clears the status
+      // bar when installed to the home screen (see .app-shell).
+      style={{ top: "calc(20px + env(safe-area-inset-top, 0px))" }}
+      className={`liquid-glass ${scrolled ? "is-scrolled" : ""} fixed inset-x-0 z-50 mx-auto flex h-[72px] w-[890px] max-w-[calc(100%-32px)] items-center justify-between rounded-[40px] py-[10px] px-[20px] max-[720px]:h-[70px] max-[720px]:max-w-[calc(100%-20px)]`}>
       {/* 120px wide on purpose: it balances the right-hand button so the
           centre links sit on the true centre. At 25px tall the lockup is
           98px wide, which fits with the padding. */}
