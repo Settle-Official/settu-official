@@ -39,7 +39,7 @@ export function Nav() {
     <nav
       // Clears the status bar when installed to the home screen (see .app-shell).
       style={{ marginTop: "calc(20px + env(safe-area-inset-top, 0px))" }}
-      className="relative z-10 mx-auto flex h-[72px] w-[890px] max-w-[calc(100%-32px)] items-center justify-between rounded-[40px] border border-white/15 bg-[#FFFFFF1A] py-[10px] px-[20px] shadow-[inset_0_1px_0_0_rgba(255,255,255,0.25),0_8px_32px_rgba(0,0,0,0.25)] backdrop-blur-xl max-[720px]:h-[70px] max-[720px]:max-w-[calc(100%-20px)]">
+      className="liquid-glass relative z-10 mx-auto flex h-[72px] w-[890px] max-w-[calc(100%-32px)] items-center justify-between rounded-[40px] py-[10px] px-[20px] max-[720px]:h-[70px] max-[720px]:max-w-[calc(100%-20px)]">
       {/* 120px wide on purpose: it balances the right-hand button so the
           centre links sit on the true centre. At 25px tall the lockup is
           98px wide, which fits with the padding. */}
