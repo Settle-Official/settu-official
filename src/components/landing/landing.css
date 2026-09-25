@@ -256,6 +256,8 @@
    the card grows/shrinks smoothly without measuring content height. The
    trigger's bottom rule and padding only exist while open, and animate in
    step with the panel so the card doesn't jump when it toggles. */
+/* Also .liquid-glass (globals.css): this file loads after it, so the gold
+   tint and its hover here override the glass's default tint. */
 .landing-faq-item {
   background: rgba(122, 104, 65, 0.2);
   transition: background-color 0.25s ease-out;
