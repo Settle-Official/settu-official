@@ -229,14 +229,19 @@
    changes), so the translucent card over the dome glow stays cheap to
    composite. */
 .landing-step-card {
-  transition:
-    transform 0.45s cubic-bezier(0.22, 1, 0.36, 1),
-    border-color 0.45s ease-out;
+  transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1);
   will-change: transform;
 }
 .landing-step-card:hover {
   transform: translateY(-12px);
-  border-color: rgba(255, 255, 255, 0.2);
+}
+/* The card's edge is liquid glass's rim layer, not a border, so hover
+   brightens that instead. */
+.landing-step-card::before {
+  transition: filter 0.45s ease-out;
+}
+.landing-step-card:hover::before {
+  filter: brightness(1.6);
 }
 @media (prefers-reduced-motion: reduce) {
   .landing-step-card {

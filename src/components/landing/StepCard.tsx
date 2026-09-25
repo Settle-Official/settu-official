@@ -1,5 +1,5 @@
 import Image from "next/image";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 
 interface StepCardProps {
   readonly icon: string;
@@ -25,7 +25,8 @@ export function StepCard({
 }: StepCardProps) {
   return (
     <div
-      className={`landing-step-card relative z-[1] flex h-[483px] w-[362px] max-w-full flex-col gap-[50px] rounded-[40px] border border-white/10 bg-[rgba(255,255,255,0.1)] p-[50px_30px] max-[720px]:h-[454px] ${
+      style={{ "--glass-tint": "rgba(255,255,255,0.1)" } as CSSProperties}
+      className={`landing-step-card liquid-glass relative z-[1] flex h-[483px] w-[362px] max-w-full flex-col gap-[50px] rounded-[40px] p-[50px_30px] max-[720px]:h-[454px] ${
         align === "center"
           ? "justify-center items-start max-[720px]:p-[30px]"
           : "justify-between items-center"
