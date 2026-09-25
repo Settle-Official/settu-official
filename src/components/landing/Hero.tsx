@@ -3,7 +3,6 @@ import { HeroBeams } from "./HeroBeams";
 import { HeroCoins } from "./HeroCoins";
 import { HeroDots } from "./HeroDots";
 import { HorizonGlow } from "./HorizonGlow";
-import { Nav } from "./Nav";
 
 export function Hero() {
   // Clip horizontally only (the grid asset overflows to the right) and stack
@@ -34,10 +33,17 @@ export function Hero() {
         <HeroDots className="absolute right-[40px] top-[47px] max-[720px]:right-[10px] max-[720px]:top-[20px] max-[720px]:origin-top-right max-[720px]:scale-[0.7]" />
       </div>
 
-      <Nav />
+      {/* The nav's place: the nav itself is fixed and rendered by
+          LandingPage, outside this section's stacking context. */}
+      <div
+        aria-hidden="true"
+        style={{ marginTop: "calc(20px + env(safe-area-inset-top, 0px))" }}
+        className="h-[72px] max-[720px]:h-[70px]"
+      />
 
       {/* Content — px/pb match the original hero padding; pt trimmed since
-          Nav (with its own mt-[20px]) now sits above this in normal flow. */}
+          the nav's spacer (with its own 20px top margin) sits above this in
+          normal flow. */}
       <div className="relative px-[257px] pb-[103px] max-[720px]:px-[10px] max-[720px]:pb-[90px]">
         {/* Horizon glow below the CTA: a wide, shallow arc whose rim sits
             just above the hero's bottom edge and fades into the stats strip.

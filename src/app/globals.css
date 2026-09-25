@@ -550,3 +550,97 @@ button {
     animation-duration: 3.6s;
   }
 }
+
+/* iOS-style "liquid glass" (landing nav, the app header and dashboard
+   cards): a heavy, colour-boosted blur of whatever is behind, a specular rim that catches light hardest on the
+   top-left and bottom-right edges, a sheen across the top half and a faint
+   glow along the bottom. Pure CSS: an SVG refraction filter only works as a
+   backdrop-filter in Chromium, so Safari (the iPhone this is modelled on)
+   would silently lose it. */
+.liquid-glass {
+  isolation: isolate;
+  /* Each surface keeps its own tint (style={{ "--glass-tint": … }}). No
+     `position` here: it would override the landing nav's `fixed` (this
+     file is unlayered, so it beats Tailwind utilities); the pseudo-element
+     layers need the element positioned, so add `relative` where it isn't. */
+  background: var(--glass-tint, rgba(255, 255, 255, 0.07));
+  -webkit-backdrop-filter: blur(22px) saturate(185%) brightness(1.1);
+  backdrop-filter: blur(22px) saturate(185%) brightness(1.1);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.4),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.1),
+    inset 0 -14px 24px -14px rgba(255, 255, 255, 0.16),
+    0 10px 36px rgba(0, 0, 0, 0.32),
+    0 2px 6px rgba(0, 0, 0, 0.18);
+}
+/* Landing nav, scrolled: page content, not hero art, passes underneath, so the glass
+   frosts over: a smoky tint and a stronger blur keep the links legible. */
+.liquid-glass.is-scrolled {
+  background: rgba(18, 18, 18, 0.55);
+  -webkit-backdrop-filter: blur(30px) saturate(170%) brightness(1.05);
+  backdrop-filter: blur(30px) saturate(170%) brightness(1.05);
+}
+.liquid-glass {
+  transition:
+    background-color 0.3s ease,
+    -webkit-backdrop-filter 0.3s ease,
+    backdrop-filter 0.3s ease;
+}
+/* The rim: a 1px gradient ring, masked to the border box's edge. */
+.liquid-glass::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  padding: 1px;
+  border-radius: inherit;
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.75) 0%,
+    rgba(255, 255, 255, 0.14) 28%,
+    rgba(255, 255, 255, 0.04) 55%,
+    rgba(255, 255, 255, 0.12) 78%,
+    rgba(255, 255, 255, 0.5) 100%
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box exclude,
+    linear-gradient(#000 0 0);
+  pointer-events: none;
+}
+/* The sheen: under the content (z-index -1 inside the isolated pill), so
+   the logo and links stay crisp. */
+.liquid-glass::after {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  z-index: -1;
+  border-radius: inherit;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.16) 0%,
+    rgba(255, 255, 255, 0.04) 45%,
+    rgba(255, 255, 255, 0) 60%
+  );
+  pointer-events: none;
+}
+
+/* A quieter glass for secondary surfaces (the landing FAQ): same rim, sheen
+   and blur, turned down, so a stack of them doesn't compete with the
+   headline surfaces. */
+.liquid-glass.is-subtle {
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  backdrop-filter: blur(16px) saturate(140%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    0 4px 16px rgba(0, 0, 0, 0.16);
+}
+.liquid-glass.is-subtle::before {
+  opacity: 0.4;
+}
+.liquid-glass.is-subtle::after {
+  opacity: 0.35;
+}

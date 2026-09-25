@@ -2,7 +2,13 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useState,
+  type CSSProperties,
+  type FormEvent,
+  type ReactNode,
+} from "react";
 import { useActiveWallet } from "./ActiveWallet";
 import { useWalletBar } from "./WalletBar";
 import { useAgentUnread } from "./AgentUnread";
@@ -227,7 +233,9 @@ export function AppShell({ children }: { readonly children: ReactNode }) {
             button. Search, notifications and the wallet pill move inside the
             drawer — on a 390px screen they wrapped the bar onto two rows and
             ate the top of every screen. */}
-        <header className="flex h-[94px] items-center justify-between gap-[20px] rounded-[20px] border border-white/15 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.25)] backdrop-blur-xl bg-white/10 px-[40px] py-[20px] max-[720px]:h-[70px] max-[720px]:rounded-[40px] max-[720px]:px-[20px] max-[720px]:py-[10px]">
+        <header
+          style={{ "--glass-tint": "rgba(255,255,255,0.1)" } as CSSProperties}
+          className="liquid-glass relative flex h-[94px] items-center justify-between gap-[20px] rounded-[20px] px-[40px] py-[20px] max-[720px]:h-[70px] max-[720px]:rounded-[40px] max-[720px]:px-[20px] max-[720px]:py-[10px]">
           <div className="flex items-center gap-[14px] max-[720px]:hidden">
             <button
               type="button"

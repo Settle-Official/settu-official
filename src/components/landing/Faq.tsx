@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 
 const ITEMS = [
   {
@@ -57,7 +57,10 @@ export function Faq() {
       className="flex flex-col items-center gap-[50px] bg-[#121212] p-[100px] max-[720px]:p-[20px]"
     >
       <div className="flex flex-col items-center gap-[20px] text-center">
-        <span className="rounded-[20px] border border-white/15 bg-white/10 px-[20px] py-[4px] font-[family-name:var(--font-inter)] text-[18px] leading-[28px] text-white shadow-[inset_0_1px_0_0_rgba(255,255,255,0.25)] backdrop-blur-xl">
+        <span
+          style={{ "--glass-tint": "rgba(255,255,255,0.1)" } as CSSProperties}
+          className="liquid-glass is-subtle relative rounded-[20px] px-[20px] py-[4px] font-[family-name:var(--font-inter)] text-[18px] leading-[28px] text-white"
+        >
           FAQ
         </span>
         <h2 className="font-[family-name:var(--font-sora)] text-[28px] leading-[40px] text-white max-[720px]:text-[24px]">
@@ -85,7 +88,7 @@ export function Faq() {
                 if (window.getSelection()?.toString()) return;
                 setOpenIndex(open ? null : i);
               }}
-              className="landing-faq-item w-[648px] max-w-full cursor-pointer rounded-[20px] px-[20px] py-[30px] max-[720px]:py-[16px]"
+              className="landing-faq-item liquid-glass is-subtle relative w-[648px] max-w-full cursor-pointer rounded-[20px] px-[20px] py-[30px] max-[720px]:py-[16px]"
             >
               <h3>
                 <button

@@ -229,14 +229,19 @@
    changes), so the translucent card over the dome glow stays cheap to
    composite. */
 .landing-step-card {
-  transition:
-    transform 0.45s cubic-bezier(0.22, 1, 0.36, 1),
-    border-color 0.45s ease-out;
+  transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1);
   will-change: transform;
 }
 .landing-step-card:hover {
   transform: translateY(-12px);
-  border-color: rgba(255, 255, 255, 0.2);
+}
+/* The card's edge is liquid glass's rim layer, not a border, so hover
+   brightens that instead. */
+.landing-step-card::before {
+  transition: filter 0.45s ease-out;
+}
+.landing-step-card:hover::before {
+  filter: brightness(1.6);
 }
 @media (prefers-reduced-motion: reduce) {
   .landing-step-card {
@@ -251,6 +256,8 @@
    the card grows/shrinks smoothly without measuring content height. The
    trigger's bottom rule and padding only exist while open, and animate in
    step with the panel so the card doesn't jump when it toggles. */
+/* Also .liquid-glass (globals.css): this file loads after it, so the gold
+   tint and its hover here override the glass's default tint. */
 .landing-faq-item {
   background: rgba(122, 104, 65, 0.2);
   transition: background-color 0.25s ease-out;
@@ -409,3 +416,12 @@
     transition: none;
   }
 }
+
+/* The nav is fixed over the page, so an in-page link (How it works, FAQ…)
+   has to stop short of it or the section heading lands underneath. Lenis
+   reads scroll-margin-top when it scrolls to an anchor. */
+#landing-root section[id],
+#landing-root footer[id] {
+  scroll-margin-top: calc(112px + env(safe-area-inset-top, 0px));
+}
+
