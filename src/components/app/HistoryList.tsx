@@ -2,7 +2,7 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useStellarWallet } from "@/hooks/useStellarWallet";
+import { useActiveWallet } from "./ActiveWallet";
 import { fiatSymbol } from "@/lib/format/currency";
 import { FunnelIcon, SearchIcon } from "./icons";
 import { useWalletHistory, type HistoryRow } from "./useWalletHistory";
@@ -104,10 +104,11 @@ function Cell({ children, color }: { readonly children: React.ReactNode; readonl
 }
 
 export function HistoryList({ notificationsView = false }: { readonly notificationsView?: boolean }) {
-  const { wallet } = useStellarWallet();
+  const { active } = useActiveWallet();
+  const address = active.isConnected ? active.address : undefined;
   const router = useRouter();
   const params = useSearchParams();
-  const { rows, isLoading } = useWalletHistory(wallet?.publicKey);
+  const { rows, isLoading } = useWalletHistory(address);
 
   // The top bar's search pushes here as `?q=`, so the field is seeded from
   // the URL and keeps writing back to it — one search, two entry points.
@@ -148,7 +149,7 @@ export function HistoryList({ notificationsView = false }: { readonly notificati
     [rows, q, status],
   );
 
-  const empty = !wallet?.publicKey
+  const empty = !address
     ? "Connect your wallet to see its transactions."
     : isLoading && rows.length === 0
       ? "Loading your transactions…"

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { useStellarWallet } from "@/hooks/useStellarWallet";
+import { useActiveWallet } from "./ActiveWallet";
 import { useWalletHistory, type HistoryRow } from "./useWalletHistory";
 import {
   ArrowsUpDownIcon,
@@ -39,9 +39,10 @@ const QUICK_ACTIONS = [
 ];
 
 export function Overview() {
-  const { wallet } = useStellarWallet();
+  const { active } = useActiveWallet();
+  const address = active.isConnected ? active.address : undefined;
   // Server record (every device) merged with this browser's own rows.
-  const { rows } = useWalletHistory(wallet?.publicKey);
+  const { rows } = useWalletHistory(address);
 
   const stats = useMemo(() => {
     const settled = rows.filter((row) => row.status !== "failed");

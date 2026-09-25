@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
-import { useStellarWallet } from "@/hooks/useStellarWallet";
+import { useActiveWallet } from "./ActiveWallet";
 import { useWalletBar } from "./WalletBar";
 import { useAgentUnread } from "./AgentUnread";
 import { useScreenBack } from "./ScreenBack";
@@ -42,19 +42,22 @@ function isActive(pathname: string, href: string) {
 export function AppShell({ children }: { readonly children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  // Stellar is the default the bar shows; a screen with its own source
-  // chain (offramp/agent) publishes that chain's wallet instead, so the
-  // pill always reflects — and connects — the wallet actually in play.
-  const stellar = useStellarWallet();
+  // A screen with its own wallet (offramp/agent by source chain, onramp
+  // always Stellar) publishes it; everywhere else the bar shows the wallet
+  // last used (see ActiveWallet.tsx), so it doesn't flip to "Connect" on
+  // leaving Offramp.
+  const wallets = useActiveWallet();
   const bar = useWalletBar();
-  const active = bar.snapshot ?? {
-    address: stellar.wallet?.publicKey,
-    isConnected: stellar.isConnected,
-    isConnecting: stellar.isConnecting,
-  };
+  const active = bar.snapshot ?? wallets.active;
   const { isConnected, isConnecting } = active;
-  const connect = bar.snapshot ? bar.connect : stellar.connect;
-  const disconnect = bar.snapshot ? bar.disconnect : stellar.disconnect;
+  const connect = bar.snapshot ? bar.connect : wallets.active.connect;
+  const disconnect = bar.snapshot ? bar.disconnect : wallets.active.disconnect;
+  // Onramp can only deliver to Stellar, so with an EVM/Solana wallet
+  // connected, say which wallet its "Connect" is asking for.
+  const needsStellar =
+    isActive(pathname, "/app/onramp") &&
+    !isConnected &&
+    (wallets.evm.isConnected || wallets.solana.isConnected);
   // See AgentUnread.tsx: this is published by AgentPanel while it's mounted
   // and deliberately outlives it, so the badge still shows while the user
   // is on a different screen.
@@ -82,7 +85,9 @@ export function AppShell({ children }: { readonly children: ReactNode }) {
     ? "Connecting…"
     : isConnected && active.address
       ? `${active.address.slice(0, 6)}…${active.address.slice(-6)}`
-      : "Connect Wallet";
+      : needsStellar
+        ? "Connect Stellar Wallet"
+        : "Connect Wallet";
 
   const nav = (
     // Scrolls itself on a short viewport now that the shell is height-locked

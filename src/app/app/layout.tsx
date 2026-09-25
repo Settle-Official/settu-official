@@ -1,6 +1,7 @@
 import { Fraunces, Inter, Sora } from "next/font/google";
 import { AppShell } from "@/components/app/AppShell";
 import { WalletBarProvider } from "@/components/app/WalletBar";
+import { ActiveWalletProvider } from "@/components/app/ActiveWallet";
 import { AgentUnreadProvider } from "@/components/app/AgentUnread";
 import { NotificationsProvider } from "@/components/app/Notifications";
 import { ScreenBackProvider } from "@/components/app/ScreenBack";
@@ -32,15 +33,17 @@ export default function AppLayout({ children }: { readonly children: React.React
       className={`${fraunces.variable} ${sora.variable} ${inter.variable} font-[family-name:var(--font-sora)] text-white`}
     >
       <WalletBarProvider>
-        <AgentUnreadProvider>
-          <NotificationsProvider>
-            <ScreenBackProvider>
-              <AgentConversationProvider>
-                <AppShell>{children}</AppShell>
-              </AgentConversationProvider>
-            </ScreenBackProvider>
-          </NotificationsProvider>
-        </AgentUnreadProvider>
+        <ActiveWalletProvider>
+          <AgentUnreadProvider>
+            <NotificationsProvider>
+              <ScreenBackProvider>
+                <AgentConversationProvider>
+                  <AppShell>{children}</AppShell>
+                </AgentConversationProvider>
+              </ScreenBackProvider>
+            </NotificationsProvider>
+          </AgentUnreadProvider>
+        </ActiveWalletProvider>
       </WalletBarProvider>
     </div>
   );

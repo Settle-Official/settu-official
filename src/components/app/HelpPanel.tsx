@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { useStellarWallet } from "@/hooks/useStellarWallet";
+import { useActiveWallet } from "./ActiveWallet";
 import {
   buildEmailComposeUrl,
   buildWhatsAppUrl,
@@ -25,7 +25,8 @@ const CARD =
   "flex flex-col gap-[20px] rounded-[30px] border border-white/15 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.25)] backdrop-blur-xl bg-white/[0.04] p-[30px] max-[700px]:p-[20px]";
 
 export function HelpPanel() {
-  const { wallet } = useStellarWallet();
+  const { active } = useActiveWallet();
+  const address = active.isConnected ? active.address : undefined;
   const [category, setCategory] = useState<ReportCategory>("transaction");
   const [orderId, setOrderId] = useState("");
   const [debitedWallet, setDebitedWallet] = useState("");
@@ -51,7 +52,7 @@ export function HelpPanel() {
       message,
       orderId,
       debitedWallet,
-      walletAddress: wallet?.publicKey,
+      walletAddress: address,
     };
     const url = via === "whatsapp" ? buildWhatsAppUrl(report) : buildEmailComposeUrl(report);
     // New tab, not a redirect: this hands off to WhatsApp or Gmail, and
@@ -162,7 +163,7 @@ export function HelpPanel() {
           </label>
 
           <p className="font-[family-name:var(--font-sora)] text-[13px] leading-[19px] text-[#8d8c8c]">
-            {wallet?.publicKey
+            {address
               ? "Your connected wallet address is included so we can find the transaction."
               : "Connect your wallet first if this is about a transaction — it gets included so we can find it."}
           </p>
