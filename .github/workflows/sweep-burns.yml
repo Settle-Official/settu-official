@@ -1,13 +1,12 @@
 name: Sweep stranded offramp burns
 
-# Vercel Hobby caps cron jobs at once/day, but a stranded CCTP burn (see
-# src/lib/offramp/burn-backstop.ts) needs recovering within minutes, not
-# hours, while the user is still watching their money. This workflow drives
-# the same recovery endpoint the daily onramp cron already calls, on a much
-# tighter cadence, independent of Vercel's plan limits.
+# Manual fallback only. The every-5-minutes schedule now runs on an Upstash
+# QStash schedule calling the same endpoint with the same bearer token:
+# GitHub treats scheduled workflows as best-effort, and this one, set to
+# every 5 minutes, was actually firing every few hours (confirmed 2026-09-28,
+# when a stranded Solana burn sat unnoticed). Use "Run workflow" to trigger a
+# sweep on demand, e.g. if QStash is down.
 on:
-  schedule:
-    - cron: "*/5 * * * *"
   workflow_dispatch: {}
 
 jobs:
