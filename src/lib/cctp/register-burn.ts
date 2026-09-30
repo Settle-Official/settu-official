@@ -12,6 +12,7 @@ import {
   type OfframpSourceChain,
 } from "../offramp/transaction-history";
 import { resolveStellarTxSource } from "./stellar-tx-source";
+import { rememberBurnForOrder } from "../offramp/burn-by-order";
 
 /**
  * Maps an offramp source chain to its CCTP source domain, or undefined for a
@@ -64,7 +65,12 @@ export async function registerOfframpBurn(
   const resolvedSourceChain: OfframpSourceChain = input.sourceChain || "stellar";
 
   const existing = await getCctpTransfer(input.burnTxHash);
-  if (existing) return existing.id;
+  if (existing) {
+    // Also on the repeat path: a burn registered before the pointer existed
+    // gains one the next time anything registers it.
+    await rememberOrderBurn(input);
+    return existing.id;
+  }
 
   const record = await createCctpTransfer({
     id: input.burnTxHash,
@@ -76,6 +82,8 @@ export async function registerOfframpBurn(
     status: "burned",
     paycrestOrderId: input.paycrestOrderId,
   });
+
+  await rememberOrderBurn(input);
 
   await recordLedgerEntry({
     direction: "offramp",
@@ -133,3 +141,19 @@ export async function registerOfframpBurn(
 
   return record.id;
 }
+
+/**
+ * Lets a page still waiting on its wallet find this burn by order id (see
+ * burn-by-order.ts). Best-effort: the transfer is registered either way, and
+ * a missing pointer only costs that page a chain lookup.
+ */
+async function rememberOrderBurn(input: RegisterOfframpBurnInput): Promise<void> {
+  if (!input.paycrestOrderId) return;
+  await rememberBurnForOrder(input.paycrestOrderId, input.burnTxHash).catch((err) =>
+    console.error(
+      `[register-burn] order pointer write failed for ${input.burnTxHash}:`,
+      err,
+    ),
+  );
+}
+

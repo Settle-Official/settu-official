@@ -35,6 +35,8 @@ import * as StellarSdk from "@stellar/stellar-sdk";
 import { closeSheet } from "@/lib/wallet/appkit";
 import { isMobileBrowser } from "@/lib/platform";
 import { sourceChainOptions } from "@/lib/offramp/source-chain-options";
+import { raceBurnAgainstRecovery } from "@/lib/offramp/burn-race";
+import { transfersAwaitingBurn } from "@/lib/offramp/resume-burn";
 
 /** Run a promise with a timeout. Rejects with a clear message on expiry. */
 function withTimeout<T>(
@@ -394,6 +396,29 @@ async function registerEvmTransfer(
   return registerWithBeaconFallback(endpoint, payload);
 }
 
+/**
+ * Asks the server for this order's burn while the page waits on the wallet
+ * (see burn-race.ts and the status route's `awaitingBurn`). Null means not
+ * found yet, including when the request itself fails.
+ */
+function checkServerForBurn(orderId: string): () => Promise<string | null> {
+  return async () => {
+    const res = await fetch(
+      `/api/offramp/paycrest/order/${encodeURIComponent(orderId)}?awaitingBurn=1`,
+    );
+    if (!res.ok) return null;
+    const payload = await res.json().catch(() => null);
+    return typeof payload?.data?.burnTxHash === "string"
+      ? payload.data.burnTxHash
+      : null;
+  };
+}
+
+// The wallet normally answers within seconds; give it that long before the
+// server starts looking, then look on every return to the page and on a
+// steady interval.
+const BURN_RACE_TIMING = { firstCheckAfterMs: 20_000, intervalMs: 10_000 };
+
 export interface StellarampDashboardProps {
   /** Which surface to open on; the app shell routes give one per URL. */
   readonly initialMode?: "offramp" | "onramp" | "agent";
@@ -442,6 +467,37 @@ export function StellarampDashboard({
   // (?source=solana) because Phantom has no WalletConnect: AppKit reopens
   // this exact URL inside Phantom's in-app browser, a fresh page that would
   // otherwise land on Stellar. Desktop keeps its current behaviour.
+  // If iOS closed this page while the user was in their wallet app, the flow
+  // that would have registered their burn died with it. Its local record
+  // survives, so check those once when the screen opens (see resume-burn.ts):
+  // the server registers any burn it finds, and the record picks up its hash.
+  useEffect(() => {
+    if (initialMode !== "offramp") return;
+    const waiting = transfersAwaitingBurn(TransactionStorage.getAll(), Date.now());
+    if (waiting.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      for (const t of waiting) {
+        const hash = await checkServerForBurn(t.payoutOrderId!)().catch(() => null);
+        if (cancelled) return;
+        if (!hash) continue;
+        const patch = {
+          stellarTxHash: hash, // reused field: the burn hash on every chain
+          bridgeStatus: "pending",
+          status: "pending" as const,
+          error: undefined,
+        };
+        TransactionStorage.update(t.id, patch);
+        setUserTransactions((prev) =>
+          prev.map((row) => (row.id === t.id ? { ...row, ...patch } : row)),
+        );
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [initialMode]);
+
   const sourceRestoredRef = useRef(false);
   useEffect(() => {
     if (initialMode !== "offramp" || !isMobileBrowser()) return;
@@ -1589,11 +1645,19 @@ export function StellarampDashboard({
           setOfframpStep("awaiting-signature");
         }
 
-        const hashes = await evmWallet.signAndSendCalls(
-          built.calls,
-          built.chainId,
-        );
-        settlementTxHash = hashes[hashes.length - 1];
+        // The wallet broadcasts the burn itself, so on a phone its reply can
+        // be lost while the burn still lands; the server check covers that
+        // (see burn-race.ts). The burn is the last call.
+        const burn = await raceBurnAgainstRecovery({
+          wallet: evmWallet
+            .signAndSendCalls(built.calls, built.chainId)
+            .then((hashes) => hashes[hashes.length - 1]),
+          check: checkServerForBurn(payoutOrderId),
+          doc: document,
+          abandoned: () => offrampFlowRef.current !== myFlow,
+          ...BURN_RACE_TIMING,
+        });
+        settlementTxHash = burn.burnTxHash;
         setOfframpStep("submitting");
 
         setTradeState((prev) => ({
@@ -1604,15 +1668,18 @@ export function StellarampDashboard({
 
         // Register the burn so the attest/mint state machine picks it up —
         // same permanent-strand risk as the Stellar path, so same retry +
-        // sendBeacon fallback (registerEvmTransfer).
-        await registerEvmTransfer("/api/offramp/bridge/register-transfer", {
-          burnTxHash: settlementTxHash,
-          mintRecipient: settlementAddress,
-          amount: tradeData.amount,
-          paycrestOrderId: payoutOrderId,
-          sourceChain: chainKey,
-          connectedAddress,
-        });
+        // sendBeacon fallback (registerEvmTransfer). A burn the server
+        // found is already registered.
+        if (burn.via === "wallet") {
+          await registerEvmTransfer("/api/offramp/bridge/register-transfer", {
+            burnTxHash: settlementTxHash,
+            mintRecipient: settlementAddress,
+            amount: tradeData.amount,
+            paycrestOrderId: payoutOrderId,
+            sourceChain: chainKey,
+            connectedAddress,
+          });
+        }
         new EventSource(`/api/offramp/bridge/stream/${settlementTxHash}`);
       } else {
         // Base: plain USDC transfer() straight to Paycrest's receive address.
@@ -1876,11 +1943,17 @@ export function StellarampDashboard({
       }
       const { transactionBase64 } = await buildRes.json();
 
-      // 4) Partial-sign with the event keypair + wallet signs + sends.
-      const burnSignature = await solanaWallet.signAndSendBurn(
-        transactionBase64,
-        eventKeypair,
-      );
+      // 4) Partial-sign with the event keypair + wallet signs + sends. The
+      // wallet broadcasts it, so on a phone its reply can be lost while the
+      // burn still lands; the server check covers that (see burn-race.ts).
+      const burn = await raceBurnAgainstRecovery({
+        wallet: solanaWallet.signAndSendBurn(transactionBase64, eventKeypair),
+        check: checkServerForBurn(payoutOrderId),
+        doc: document,
+        abandoned: () => offrampFlowRef.current !== myFlow,
+        ...BURN_RACE_TIMING,
+      });
+      const burnSignature = burn.burnTxHash;
       console.log("[offramp] Solana burn signature:", burnSignature);
       setOfframpStep("submitting");
       setTradeState((prev) => ({
@@ -1890,14 +1963,17 @@ export function StellarampDashboard({
       }));
 
       // 5) Register the burn (same permanent-strand risk + retry/sendBeacon).
-      await registerEvmTransfer("/api/offramp/bridge/register-transfer", {
-        burnTxHash: burnSignature,
-        mintRecipient: settlementAddress,
-        amount: tradeData.amount,
-        paycrestOrderId: payoutOrderId,
-        sourceChain: "solana",
-        connectedAddress,
-      });
+      // A burn the server found is already registered.
+      if (burn.via === "wallet") {
+        await registerEvmTransfer("/api/offramp/bridge/register-transfer", {
+          burnTxHash: burnSignature,
+          mintRecipient: settlementAddress,
+          amount: tradeData.amount,
+          paycrestOrderId: payoutOrderId,
+          sourceChain: "solana",
+          connectedAddress,
+        });
+      }
       new EventSource(`/api/offramp/bridge/stream/${burnSignature}`);
 
       TransactionStorage.update(txId, {
