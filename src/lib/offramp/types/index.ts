@@ -1,3 +1,5 @@
+import type { PaycrestPersonKyc } from "../../onramp/kyc";
+
 // Core domain types for the offramp system
 
 export type TradeState =
@@ -176,6 +178,11 @@ export interface CreateOnrampOrderParams {
   network?: string; // defaults to "base"
   cryptoCurrency?: string; // defaults to "USDC"
   refundAccount: OnrampRefundAccount;
+  /**
+   * The payer's identity, required by Paycrest on every onramp. Passed
+   * through to them only: never stored or logged (see lib/onramp/kyc.ts).
+   */
+  kyc: PaycrestPersonKyc;
   rate?: number;
   reference?: string;
 }

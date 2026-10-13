@@ -3,6 +3,7 @@ import { PaycrestAdapter } from "@/lib/offramp/adapters/paycrest-adapter";
 import { createOnrampOrder } from "@/lib/onramp/onramp-store";
 import { validateAddress, validateAmount } from "@/lib/offramp/utils/validation";
 import { alertRampEvent } from "@/lib/notify/telegram";
+import { buildOnrampKyc, describePaycrestRejection } from "@/lib/onramp/kyc";
 
 /**
  * Create an onramp order.
@@ -66,6 +67,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // The payer's identity, which Paycrest requires on every onramp. Built
+    // here, handed to Paycrest below, and nowhere else: it must not reach the
+    // order store, the alert or a log line.
+    const kyc = buildOnrampKyc(body?.kyc, refundAccount.accountName);
+    if (!kyc.ok) {
+      return NextResponse.json({ error: kyc.error }, { status: 400 });
+    }
+
     const paycrest = new PaycrestAdapter(apiKey);
     const order = await paycrest.createOnrampOrder({
       fiatAmount,
@@ -75,6 +84,7 @@ export async function POST(request: NextRequest) {
       network: "base",
       cryptoCurrency: "USDC",
       refundAccount,
+      kyc: kyc.kyc,
       rate,
       reference,
     });
@@ -148,14 +158,26 @@ export async function POST(request: NextRequest) {
     // wrong with this request. Surface a friendly message instead of their
     // raw error, but keep the original in `details` for debugging/support.
     const isUpstreamOutage = statusCode >= 500;
-    const userMessage = isUpstreamOutage
-      ? "Deposit provisioning is temporarily unavailable. This is an issue on our payment provider's side — please try again in a few minutes."
-      : error?.message || "Failed to create onramp order";
+    // Paycrest's rejection carries a bare "Failed to validate payload" for
+    // very different causes: bad identity details, or simply nobody on their
+    // side to fill the order. Classified so the user is told the real one
+    // (see describePaycrestRejection).
+    const rejection = describePaycrestRejection(error?.details);
+    const userMessage =
+      rejection.kind === "no-provider"
+        ? rejection.message
+        : isUpstreamOutage
+          ? "Deposit provisioning is temporarily unavailable. This is an issue on our payment provider's side — please try again in a few minutes."
+          : statusCode === 400
+            ? rejection.message
+            : error?.message || "Failed to create onramp order";
 
     return NextResponse.json(
       {
         error: userMessage,
-        details: error?.details ?? null,
+        // Not on a validation failure: Paycrest's payload can quote back
+        // the identity details that were sent.
+        details: statusCode === 400 ? null : (error?.details ?? null),
       },
       { status: statusCode },
     );

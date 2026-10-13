@@ -331,6 +331,8 @@ export class PaycrestAdapter implements PayoutProviderAdapter {
           accountIdentifier: params.refundAccount.accountIdentifier,
           accountName: params.refundAccount.accountName,
         },
+        // Required by Paycrest on every onramp (V2FiatSource.kyc).
+        kyc: params.kyc,
       },
       destination: {
         type: "crypto" as const,
