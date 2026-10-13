@@ -152,3 +152,12 @@ export const MenuIcon = (p: IconProps) => (
     <path d="M3.5 7h17M3.5 12h17M3.5 17h17" />
   </Icon>
 );
+
+export const CalendarIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="3.5" y="5" width="17" height="15.5" rx="2.5" />
+    <path d="M3.5 10h17" />
+    <path d="M8 3v4" />
+    <path d="M16 3v4" />
+  </Icon>
+);

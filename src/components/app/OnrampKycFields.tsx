@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { AppSelect } from "./AppSelect";
+import { AppDatePicker } from "./AppDatePicker";
 import {
   buildOnrampKyc,
   type OnrampIdType,
@@ -129,22 +130,19 @@ export function OnrampKycFields({
       </p>
 
       <div className={grid}>
-        <label className={field}>
+        <div className={field}>
           <span className={label}>Date of birth</span>
-          <span className={box}>
-            <input
-              type="date"
-              value={value.birthDate}
-              onChange={(e) => set({ birthDate: e.target.value })}
-              max={latestAdultBirthDate()}
-              min="1906-01-01"
-              disabled={disabled}
-              autoComplete="bday"
-              // Dark native picker and calendar icon, to match the field.
-              className={`${input} [color-scheme:dark]`}
-            />
-          </span>
-        </label>
+          <AppDatePicker
+            aria-label="Date of birth"
+            value={value.birthDate}
+            onChange={(birthDate) => set({ birthDate })}
+            // Nobody under 18 can be selected at all.
+            max={latestAdultBirthDate()}
+            minYear={1906}
+            compact={compact}
+            disabled={disabled}
+          />
+        </div>
 
         <div className={field}>
           <span className={label}>ID type</span>
