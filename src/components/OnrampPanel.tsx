@@ -9,6 +9,9 @@ import { ResultCard } from "@/components/app/ResultCard";
 import { fiatSymbol } from "@/lib/format/currency";
 import { ONRAMP_STATUS_LABEL } from "@/lib/onramp/status-labels";
 import { createOnrampOrder } from "@/lib/onramp/client";
+import { readBuyAvailability } from "@/lib/onramp/kyc";
+import { PHONE_QUERY, useMediaQuery } from "@/components/app/useMediaQuery";
+import { useScreenBack } from "@/components/app/ScreenBack";
 import {
   OnrampKycFields,
   EMPTY_KYC_DRAFT,
@@ -20,6 +23,12 @@ import { TransactionStorage } from "@/lib/transaction-storage";
 import type { OnrampProviderAccount } from "@/lib/offramp/types";
 
 const PAYCREST_API_BASE = "https://api.paycrest.io/v1";
+// The v2 quote endpoint reports the BUY side (fiat → USDC) separately, with
+// the same provider selection order creation uses, so it says whether an
+// onramp can be filled at all. Paycrest settles onramps on Base.
+const PAYCREST_BUY_QUOTE_BASE = "https://api.paycrest.io/v2/rates/base/USDC";
+// Asked when no amount is typed yet: comfortably above any minimum.
+const AVAILABILITY_PROBE_USDC = 10;
 
 interface Bank {
   code: string;
@@ -114,6 +123,12 @@ export function OnrampPanel({
   // The payer's identity, which the payment provider requires. Held in
   // memory for this order only: never written to storage.
   const [kyc, setKyc] = useState<OnrampKycDraft>(EMPTY_KYC_DRAFT);
+  // On a phone the form is two screens, like the offramp's: the order and
+  // bank details first, then identity. Above 720px everything renders in
+  // one column and `phoneStep` is ignored.
+  const isPhone = useMediaQuery(PHONE_QUERY);
+  const [phoneStep, setPhoneStep] = useState<1 | 2>(1);
+  const topRef = useRef<HTMLDivElement>(null);
   const [useCustomAddress, setUseCustomAddress] = useState(false);
   const [customAddress, setCustomAddress] = useState("");
   // The design lets the amount be entered either way round. The API only
@@ -122,6 +137,11 @@ export function OnrampPanel({
   const [amountMode, setAmountMode] = useState<"fiat" | "crypto">("fiat");
   const [rate, setRate] = useState<number | null>(null);
   const [isLoadingRate, setIsLoadingRate] = useState(false);
+  // Whether the payment partner has anyone buying this currency right now.
+  // "unknown" (not yet checked, or the check itself failed) never blocks.
+  const [buyAvailability, setBuyAvailability] = useState<
+    "available" | "unavailable" | "unknown"
+  >("unknown");
   const [showFee, setShowFee] = useState(false);
   /** USDC the order actually bought, resolved from the provider's own rate. */
   const [deliveredUsdc, setDeliveredUsdc] = useState<string | null>(null);
@@ -356,9 +376,37 @@ export function OnrampPanel({
     !hasAmount ? null : amountMode === "fiat" ? typed : rate ? typed * rate : null;
   const meetsMinimum = usdcAmount !== null && usdcAmount >= MIN_USDC;
 
+  // Ask before the user fills in bank and identity details, not after: with
+  // no provider on the buy side, no order can be created whatever they type
+  // (seen 2026-10-13, when Paycrest had none for NGN on any network).
+  const probeUsdc =
+    usdcAmount !== null && usdcAmount >= MIN_USDC
+      ? Number(usdcAmount.toFixed(2))
+      : AVAILABILITY_PROBE_USDC;
+  useEffect(() => {
+    if (!currency || phase !== "form") return;
+    let cancelled = false;
+    const debounce = setTimeout(async () => {
+      try {
+        const res = await fetch(
+          `${PAYCREST_BUY_QUOTE_BASE}/${probeUsdc}/${encodeURIComponent(currency)}?side=buy`,
+        );
+        const payload = await res.json().catch(() => null);
+        if (!cancelled) setBuyAvailability(readBuyAvailability(res.status, payload));
+      } catch {
+        if (!cancelled) setBuyAvailability("unknown");
+      }
+    }, 500);
+    return () => {
+      cancelled = true;
+      clearTimeout(debounce);
+    };
+  }, [currency, probeUsdc, phase]);
+
   const canSubmit =
     isConnected &&
     !isSubmitting &&
+    buyAvailability !== "unavailable" &&
     hasAmount &&
     fiatAmount !== null &&
     meetsMinimum &&
@@ -369,6 +417,49 @@ export function OnrampPanel({
     kycDraftError(kyc, accountName) === null &&
     !!destinationAddress &&
     (!useCustomAddress || isValidStellarAddress(customAddress.trim()));
+
+  // Step 1 on a phone gates on everything except identity, which is what
+  // step 2 is about to ask for. Step 2 (and the desktop form) gates on the
+  // real `canSubmit`.
+  const onPhoneDetailsStep = isPhone && phoneStep === 1;
+  const detailsStepReady =
+    isConnected &&
+    !isSubmitting &&
+    buyAvailability !== "unavailable" &&
+    hasAmount &&
+    fiatAmount !== null &&
+    meetsMinimum &&
+    !!currency &&
+    !!bank &&
+    accountNumber.length === 10 &&
+    !!accountName &&
+    !!destinationAddress &&
+    (!useCustomAddress || isValidStellarAddress(customAddress.trim()));
+  const showDetailsStep = !isPhone || phoneStep === 1;
+  const showIdentityStep = !isPhone || phoneStep === 2;
+
+  // The phone header's back arrow returns from identity to the details.
+  const { publish: publishBack } = useScreenBack();
+  useEffect(() => {
+    const wantsBack = isPhone && phoneStep === 2 && phase === "form" && !isSubmitting;
+    publishBack(wantsBack ? () => setPhoneStep(1) : null);
+    return () => publishBack(null);
+  }, [isPhone, phoneStep, phase, isSubmitting, publishBack]);
+
+  // Each step starts at its top, not wherever the last one was scrolled to.
+  // Only on a step change (not on first render), and only the panel this
+  // form scrolls inside: scrollIntoView would move every ancestor and push
+  // the app header off screen.
+  const lastStepRef = useRef(phoneStep);
+  useEffect(() => {
+    if (lastStepRef.current === phoneStep) return;
+    lastStepRef.current = phoneStep;
+    let el = topRef.current?.parentElement ?? null;
+    while (el && !/auto|scroll/.test(getComputedStyle(el).overflowY)) {
+      el = el.parentElement;
+    }
+    if (el) el.scrollTop = 0;
+  }, [phoneStep]);
 
   const handleSubmit = async () => {
     if (!isConnected) {
@@ -432,6 +523,7 @@ export function OnrampPanel({
     setBank("");
     setAccountName("");
     setKyc(EMPTY_KYC_DRAFT);
+    setPhoneStep(1);
     setUseCustomAddress(false);
     setCustomAddress("");
     setDeliveredUsdc(null);
@@ -518,238 +610,276 @@ export function OnrampPanel({
     ? "Connect Wallet"
     : isSubmitting
       ? "Creating order…"
-      : "Continue";
+      : buyAvailability === "unavailable"
+        ? "Onramp unavailable"
+        : !isPhone || phoneStep === 1
+          ? "Continue"
+          : "Create order";
+
+  // Step 1's button advances the wizard; everywhere else it submits.
+  const handleButton = onPhoneDetailsStep
+    ? () => {
+        if (!isConnected) {
+          onConnect();
+          return;
+        }
+        if (detailsStepReady) setPhoneStep(2);
+      }
+    : handleSubmit;
+  const buttonReady = onPhoneDetailsStep ? detailsStepReady : canSubmit;
 
   return (
-    <div className="flex flex-col gap-[30px] max-[720px]:gap-[24px]">
-      <section className="flex flex-col gap-[30px] max-[720px]:gap-[22px]">
-        <h2 className={SECTION_HEADING}>Onramp information</h2>
+    <div ref={topRef} className="flex flex-col gap-[30px] max-[720px]:gap-[24px]">
+      {buyAvailability === "unavailable" && (
+        <p
+          role="status"
+          style={{ border: "1px solid rgba(224,122,126,0.55)" }}
+          className="rounded-[20px] bg-[#2b2a2a] px-[30px] py-[18px] font-[family-name:var(--font-sora)] text-[15px] leading-[23px] text-[#f1d6d7] max-[720px]:rounded-[14px] max-[720px]:px-[16px] max-[720px]:py-[14px] max-[720px]:text-[13px] max-[720px]:leading-[20px]"
+        >
+          <span className="font-semibold text-white">
+            Buying USDC with {currency} is temporarily unavailable.
+          </span>{" "}
+          Our payment partner has no provider for it right now, so an order can&rsquo;t
+          be created. Please check back later. Selling USDC (offramp) is working
+          normally.
+        </p>
+      )}
+      {showDetailsStep && (
+        <section className="flex flex-col gap-[30px] max-[720px]:gap-[22px]">
+          <h2 className={SECTION_HEADING}>Onramp information</h2>
 
-        <div className="flex flex-col gap-[10px] border-b-[0.4px] border-[#6a6969] pb-[20px] max-[720px]:pb-[16px]">
-          <div className="flex flex-col gap-[14px] max-[720px]:gap-[10px]">
-            <span className={FIELD_LABEL}>Amount to buy</span>
-            <div className={`${FIELD_BOX} border-[#d7d6d6]/70 focus-within:border-[#d7d6d6]`}>
-              <input
-                type="number"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                // A focused number input still eats scroll-wheel ticks to
-                // bump its value — blurring hands that scroll back to the page.
-                onWheel={(e) => e.currentTarget.blur()}
-                min={0}
-                step={amountMode === "fiat" ? "1" : "0.000001"}
-                placeholder="0.00"
-                aria-label={amountMode === "fiat" ? `Amount in ${currency}` : "Amount in USDC"}
-                className="min-w-0 flex-1 bg-transparent font-[family-name:var(--font-inter)] text-[20px] leading-[24px] text-white outline-none placeholder:text-[#8d8c8c] max-[720px]:text-[16px] max-[720px]:leading-[20px] [appearance:textfield] [&::-webkit-inner-spin-button]:m-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:m-0 [&::-webkit-outer-spin-button]:appearance-none"
-              />
-              {/* Enter either side of the pair; switching carries the value
-                  across at the live rate so nothing has to be retyped. */}
-              <div className="flex shrink-0 items-center gap-[4px] rounded-full bg-white/5 p-[3px]">
-                {(["fiat", "crypto"] as const).map((mode) => {
-                  const isActive = mode === amountMode;
-                  return (
-                    <button
-                      key={mode}
-                      type="button"
-                      aria-pressed={isActive}
-                      onClick={() => {
-                        if (isActive) return;
-                        const carried = mode === "fiat" ? fiatAmount : usdcAmount;
-                        if (carried !== null) {
-                          setAmount(mode === "fiat" ? carried.toFixed(2) : carried.toFixed(6));
-                        }
-                        setAmountMode(mode);
-                      }}
-                      style={{
-                        backgroundColor: isActive ? "rgba(201,169,98,0.35)" : "transparent",
-                      }}
-                      className={`rounded-full px-[12px] py-[5px] font-[family-name:var(--font-inter)] text-[14px] leading-[17px] transition-colors max-[720px]:px-[9px] max-[720px]:py-[4px] max-[720px]:text-[12px] max-[720px]:leading-[15px] ${
-                        isActive ? "text-white" : "text-[#bdbcbc]"
-                      }`}
-                    >
-                      {mode === "fiat" ? currency : "USDC"}
-                    </button>
-                  );
-                })}
+          <div className="flex flex-col gap-[10px] border-b-[0.4px] border-[#6a6969] pb-[20px] max-[720px]:pb-[16px]">
+            <div className="flex flex-col gap-[14px] max-[720px]:gap-[10px]">
+              <span className={FIELD_LABEL}>Amount to buy</span>
+              <div className={`${FIELD_BOX} border-[#d7d6d6]/70 focus-within:border-[#d7d6d6]`}>
+                <input
+                  type="number"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  // A focused number input still eats scroll-wheel ticks to
+                  // bump its value — blurring hands that scroll back to the page.
+                  onWheel={(e) => e.currentTarget.blur()}
+                  min={0}
+                  step={amountMode === "fiat" ? "1" : "0.000001"}
+                  placeholder="0.00"
+                  aria-label={amountMode === "fiat" ? `Amount in ${currency}` : "Amount in USDC"}
+                  className="min-w-0 flex-1 bg-transparent font-[family-name:var(--font-inter)] text-[20px] leading-[24px] text-white outline-none placeholder:text-[#8d8c8c] max-[720px]:text-[16px] max-[720px]:leading-[20px] [appearance:textfield] [&::-webkit-inner-spin-button]:m-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:m-0 [&::-webkit-outer-spin-button]:appearance-none"
+                />
+                {/* Enter either side of the pair; switching carries the value
+                    across at the live rate so nothing has to be retyped. */}
+                <div className="flex shrink-0 items-center gap-[4px] rounded-full bg-white/5 p-[3px]">
+                  {(["fiat", "crypto"] as const).map((mode) => {
+                    const isActive = mode === amountMode;
+                    return (
+                      <button
+                        key={mode}
+                        type="button"
+                        aria-pressed={isActive}
+                        onClick={() => {
+                          if (isActive) return;
+                          const carried = mode === "fiat" ? fiatAmount : usdcAmount;
+                          if (carried !== null) {
+                            setAmount(mode === "fiat" ? carried.toFixed(2) : carried.toFixed(6));
+                          }
+                          setAmountMode(mode);
+                        }}
+                        style={{
+                          backgroundColor: isActive ? "rgba(201,169,98,0.35)" : "transparent",
+                        }}
+                        className={`rounded-full px-[12px] py-[5px] font-[family-name:var(--font-inter)] text-[14px] leading-[17px] transition-colors max-[720px]:px-[9px] max-[720px]:py-[4px] max-[720px]:text-[12px] max-[720px]:leading-[15px] ${
+                          isActive ? "text-white" : "text-[#bdbcbc]"
+                        }`}
+                      >
+                        {mode === "fiat" ? currency : "USDC"}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-[10px] font-[family-name:var(--font-inter)] text-[16px] leading-[19px] text-white max-[720px]:gap-[8px] max-[720px]:text-[13px] max-[720px]:leading-[16px]">
+              <span>Min {MIN_USDC} USDC</span>
+              <span className="size-[6px] rounded-full bg-[#c4c4c4]" aria-hidden="true" />
+              <span>
+                {isLoadingBalance
+                  ? "Balance: checking…"
+                  : usdcBalance !== null
+                    ? `Balance: ${usdcBalance.toFixed(2)} USDC`
+                    : "Balance: —"}
+              </span>
+              {hasAmount && !meetsMinimum && (
+                <>
+                  <span className="size-[6px] rounded-full bg-[#c4c4c4]" aria-hidden="true" />
+                  <span className="text-[#e07a7e]">Below the {MIN_USDC} USDC minimum</span>
+                </>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-[20px] bg-[#2b2a2a] max-[720px]:rounded-[14px]">
+            <div className="flex items-center justify-between gap-[20px] px-[30px] py-[20px] font-[family-name:var(--font-inter)] text-[16px] leading-[19px] text-white max-[720px]:gap-[10px] max-[720px]:px-[16px] max-[720px]:py-[16px]">
+              <span className="min-w-0 truncate text-[20px] font-semibold leading-[26px] text-[#c9a962] max-[720px]:text-[14px] max-[720px]:leading-[18px]">
+                {usdcAmount !== null
+                  ? `You'll receive ${usdcAmount.toFixed(2)} USDC.`
+                  : hasAmount && isLoadingRate
+                    ? "Getting your rate…"
+                    : "You'll receive —"}
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowFee((f) => !f)}
+                aria-expanded={showFee}
+                className="flex shrink-0 items-center gap-[10px] p-[10px] text-white max-[720px]:gap-[6px] max-[720px]:p-0 max-[720px]:text-[12px] max-[720px]:leading-[15px]"
+              >
+                {showFee ? "Hide fee" : "Show fee"}
+                <CaretDownIcon
+                  size={18}
+                  className={`text-[#f4f2f2] transition-transform ${showFee ? "rotate-180" : ""}`}
+                />
+              </button>
+            </div>
+            {/* Always mounted — .fee-reveal in globals.css animates it. */}
+            <div className={`fee-reveal ${showFee ? "is-open" : ""}`}>
+              <div>
+                <dl className="grid grid-cols-[1fr_auto] gap-x-[20px] gap-y-[12px] border-t border-white/10 px-[30px] py-[20px] font-[family-name:var(--font-inter)] text-[15px] leading-[19px] text-[#dcd6d6] max-[720px]:gap-x-[12px] max-[720px]:gap-y-[10px] max-[720px]:px-[16px] max-[720px]:py-[16px] max-[720px]:text-[12px] max-[720px]:leading-[16px]">
+                  <div className="contents">
+                    <dt>You&rsquo;ll pay</dt>
+                    <dd className="text-right text-white">
+                      {fiatAmount !== null ? fmtFiat(fiatAmount) : "—"}
+                    </dd>
+                  </div>
+                  <div className="contents">
+                    <dt>Rate</dt>
+                    <dd className="text-right text-white">
+                      {rate ? `1 USDC = ${symbol}${rate.toLocaleString("en-US")}` : "—"}
+                    </dd>
+                  </div>
+                  <div className="contents">
+                    <dt>Delivered to</dt>
+                    <dd className="min-w-0 break-all text-right text-white">
+                      {destinationAddress
+                        ? `${destinationAddress.slice(0, 6)}…${destinationAddress.slice(-6)}`
+                        : "—"}
+                    </dd>
+                  </div>
+                  <div className="contents">
+                    <dt>Quote</dt>
+                    <dd className="text-right text-white">Indicative until the order is created</dd>
+                  </div>
+                </dl>
               </div>
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-[10px] font-[family-name:var(--font-inter)] text-[16px] leading-[19px] text-white max-[720px]:gap-[8px] max-[720px]:text-[13px] max-[720px]:leading-[16px]">
-            <span>Min {MIN_USDC} USDC</span>
-            <span className="size-[6px] rounded-full bg-[#c4c4c4]" aria-hidden="true" />
-            <span>
-              {isLoadingBalance
-                ? "Balance: checking…"
-                : usdcBalance !== null
-                  ? `Balance: ${usdcBalance.toFixed(2)} USDC`
-                  : "Balance: —"}
-            </span>
-            {hasAmount && !meetsMinimum && (
-              <>
-                <span className="size-[6px] rounded-full bg-[#c4c4c4]" aria-hidden="true" />
-                <span className="text-[#e07a7e]">Below the {MIN_USDC} USDC minimum</span>
-              </>
-            )}
-          </div>
-        </div>
+        </section>
+      )}
 
-        <div className="rounded-[20px] bg-[#2b2a2a] max-[720px]:rounded-[14px]">
-          <div className="flex items-center justify-between gap-[20px] px-[30px] py-[20px] font-[family-name:var(--font-inter)] text-[16px] leading-[19px] text-white max-[720px]:gap-[10px] max-[720px]:px-[16px] max-[720px]:py-[16px]">
-            <span className="min-w-0 truncate text-[20px] font-semibold leading-[26px] text-[#c9a962] max-[720px]:text-[14px] max-[720px]:leading-[18px]">
-              {usdcAmount !== null
-                ? `You'll receive ${usdcAmount.toFixed(2)} USDC.`
-                : hasAmount && isLoadingRate
-                  ? "Getting your rate…"
-                  : "You'll receive —"}
-            </span>
-            <button
-              type="button"
-              onClick={() => setShowFee((f) => !f)}
-              aria-expanded={showFee}
-              className="flex shrink-0 items-center gap-[10px] p-[10px] text-white max-[720px]:gap-[6px] max-[720px]:p-0 max-[720px]:text-[12px] max-[720px]:leading-[15px]"
-            >
-              {showFee ? "Hide fee" : "Show fee"}
-              <CaretDownIcon
-                size={18}
-                className={`text-[#f4f2f2] transition-transform ${showFee ? "rotate-180" : ""}`}
-              />
-            </button>
-          </div>
-          {/* Always mounted — .fee-reveal in globals.css animates it. */}
-          <div className={`fee-reveal ${showFee ? "is-open" : ""}`}>
-            <div>
-              <dl className="grid grid-cols-[1fr_auto] gap-x-[20px] gap-y-[12px] border-t border-white/10 px-[30px] py-[20px] font-[family-name:var(--font-inter)] text-[15px] leading-[19px] text-[#dcd6d6] max-[720px]:gap-x-[12px] max-[720px]:gap-y-[10px] max-[720px]:px-[16px] max-[720px]:py-[16px] max-[720px]:text-[12px] max-[720px]:leading-[16px]">
-                <div className="contents">
-                  <dt>You&rsquo;ll pay</dt>
-                  <dd className="text-right text-white">
-                    {fiatAmount !== null ? fmtFiat(fiatAmount) : "—"}
-                  </dd>
-                </div>
-                <div className="contents">
-                  <dt>Rate</dt>
-                  <dd className="text-right text-white">
-                    {rate ? `1 USDC = ${symbol}${rate.toLocaleString("en-US")}` : "—"}
-                  </dd>
-                </div>
-                <div className="contents">
-                  <dt>Delivered to</dt>
-                  <dd className="min-w-0 break-all text-right text-white">
-                    {destinationAddress
-                      ? `${destinationAddress.slice(0, 6)}…${destinationAddress.slice(-6)}`
-                      : "—"}
-                  </dd>
-                </div>
-                <div className="contents">
-                  <dt>Quote</dt>
-                  <dd className="text-right text-white">Indicative until the order is created</dd>
-                </div>
-              </dl>
+      {showDetailsStep && (
+        <section className="flex flex-col gap-[30px] max-[720px]:gap-[22px]">
+          <h2 className={SECTION_HEADING}>Refund Bank</h2>
+          <div className="grid grid-cols-2 gap-x-[106px] gap-y-[30px] max-[1100px]:grid-cols-1 max-[1100px]:gap-x-[20px] max-[720px]:gap-y-[22px]">
+            <div className="flex flex-col gap-[14px] max-[720px]:gap-[10px]">
+              <span className={FIELD_LABEL}>Account number</span>
+              <div className={`${FIELD_BOX} border-[#d7d6d6]/70 focus-within:border-[#d7d6d6]`}>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={accountNumber}
+                  onChange={(e) => setAccountNumber(e.target.value)}
+                  maxLength={10}
+                  placeholder="0123456789"
+                  aria-label="Refund account number"
+                  className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-[#8d8c8c]"
+                />
+              </div>
             </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="flex flex-col gap-[30px] max-[720px]:gap-[22px]">
-        <h2 className={SECTION_HEADING}>Refund Bank</h2>
-        <div className="grid grid-cols-2 gap-x-[106px] gap-y-[30px] max-[1100px]:grid-cols-1 max-[1100px]:gap-x-[20px] max-[720px]:gap-y-[22px]">
-          <div className="flex flex-col gap-[14px] max-[720px]:gap-[10px]">
-            <span className={FIELD_LABEL}>Account number</span>
-            <div className={`${FIELD_BOX} border-[#d7d6d6]/70 focus-within:border-[#d7d6d6]`}>
-              <input
-                type="text"
-                inputMode="numeric"
-                value={accountNumber}
-                onChange={(e) => setAccountNumber(e.target.value)}
-                maxLength={10}
-                placeholder="0123456789"
-                aria-label="Refund account number"
-                className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-[#8d8c8c]"
+            <div className="flex flex-col gap-[14px] max-[720px]:gap-[10px]">
+              <span className={FIELD_LABEL}>Bank</span>
+              <AppSelect
+                aria-label="Refund bank"
+                value={bank}
+                onChange={setBank}
+                options={banks}
+                isLoading={isLoadingBanks}
+                placeholder="Select"
               />
             </div>
           </div>
           <div className="flex flex-col gap-[14px] max-[720px]:gap-[10px]">
-            <span className={FIELD_LABEL}>Bank</span>
-            <AppSelect
-              aria-label="Refund bank"
-              value={bank}
-              onChange={setBank}
-              options={banks}
-              isLoading={isLoadingBanks}
-              placeholder="Select"
-            />
-          </div>
-        </div>
-        <div className="flex flex-col gap-[14px] max-[720px]:gap-[10px]">
-          <span className={FIELD_LABEL}>Account name</span>
-          <div
-            className={`${FIELD_BOX} border-[#d7d6d6]/70 ${accountName ? "text-white" : "text-[#8d8c8c]"}`}
-            aria-live="polite"
-          >
-            {isVerifying ? "Verifying…" : accountName || "-"}
-          </div>
-        </div>
-      </section>
-
-      <section className="flex flex-col gap-[30px] max-[720px]:gap-[22px]">
-        <h2 className={SECTION_HEADING}>Verify your identity</h2>
-        <OnrampKycFields
-          value={kyc}
-          onChange={setKyc}
-          fullName={accountName}
-          disabled={isSubmitting}
-        />
-      </section>
-
-      <div className="flex flex-col gap-[20px] max-[720px]:gap-[16px]">
-        <p className="rounded-[20px] bg-[#2b2a2a] px-[30px] py-[16px] text-center font-[family-name:var(--font-sora)] text-[14px] leading-[22px] text-[#bdbcbc] max-[720px]:rounded-[14px] max-[720px]:px-[16px] max-[720px]:text-left max-[720px]:text-[12px] max-[720px]:leading-[18px]">
-          By default, USDC is sent to your connected wallet address. Tick the box below to
-          send it to a different Stellar address instead.
-        </p>
-        <label className="flex cursor-pointer items-center gap-[12px] font-[family-name:var(--font-sora)] text-[16px] leading-[20px] text-[#e6e3e3] max-[720px]:gap-[10px] max-[720px]:text-[14px]">
-          <input
-            type="checkbox"
-            checked={useCustomAddress}
-            onChange={(e) => setUseCustomAddress(e.target.checked)}
-            className="peer sr-only"
-          />
-          {/* Driven off React state rather than `peer-checked:`, which only
-              reaches siblings of the input — the tick is a descendant. */}
-          <span
-            aria-hidden="true"
-            style={{ backgroundColor: useCustomAddress ? "#ecc56f" : "transparent" }}
-            className="flex size-[22px] shrink-0 items-center justify-center rounded-[6px] border border-[#ecc56f] text-[#111010] transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-[#ecc56f]/50 max-[720px]:size-[20px]"
-          >
-            {useCustomAddress && <CheckIcon size={14} strokeWidth={3} />}
-          </span>
-          Send to a different Stellar address
-        </label>
-        {useCustomAddress && (
-          <div className="flex flex-col gap-[14px] max-[720px]:gap-[10px]">
-            <span className={FIELD_LABEL}>Destination Stellar Address</span>
+            <span className={FIELD_LABEL}>Account name</span>
             <div
-              className={`${FIELD_BOX} ${
-                customAddress.trim() && !isValidStellarAddress(customAddress.trim())
-                  ? "border-[#ac4747]"
-                  : "border-[#d7d6d6]/70 focus-within:border-[#d7d6d6]"
-              }`}
+              className={`${FIELD_BOX} border-[#d7d6d6]/70 ${accountName ? "text-white" : "text-[#8d8c8c]"}`}
+              aria-live="polite"
             >
-              <input
-                type="text"
-                value={customAddress}
-                onChange={(e) => setCustomAddress(e.target.value)}
-                placeholder="G....."
-                aria-label="Destination Stellar address"
-                className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-[#8d8c8c]"
-              />
+              {isVerifying ? "Verifying…" : accountName || "-"}
             </div>
-            {customAddress.trim() && !isValidStellarAddress(customAddress.trim()) && (
-              <span className="font-[family-name:var(--font-sora)] text-[14px] leading-[18px] text-[#ac4747]">
-                Enter a valid Stellar address (starts with G, 56 characters).
-              </span>
-            )}
           </div>
-        )}
-      </div>
+        </section>
+      )}
+
+      {showIdentityStep && (
+        <section className="flex flex-col gap-[30px] max-[720px]:gap-[22px]">
+          <h2 className={SECTION_HEADING}>Verify your identity</h2>
+          <OnrampKycFields
+            value={kyc}
+            onChange={setKyc}
+            fullName={accountName}
+            disabled={isSubmitting}
+          />
+        </section>
+      )}
+
+      {showDetailsStep && (
+        <div className="flex flex-col gap-[20px] max-[720px]:gap-[16px]">
+          <p className="rounded-[20px] bg-[#2b2a2a] px-[30px] py-[16px] text-center font-[family-name:var(--font-sora)] text-[14px] leading-[22px] text-[#bdbcbc] max-[720px]:rounded-[14px] max-[720px]:px-[16px] max-[720px]:text-left max-[720px]:text-[12px] max-[720px]:leading-[18px]">
+            By default, USDC is sent to your connected wallet address. Tick the box below to
+            send it to a different Stellar address instead.
+          </p>
+          <label className="flex cursor-pointer items-center gap-[12px] font-[family-name:var(--font-sora)] text-[16px] leading-[20px] text-[#e6e3e3] max-[720px]:gap-[10px] max-[720px]:text-[14px]">
+            <input
+              type="checkbox"
+              checked={useCustomAddress}
+              onChange={(e) => setUseCustomAddress(e.target.checked)}
+              className="peer sr-only"
+            />
+            {/* Driven off React state rather than `peer-checked:`, which only
+                reaches siblings of the input — the tick is a descendant. */}
+            <span
+              aria-hidden="true"
+              style={{ backgroundColor: useCustomAddress ? "#ecc56f" : "transparent" }}
+              className="flex size-[22px] shrink-0 items-center justify-center rounded-[6px] border border-[#ecc56f] text-[#111010] transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-[#ecc56f]/50 max-[720px]:size-[20px]"
+            >
+              {useCustomAddress && <CheckIcon size={14} strokeWidth={3} />}
+            </span>
+            Send to a different Stellar address
+          </label>
+          {useCustomAddress && (
+            <div className="flex flex-col gap-[14px] max-[720px]:gap-[10px]">
+              <span className={FIELD_LABEL}>Destination Stellar Address</span>
+              <div
+                className={`${FIELD_BOX} ${
+                  customAddress.trim() && !isValidStellarAddress(customAddress.trim())
+                    ? "border-[#ac4747]"
+                    : "border-[#d7d6d6]/70 focus-within:border-[#d7d6d6]"
+                }`}
+              >
+                <input
+                  type="text"
+                  value={customAddress}
+                  onChange={(e) => setCustomAddress(e.target.value)}
+                  placeholder="G....."
+                  aria-label="Destination Stellar address"
+                  className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-[#8d8c8c]"
+                />
+              </div>
+              {customAddress.trim() && !isValidStellarAddress(customAddress.trim()) && (
+                <span className="font-[family-name:var(--font-sora)] text-[14px] leading-[18px] text-[#ac4747]">
+                  Enter a valid Stellar address (starts with G, 56 characters).
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {error && (
         <p className="font-[family-name:var(--font-sora)] text-[15px] leading-[22px] text-[#e07a7e]">
@@ -759,8 +889,8 @@ export function OnrampPanel({
 
       <button
         type="button"
-        onClick={handleSubmit}
-        disabled={isConnected ? !canSubmit : isConnecting}
+        onClick={handleButton}
+        disabled={isConnected ? !buttonReady : isConnecting}
         // Inline: globals.css's unlayered `button { background: none }` reset
         // beats layered bg-* utilities.
         style={{ backgroundColor: "#ecc56f" }}

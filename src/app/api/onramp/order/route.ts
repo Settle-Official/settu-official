@@ -3,7 +3,7 @@ import { PaycrestAdapter } from "@/lib/offramp/adapters/paycrest-adapter";
 import { createOnrampOrder } from "@/lib/onramp/onramp-store";
 import { validateAddress, validateAmount } from "@/lib/offramp/utils/validation";
 import { alertRampEvent } from "@/lib/notify/telegram";
-import { buildOnrampKyc, paycrestValidationDetail } from "@/lib/onramp/kyc";
+import { buildOnrampKyc, describePaycrestRejection } from "@/lib/onramp/kyc";
 
 /**
  * Create an onramp order.
@@ -158,16 +158,19 @@ export async function POST(request: NextRequest) {
     // wrong with this request. Surface a friendly message instead of their
     // raw error, but keep the original in `details` for debugging/support.
     const isUpstreamOutage = statusCode >= 500;
-    // A 400 from Paycrest carries a bare "Failed to validate payload" with
-    // the real reason alongside it (e.g. the ID name not matching the refund
-    // account). That reason is what the user can act on.
-    const validationDetail =
-      statusCode === 400 ? paycrestValidationDetail(error?.details) : null;
-    const userMessage = isUpstreamOutage
-      ? "Deposit provisioning is temporarily unavailable. This is an issue on our payment provider's side — please try again in a few minutes."
-      : validationDetail
-        ? `We couldn't verify your details: ${validationDetail}`
-        : error?.message || "Failed to create onramp order";
+    // Paycrest's rejection carries a bare "Failed to validate payload" for
+    // very different causes: bad identity details, or simply nobody on their
+    // side to fill the order. Classified so the user is told the real one
+    // (see describePaycrestRejection).
+    const rejection = describePaycrestRejection(error?.details);
+    const userMessage =
+      rejection.kind === "no-provider"
+        ? rejection.message
+        : isUpstreamOutage
+          ? "Deposit provisioning is temporarily unavailable. This is an issue on our payment provider's side — please try again in a few minutes."
+          : statusCode === 400
+            ? rejection.message
+            : error?.message || "Failed to create onramp order";
 
     return NextResponse.json(
       {

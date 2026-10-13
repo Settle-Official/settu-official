@@ -172,3 +172,76 @@ export function paycrestValidationDetail(details: unknown): string | null {
     .filter(Boolean);
   return messages.length > 0 ? messages.join("; ") : null;
 }
+
+const NO_PROVIDER = /no provider available/i;
+const IDENTITY_HINT = /kyc|personDetails|birth|idDocument|taxId|\bBVN\b|\bNIN\b|fullName|account name|does not match/i;
+
+export interface PaycrestRejection {
+  /**
+   * - `no-provider`: Paycrest has nobody to fill this order right now. Not
+   *   the user's fault and not fixable by retyping anything.
+   * - `identity`: the KYC details or the name match were refused.
+   * - `other`: any other validation failure.
+   */
+  readonly kind: "no-provider" | "identity" | "other";
+  /** What to show the user. */
+  readonly message: string;
+}
+
+/**
+ * Turns Paycrest's 400 into something a user can act on. Its top-level
+ * message is a bare "Failed to validate payload" for very different causes;
+ * treating them all as an identity problem told a user their details were
+ * wrong when the real reason was that no provider was buying naira.
+ */
+export function describePaycrestRejection(details: unknown): PaycrestRejection {
+  const detail = paycrestValidationDetail(details);
+  const top =
+    details && typeof details === "object" && typeof (details as { message?: unknown }).message === "string"
+      ? (details as { message: string }).message
+      : "";
+  const text = detail ?? top;
+
+  if (NO_PROVIDER.test(text)) {
+    return {
+      kind: "no-provider",
+      message:
+        "Buying USDC with naira is temporarily unavailable: our payment partner has no provider for it right now. Nothing was charged. Please try again later.",
+    };
+  }
+
+  const data = details && typeof details === "object" ? (details as { data?: unknown }).data : null;
+  const fields = (Array.isArray(data) ? data : data ? [data] : [])
+    .map((item) =>
+      item && typeof item === "object" ? String((item as { field?: unknown }).field ?? "") : "",
+    )
+    .join(" ");
+  if (detail && (/source/i.test(fields) || IDENTITY_HINT.test(detail))) {
+    return { kind: "identity", message: `We couldn't verify your details: ${detail}` };
+  }
+  return {
+    kind: "other",
+    message: detail ? `The order was rejected: ${detail}` : top || "Failed to create onramp order",
+  };
+}
+
+/**
+ * Reads Paycrest's public buy-side quote (`GET /v2/rates/{network}/{token}/
+ * {amount}/{fiat}?side=buy`), which uses the same provider selection as
+ * order creation. "unknown" for anything that isn't a clear answer, so an
+ * outage on the quote endpoint never blocks the form by itself.
+ */
+export function readBuyAvailability(
+  httpStatus: number,
+  payload: unknown,
+): "available" | "unavailable" | "unknown" {
+  if (!payload || typeof payload !== "object") return "unknown";
+  const body = payload as { data?: unknown; message?: unknown };
+  if (typeof body.message === "string" && NO_PROVIDER.test(body.message)) return "unavailable";
+  if (httpStatus >= 200 && httpStatus < 300 && body.data && typeof body.data === "object") {
+    const data = body.data as { buy?: { rate?: unknown }; sell?: unknown };
+    if (data.buy && data.buy.rate) return "available";
+    if (data.sell) return "unavailable";
+  }
+  return "unknown";
+}

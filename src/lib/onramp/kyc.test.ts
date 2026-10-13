@@ -123,3 +123,55 @@ test("Paycrest's field-level reason is pulled out of a validation error", () => 
   assert.equal(paycrestValidationDetail({ message: "Failed to validate payload" }), null);
   assert.equal(paycrestValidationDetail(null), null);
 });
+
+test("a Paycrest rejection is classified, so 'no provider' is never blamed on the user's details", async () => {
+  const { describePaycrestRejection } = await import("./kyc");
+  // Seen live 2026-10-13: KYC passed, then no NGN buy-side provider existed.
+  assert.deepEqual(
+    describePaycrestRejection({
+      message: "Failed to validate payload",
+      data: [
+        {
+          field: "Rate",
+          message:
+            "Rate validation failed: no provider available for NGN to USDC conversion with amount 3.662735 on base",
+        },
+      ],
+    }).kind,
+    "no-provider",
+  );
+  assert.equal(
+    describePaycrestRejection({
+      message: "no provider available for NGN to USDC conversion with amount 50 on base",
+      data: null,
+    }).kind,
+    "no-provider",
+  );
+  const identity = describePaycrestRejection({
+    message: "Failed to validate payload",
+    data: [{ field: "Source", message: "kyc.personDetails.birthDate is required" }],
+  });
+  assert.equal(identity.kind, "identity");
+  assert.match(identity.message, /birthDate is required/);
+  const other = describePaycrestRejection({
+    message: "Failed to validate payload",
+    data: [{ field: "Amount", message: "amount is below the minimum" }],
+  });
+  assert.equal(other.kind, "other");
+  assert.match(other.message, /below the minimum/);
+  assert.equal(describePaycrestRejection(null).kind, "other");
+});
+
+test("the buy-side quote says whether an onramp can be filled at all", async () => {
+  const { readBuyAvailability } = await import("./kyc");
+  assert.equal(readBuyAvailability(200, { data: { buy: { rate: "1360.5", providerIds: ["a"] } } }), "available");
+  assert.equal(
+    readBuyAvailability(404, { status: "error", message: "no provider available for NGN to USDC conversion with amount 10 on base", data: null }),
+    "unavailable",
+  );
+  // A sell-only answer: the corridor exists, but nobody is buying naira.
+  assert.equal(readBuyAvailability(200, { data: { sell: { rate: "1355" } } }), "unavailable");
+  // Anything else (outage, rate limit, odd payload) must not block the form.
+  assert.equal(readBuyAvailability(500, { message: "internal error" }), "unknown");
+  assert.equal(readBuyAvailability(200, null), "unknown");
+});
