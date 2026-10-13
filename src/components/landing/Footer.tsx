@@ -5,6 +5,7 @@ const LINKS = [
   { label: "Security", href: "#security" },
   { label: "FAQ", href: "#faq" },
   { label: "Support", href: "#support" },
+  { label: "Privacy", href: "/privacy" },
 ];
 
 // TODO(links): point these at the real profiles.

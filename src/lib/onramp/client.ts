@@ -1,5 +1,6 @@
 import type { OnrampProviderAccount } from "@/lib/offramp/types";
 import { TransactionStorage } from "@/lib/transaction-storage";
+import type { OnrampKycInput } from "@/lib/onramp/kyc";
 
 export interface CreateOnrampOrderInput {
   fiatAmount: string;
@@ -10,6 +11,12 @@ export interface CreateOnrampOrderInput {
     accountIdentifier: string;
     accountName: string;
   };
+  /**
+   * The payer's identity, which the payment provider requires. Sent with
+   * this one request and kept nowhere: not in local history, not on Settu's
+   * servers.
+   */
+  kyc: OnrampKycInput;
   /**
    * What the caller already worked out this order buys, used only when the
    * provider quotes no rate of its own. Without a figure here or a rate

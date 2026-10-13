@@ -9,6 +9,13 @@ import { ResultCard } from "@/components/app/ResultCard";
 import { fiatSymbol } from "@/lib/format/currency";
 import { ONRAMP_STATUS_LABEL } from "@/lib/onramp/status-labels";
 import { createOnrampOrder } from "@/lib/onramp/client";
+import {
+  OnrampKycFields,
+  EMPTY_KYC_DRAFT,
+  kycDraftError,
+  kycDraftToInput,
+  type OnrampKycDraft,
+} from "@/components/app/OnrampKycFields";
 import { TransactionStorage } from "@/lib/transaction-storage";
 import type { OnrampProviderAccount } from "@/lib/offramp/types";
 
@@ -104,6 +111,9 @@ export function OnrampPanel({
   const [accountNumber, setAccountNumber] = useState("");
   const [accountName, setAccountName] = useState("");
   const [isVerifying, setIsVerifying] = useState(false);
+  // The payer's identity, which the payment provider requires. Held in
+  // memory for this order only: never written to storage.
+  const [kyc, setKyc] = useState<OnrampKycDraft>(EMPTY_KYC_DRAFT);
   const [useCustomAddress, setUseCustomAddress] = useState(false);
   const [customAddress, setCustomAddress] = useState("");
   // The design lets the amount be entered either way round. The API only
@@ -356,6 +366,7 @@ export function OnrampPanel({
     !!bank &&
     accountNumber.length === 10 &&
     !!accountName &&
+    kycDraftError(kyc, accountName) === null &&
     !!destinationAddress &&
     (!useCustomAddress || isValidStellarAddress(customAddress.trim()));
 
@@ -383,6 +394,7 @@ export function OnrampPanel({
           accountIdentifier: accountNumber,
           accountName,
         },
+        kyc: kycDraftToInput(kyc),
       });
       setOrderId(result.id);
       // The provider's own figures, not the indicative rate above — this is
@@ -419,6 +431,7 @@ export function OnrampPanel({
     setAccountNumber("");
     setBank("");
     setAccountName("");
+    setKyc(EMPTY_KYC_DRAFT);
     setUseCustomAddress(false);
     setCustomAddress("");
     setDeliveredUsdc(null);
@@ -675,6 +688,16 @@ export function OnrampPanel({
             {isVerifying ? "Verifying…" : accountName || "-"}
           </div>
         </div>
+      </section>
+
+      <section className="flex flex-col gap-[30px] max-[720px]:gap-[22px]">
+        <h2 className={SECTION_HEADING}>Verify your identity</h2>
+        <OnrampKycFields
+          value={kyc}
+          onChange={setKyc}
+          fullName={accountName}
+          disabled={isSubmitting}
+        />
       </section>
 
       <div className="flex flex-col gap-[20px] max-[720px]:gap-[16px]">

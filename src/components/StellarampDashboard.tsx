@@ -31,6 +31,7 @@ import {
 } from "@/components/TransactionProgressModal";
 import { createOnrampOrder } from "@/lib/onramp/client";
 import type { ResolvedOnrampOrder } from "@/lib/offramp/agent-onramp-resolver";
+import type { OnrampKycInput } from "@/lib/onramp/kyc";
 import * as StellarSdk from "@stellar/stellar-sdk";
 import { closeSheet } from "@/lib/wallet/appkit";
 import { isMobileBrowser } from "@/lib/platform";
@@ -1394,7 +1395,7 @@ export function StellarampDashboard({
   // vs userStellarAddress, and refundAccount carries an extra currency
   // field Agent Mode's resolver includes for symmetry with offramp's
   // beneficiary shape. This just maps one to the other.
-  const handleAgentInitiateOnramp = (order: ResolvedOnrampOrder) =>
+  const handleAgentInitiateOnramp = (order: ResolvedOnrampOrder, kyc: OnrampKycInput) =>
     createOnrampOrder(
       {
         fiatAmount: order.fiatAmount,
@@ -1405,6 +1406,8 @@ export function StellarampDashboard({
           accountIdentifier: order.refundAccount.accountIdentifier,
           accountName: order.refundAccount.accountName,
         },
+        // Typed into the agent's confirmation card, not the chat.
+        kyc,
       },
       { initiator: "agent" },
     );

@@ -20,6 +20,14 @@ import {
 // is what keeps the two from silently drifting apart.
 import type { AgentOrderWithQuote } from "@/lib/offramp/agent-resolver";
 import type { ResolvedOnrampOrder } from "@/lib/offramp/agent-onramp-resolver";
+import {
+  OnrampKycFields,
+  EMPTY_KYC_DRAFT,
+  kycDraftError,
+  kycDraftToInput,
+  type OnrampKycDraft,
+} from "@/components/app/OnrampKycFields";
+import type { OnrampKycInput } from "@/lib/onramp/kyc";
 import { onrampStatusToAgentEvent } from "@/lib/offramp/agent-onramp-step-bridge";
 import type { CreateOnrampOrderResult } from "@/lib/onramp/client";
 import { TransactionStorage } from "@/lib/transaction-storage";
@@ -80,7 +88,10 @@ export interface AgentPanelProps {
   // address can be given explicitly in the conversation. If the user
   // instead refers to "my connected wallet", the parse route substitutes
   // this address server-side; null if no Stellar wallet is connected.
-  readonly onInitiateOnramp: (order: ResolvedOnrampOrder) => Promise<CreateOnrampOrderResult>;
+  readonly onInitiateOnramp: (
+    order: ResolvedOnrampOrder,
+    kyc: OnrampKycInput,
+  ) => Promise<CreateOnrampOrderResult>;
   readonly connectedStellarAddress: string | null;
   /** Fired on every terminal onramp status (delivered, refunded, or
    * expired) — the wallet's balance may have just changed (or the user
@@ -540,14 +551,17 @@ export function AgentPanel({
     onCancelFlow();
   };
 
-  const confirmOnrampOrder = async (order: ResolvedOnrampOrder) => {
+  // `kyc` comes straight from the card's own fields and goes straight to the
+  // order: it is never put in `messages`, which are kept across tab switches
+  // and sent to the model as context.
+  const confirmOnrampOrder = async (order: ResolvedOnrampOrder, kyc: OnrampKycInput) => {
     setMessages((prev) =>
       prev.map((m) =>
         m.onrampOrder === order ? { ...m, onrampOrderStatus: "confirmed" } : m,
       ),
     );
     try {
-      const result = await onInitiateOnramp(order);
+      const result = await onInitiateOnramp(order, kyc);
       setMessages((prev) => [
         ...prev.map((m) =>
           m.onrampOrder === order ? { ...m, onrampOrderStatus: "success" as const } : m,
@@ -884,23 +898,11 @@ export function AgentPanel({
     if (m.onrampOrder) {
       const o = m.onrampOrder;
       return (
-        <SummaryCard
-          title="Onramp Summary"
-          rows={[
-            ["Amount", `${o.fiatAmount} ${o.currency}`],
-            [
-              "Destination",
-              `${o.destinationAddress.slice(0, 6)}…${o.destinationAddress.slice(-6)}`,
-            ],
-            ["Refund bank", o.refundAccount.institution],
-            ["Refund account", o.refundAccount.accountIdentifier],
-            ["Refund Account Name", `${o.refundAccount.accountName} ✓`, "accent"],
-          ]}
+        <OnrampSummaryCard
+          order={o}
           status={m.onrampOrderStatus}
-          onConfirm={() => confirmOnrampOrder(o)}
+          onConfirm={(kyc) => confirmOnrampOrder(o, kyc)}
           onCancel={() => cancelOnrampOrder(o)}
-          confirmLabel="Confirm"
-          successText="Order created — pay into the account below."
         />
       );
     }
@@ -1081,8 +1083,54 @@ interface SummaryCardProps {
   readonly onCancel?: () => void;
   readonly confirmLabel?: string;
   readonly confirmDisabled?: boolean;
+  /** Disables Confirm only (Cancel stays usable), e.g. until `extra` is valid. */
+  readonly confirmBlocked?: boolean;
+  /** Shown under the rows while the card still awaits Confirm/Cancel. */
+  readonly extra?: ReactNode;
   readonly successText?: string;
   readonly failedText?: string;
+}
+
+/**
+ * The onramp confirmation card, with the identity fields the payment
+ * provider requires. They live in this card's own state, not in the chat:
+ * nothing typed here is added to the conversation or sent to the model.
+ */
+function OnrampSummaryCard({
+  order,
+  status,
+  onConfirm,
+  onCancel,
+}: {
+  readonly order: ResolvedOnrampOrder;
+  readonly status: SummaryCardProps["status"];
+  readonly onConfirm: (kyc: OnrampKycInput) => void;
+  readonly onCancel: () => void;
+}) {
+  const [kyc, setKyc] = useState<OnrampKycDraft>(EMPTY_KYC_DRAFT);
+  const fullName = order.refundAccount.accountName;
+  return (
+    <SummaryCard
+      title="Onramp Summary"
+      rows={[
+        ["Amount", `${order.fiatAmount} ${order.currency}`],
+        [
+          "Destination",
+          `${order.destinationAddress.slice(0, 6)}…${order.destinationAddress.slice(-6)}`,
+        ],
+        ["Refund bank", order.refundAccount.institution],
+        ["Refund account", order.refundAccount.accountIdentifier],
+        ["Refund Account Name", `${fullName} ✓`, "accent"],
+      ]}
+      status={status}
+      extra={<OnrampKycFields compact value={kyc} onChange={setKyc} fullName={fullName} />}
+      confirmBlocked={kycDraftError(kyc, fullName) !== null}
+      onConfirm={() => onConfirm(kycDraftToInput(kyc))}
+      onCancel={onCancel}
+      confirmLabel="Confirm"
+      successText="Order created — pay into the account below."
+    />
+  );
 }
 
 /** The confirmation/receipt cards the agent drops into the chat — offramp
@@ -1096,6 +1144,8 @@ function SummaryCard({
   onCancel,
   confirmLabel = "Confirm",
   confirmDisabled,
+  confirmBlocked,
+  extra,
   successText,
   failedText,
 }: SummaryCardProps) {
@@ -1134,6 +1184,8 @@ function SummaryCard({
           </>
         )}
 
+        {!status && extra}
+
         {!status && onConfirm && onCancel && (
           <div className="flex gap-[12px]">
             <button
@@ -1149,7 +1201,7 @@ function SummaryCard({
             <button
               type="button"
               onClick={onConfirm}
-              disabled={confirmDisabled}
+              disabled={confirmDisabled || confirmBlocked}
               style={{ backgroundColor: "#c9a962" }}
               className="h-[48px] flex-1 rounded-[16px] font-[family-name:var(--font-sora)] text-[15px] font-semibold text-[#1a1a1a] transition-[filter] hover:brightness-110 disabled:opacity-50 max-[720px]:h-[44px] max-[720px]:rounded-[12px] max-[720px]:text-[14px]"
             >
