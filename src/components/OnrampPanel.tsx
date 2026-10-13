@@ -1001,7 +1001,9 @@ function VirtualAccountView({
           onClick={onCheckNow}
           disabled={checkState === "checking"}
           style={{ backgroundColor: "#ecc56f" }}
-          className="flex h-[70px] min-w-0 flex-1 items-center justify-center rounded-[40px] px-[16px] font-[family-name:var(--font-sora)] text-[18px] font-semibold text-[#111010] transition-[filter] hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-70 max-[720px]:h-[56px] max-[720px]:w-full max-[720px]:text-[15px]"
+          // flex-none on a phone: the buttons stack there, and in a column
+          // `flex-1`'s zero basis overrides the height and squashes the pill.
+          className="flex h-[70px] min-w-0 flex-1 items-center justify-center rounded-[40px] px-[16px] font-[family-name:var(--font-sora)] text-[18px] font-semibold text-[#111010] transition-[filter] hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-70 max-[720px]:h-[56px] max-[720px]:w-full max-[720px]:flex-none max-[720px]:text-[15px]"
         >
           {checkState === "checking" ? "Checking…" : "I've sent it - Check Now"}
         </button>
