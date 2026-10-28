@@ -23,7 +23,13 @@ import {
 } from "@/lib/offramp/agent-order-context";
 
 export const runtime = "nodejs";
-export const maxDuration = 30;
+// Gemini usually answers in 5-10s but has slow spells where one call alone
+// runs past 30s, which used to kill the function mid-call (a bare 504 the
+// client could only report as "couldn't reach the server"). The model call
+// gets its own deadline below, inside this one, so a slow spell ends in a
+// clear "taking longer than usual" reply instead.
+export const maxDuration = 60;
+const MODEL_DEADLINE_MS = 45_000;
 
 // Called directly against Google's own API (bypassing the Vercel AI Gateway)
 // so this runs on Google's genuinely free tier — every "free"-tagged model on
@@ -77,6 +83,7 @@ const extractionSchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
+  const modelDeadline = AbortSignal.timeout(MODEL_DEADLINE_MS);
   try {
     const clientKey =
       request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
@@ -131,6 +138,10 @@ export async function POST(request: NextRequest) {
     const { object: rawExtraction } = await generateObject({
       model: google(process.env.AGENT_PARSE_MODEL || "gemini-3.5-flash-lite"),
       schema: extractionSchema,
+      // One retry (the SDK default is two) so a flaky first attempt still
+      // gets a second chance, and the deadline caps both together.
+      maxRetries: 1,
+      abortSignal: modelDeadline,
       system:
         `You extract order details from a conversation between a user and ` +
         `Settu's crypto agent. The user wants EITHER to onramp (pay fiat, ` +
@@ -284,6 +295,12 @@ export async function POST(request: NextRequest) {
     // The generic message below is what the user sees; log the real cause
     // server-side so a 500 here is diagnosable instead of a dead end.
     console.error("[agent/parse] failed:", error?.message || error, error?.cause || "");
+    if (modelDeadline.aborted) {
+      return NextResponse.json(
+        { kind: "error", message: "This is taking longer than usual — please try again in a moment." },
+        { status: 504 },
+      );
+    }
     return NextResponse.json(
       { kind: "error", message: "I had trouble understanding that — please try rephrasing." },
       { status: 500 },
