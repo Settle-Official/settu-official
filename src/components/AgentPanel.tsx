@@ -409,7 +409,17 @@ export function AgentPanel({
           lastCompletedOrder,
         }),
       });
-      const data: ParseResponse = await res.json();
+      // If the function itself runs out of time, Vercel answers with a
+      // plain-text 504 rather than our JSON. That's the server being slow,
+      // not unreachable, so it gets its own message instead of falling
+      // through to the catch below.
+      const data: ParseResponse = await res.json().catch(() => {
+        if (res.status !== 504) throw new Error(`agent/parse ${res.status}`);
+        return {
+          kind: "error",
+          message: "This is taking longer than usual — please try again in a moment.",
+        } as ParseResponse;
+      });
       if (data.kind === "clarify") {
         setMessages((prev) => [
           ...prev,
