@@ -551,6 +551,42 @@ button {
   }
 }
 
+/* The app's service-notice strip (NoticeBanner.tsx). The track holds the
+   message twice; sliding it -50% moves exactly one copy, so the loop has no
+   seam. Slow enough to read a long sentence, and paused under the pointer so
+   it can be read at leisure. */
+@keyframes notice-marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+.notice-marquee-track {
+  animation: notice-marquee 45s linear infinite;
+}
+.notice-marquee:hover .notice-marquee-track {
+  animation-play-state: paused;
+}
+@media (prefers-reduced-motion: reduce) {
+  /* Still, and wrapped onto as many lines as it needs, with no duplicate. */
+  .notice-marquee {
+    height: auto;
+  }
+  .notice-marquee-track {
+    animation: none;
+    width: auto;
+  }
+  .notice-marquee-copy {
+    white-space: normal;
+    padding-right: 0;
+  }
+  .notice-marquee-copy[aria-hidden] {
+    display: none;
+  }
+}
+
 /* iOS-style "liquid glass" (landing nav, the app header and dashboard
    cards): a heavy, colour-boosted blur of whatever is behind, a specular rim that catches light hardest on the
    top-left and bottom-right edges, a sheen across the top half and a faint
