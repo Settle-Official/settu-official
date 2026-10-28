@@ -1,4 +1,4 @@
-import { Fraunces, Inter, Sora } from "next/font/google";
+import { Fraunces, Geist, Inter, Sora } from "next/font/google";
 import { AppShell } from "@/components/app/AppShell";
 import { WalletBarProvider } from "@/components/app/WalletBar";
 import { ActiveWalletProvider } from "@/components/app/ActiveWallet";
@@ -26,11 +26,18 @@ const inter = Inter({
   variable: "--font-inter",
   display: "swap",
 });
+// Only the service-notice strip uses it (NoticeBanner.tsx).
+const geist = Geist({
+  subsets: ["latin"],
+  weight: ["400"],
+  variable: "--font-geist",
+  display: "swap",
+});
 
 export default function AppLayout({ children }: { readonly children: React.ReactNode }) {
   return (
     <div
-      className={`${fraunces.variable} ${sora.variable} ${inter.variable} font-[family-name:var(--font-sora)] text-white`}
+      className={`${fraunces.variable} ${sora.variable} ${inter.variable} ${geist.variable} font-[family-name:var(--font-sora)] text-white`}
     >
       <WalletBarProvider>
         <ActiveWalletProvider>

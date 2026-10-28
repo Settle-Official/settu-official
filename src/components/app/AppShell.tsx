@@ -16,6 +16,7 @@ import { useScreenBack } from "./ScreenBack";
 import { useNotifications } from "./Notifications";
 import { SettuLogo } from "@/components/brand/SettuLogo";
 import { SettuMark } from "@/components/brand/SettuMark";
+import { NoticeBanner } from "./NoticeBanner";
 import {
   ArrowLeftIcon,
   BellIcon,
@@ -320,6 +321,10 @@ export function AppShell({ children }: { readonly children: ReactNode }) {
             </button>
           </div>
         </header>
+
+        {/* On every screen, not just Overview where the design draws it: a
+            notice about a wallet outage matters most mid-transaction. */}
+        <NoticeBanner />
 
         {/* Agent Mode is a full-bleed chat surface with no card behind it
             (per its own design), unlike every other screen's translucent

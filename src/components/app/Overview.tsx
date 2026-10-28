@@ -86,7 +86,7 @@ export function Overview() {
         {tiles.map(({ label, value, icon: TileIcon, onPhone }) => (
           <div
             key={label}
-            style={{ "--glass-tint": "rgba(127,125,125,0.1)" } as CSSProperties}
+            style={{ "--glass-tint": "rgba(24,23,23,0.1)" } as CSSProperties}
             className={`liquid-glass relative flex min-h-[110px] flex-col justify-center gap-[10px] rounded-[20px] p-[20px] max-[720px]:px-[10px] max-[720px]:py-[20px] ${
               onPhone ? "" : "max-[720px]:hidden"
             }`}
@@ -105,7 +105,7 @@ export function Overview() {
       </div>
 
       <div className="grid grid-cols-[minmax(0,444fr)_minmax(0,545fr)] gap-[44px] max-[1400px]:gap-[20px] max-[1100px]:grid-cols-1">
-        <section style={{ "--glass-tint": "rgba(255,255,255,0.1)" } as CSSProperties} className="liquid-glass relative flex flex-col gap-[24px] rounded-[30px] px-[20px] py-[30px] max-[720px]:gap-[30px]">
+        <section style={{ "--glass-tint": "rgba(24,23,23,0.5)" } as CSSProperties} className="liquid-glass relative flex flex-col gap-[24px] rounded-[30px] px-[20px] py-[30px] max-[720px]:gap-[30px]">
           <h2 className="border-b-[0.6px] border-[#484646] pb-[20px] font-fraunces text-[28px] leading-[35px] text-[#f4f0f0]">
             Quick Action
           </h2>
@@ -129,7 +129,7 @@ export function Overview() {
           </div>
         </section>
 
-        <section style={{ "--glass-tint": "rgba(255,255,255,0.1)" } as CSSProperties} className="liquid-glass relative flex flex-col gap-[26px] rounded-[30px] px-[20px] py-[30px]">
+        <section style={{ "--glass-tint": "rgba(24,23,23,0.5)" } as CSSProperties} className="liquid-glass relative flex flex-col gap-[26px] rounded-[30px] px-[20px] py-[30px]">
           <div className="flex flex-col gap-[10px] border-b-[0.6px] border-[#484646] pb-[10px]">
             <h2 className="font-fraunces text-[28px] font-semibold leading-[35px] text-[#f4f0f0]">
               Transaction activity
