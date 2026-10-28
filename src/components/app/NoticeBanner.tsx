@@ -7,7 +7,7 @@
  * would shove the whole screen down a beat after it loads.
  */
 export const NOTICE: string | null =
-  "LOBSTR is currently experiencing app connection issues that may affect connecting with Settu. The issue originates from LOBSTR and is not caused by Settu. We’re monitoring the situation and will update you when services are restored. Thank you for your patience and understanding.";
+  "LOBSTR is currently experiencing app connection issues that may affect connecting with Settu. The issue originates from LOBSTR and is not caused by Settu. We’re monitoring the situation and will update you when services are restored. Use Freighter on Stellar instead. Thank you for your patience and understanding.";
 
 export function NoticeBanner() {
   if (!NOTICE) return null;
