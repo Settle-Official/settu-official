@@ -60,6 +60,14 @@ export async function getPayoutStatus(
   return record ?? null;
 }
 
+/** getPayoutStatus for many orders in one MGET, in the same order. */
+export async function getPayoutStatuses(
+  orderIds: readonly string[],
+): Promise<(PayoutRecord | null)[]> {
+  if (orderIds.length === 0) return [];
+  return redis.mget<(PayoutRecord | null)[]>(...orderIds.map(key));
+}
+
 /**
  * Idempotent write. Paycrest retries deliveries, and they can arrive out of
  * order — never let a later event regress a record that's already terminal or

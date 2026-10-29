@@ -3,11 +3,11 @@
 // Covers every burning chain (Stellar, Solana, EVM); Base transfers directly.
 
 import {
-  listOrderMetaIds,
+  listOrderMetasCreatedBetween,
   getOrderMeta,
   type OrderMeta,
 } from "./order-meta-store";
-import { getPayoutStatus } from "./payout-store";
+import { getPayoutStatus, getPayoutStatuses } from "./payout-store";
 import type { PayoutStatus } from "./types";
 import { getCctpTransfer } from "../cctp/cctp-store";
 import { fetchBurnMessage } from "../cctp/iris-client";
@@ -332,17 +332,21 @@ export interface BurnBackstopResult {
 }
 
 export async function reconcileUnregisteredBurns(): Promise<BurnBackstopResult> {
-  const orderIds = await listOrderMetaIds();
+  // Only the window orderRecoverable accepts, read in a fixed handful of
+  // commands. This runs every 5 minutes, so per-order reads here multiply
+  // fast: the old version's full-database SCAN plus a GET per order was
+  // most of what exhausted the Upstash quota on 2026-10-29.
+  const now = Date.now();
+  const candidates = (
+    await listOrderMetasCreatedBetween(now - MAX_AGE_MS, now - GRACE_MS)
+  ).filter(({ meta }) => orderRecoverable(meta));
+  const payouts = await getPayoutStatuses(candidates.map((c) => c.orderId));
   const recovered: string[] = [];
   let errors = 0;
 
-  for (const orderId of orderIds) {
+  for (const [i, { orderId, meta }] of candidates.entries()) {
     try {
-      const meta = await getOrderMeta(orderId);
-      if (!orderRecoverable(meta)) continue;
-
-      const payout = await getPayoutStatus(orderId);
-      if (isPayoutAlreadyResolved(payout?.status)) continue;
+      if (isPayoutAlreadyResolved(payouts[i]?.status)) continue;
 
       const found = await findBurn(meta);
       if (!found) continue;
@@ -376,7 +380,7 @@ export async function reconcileUnregisteredBurns(): Promise<BurnBackstopResult> 
     }
   }
 
-  return { scanned: orderIds.length, recovered, errors };
+  return { scanned: candidates.length, recovered, errors };
 }
 
 
