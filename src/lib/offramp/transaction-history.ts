@@ -24,6 +24,17 @@ const ADDRESS_INDEX_KEY = (address: string) =>
 // instead of a scan over every transaction ever made.
 const ORDER_INDEX_KEY = (orderId: string) => `offramp:tx:by-order:${orderId}`;
 
+/**
+ * One MGET for a page of records. Upstash bills per command, and reading a
+ * page with one GET per id cost 200 commands where this costs one. The
+ * landing page re-reads the whole history every few minutes, so that
+ * difference alone was a large share of the monthly quota.
+ */
+async function getEntries(ids: string[]): Promise<(OfframpTransactionRecord | null)[]> {
+  if (ids.length === 0) return [];
+  return redis.mget<(OfframpTransactionRecord | null)[]>(...ids.map(ENTRY_KEY));
+}
+
 export type OfframpSourceChain = "stellar" | EvmChainKey | "solana";
 
 export interface OfframpTransactionRecord {
@@ -88,7 +99,7 @@ async function resolveIdByOrder(orderId: string): Promise<string | null> {
 
   const ids = await redis.zrange<string[]>(CHRONOLOGICAL_INDEX_KEY, 0, 199, { rev: true });
   if (ids.length === 0) return null;
-  const records = await Promise.all(ids.map((id) => redis.get<OfframpTransactionRecord>(ENTRY_KEY(id))));
+  const records = await getEntries(ids);
   const hit = records.find((r) => r?.paycrestOrderId === orderId);
   if (!hit) return null;
 
@@ -165,7 +176,7 @@ export async function listAllPaged(
     { rev: true },
   );
   if (ids.length === 0) return [];
-  const records = await Promise.all(ids.map((id) => redis.get<OfframpTransactionRecord>(ENTRY_KEY(id))));
+  const records = await getEntries(ids);
   return records.filter((r): r is OfframpTransactionRecord => r !== null);
 }
 
@@ -187,6 +198,6 @@ export async function listByAddress(
     rev: true,
   });
   if (ids.length === 0) return [];
-  const records = await Promise.all(ids.map((id) => redis.get<OfframpTransactionRecord>(ENTRY_KEY(id))));
+  const records = await getEntries(ids);
   return records.filter((r): r is OfframpTransactionRecord => r !== null);
 }

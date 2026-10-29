@@ -37,6 +37,18 @@ const BASELINE_ORDERS: ReadonlySet<string> = new Set(BASELINE_ORDER_IDS);
 const PAGE = 200;
 
 export async function getLandingStats(): Promise<LandingStats> {
+  try {
+    return await readLandingStats();
+  } catch (err) {
+    // A Redis outage (or the monthly command quota running out, which took
+    // the whole landing page down on 2026-10-29) must not cost a 500. The
+    // baseline alone undercounts, so the figures are still true, just low.
+    console.error("[landing-stats] falling back to the baseline:", err);
+    return summarise([], 0, BASELINE_ORDERS);
+  }
+}
+
+async function readLandingStats(): Promise<LandingStats> {
   const offramps: OfframpTransactionRecord[] = [];
   for (let offset = 0; ; offset += PAGE) {
     const page = await listAllPaged(offset, PAGE);
