@@ -1,7 +1,8 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { ArrowRightIcon, CheckIcon, CloseIcon } from "./icons";
+import { ArrowRightIcon } from "./icons";
+import { ResultIcon } from "./ResultIcon";
 
 /**
  * The terminal card both ramps end on — a tinted disc, a headline, a line of
@@ -25,23 +26,12 @@ export function ResultCard({
   /** Inside an overlay, where the surrounding padding is the modal's. */
   readonly compact?: boolean;
 }) {
-  const isSuccess = kind === "success";
   return (
     <div className={`flex flex-col items-center max-[720px]:gap-[22px] max-[720px]:py-0 ${
         compact ? "gap-[28px] py-[4px]" : "gap-[50px] py-[60px] max-[720px]:gap-[30px]"
       }`}>
       <div className="flex w-[414px] max-w-full flex-col items-center gap-[24px] rounded-[20px] bg-[#232222] px-[30px] py-[40px] text-center max-[720px]:gap-[18px] max-[720px]:rounded-[14px] max-[720px]:px-[20px] max-[720px]:py-[32px]">
-        <span
-          className={`flex size-[82px] items-center justify-center rounded-full max-[720px]:size-[62px] ${
-            isSuccess ? "bg-[#2fb457]" : "bg-[#b23a3e]"
-          }`}
-        >
-          {isSuccess ? (
-            <CheckIcon size={40} strokeWidth={2.4} className="text-white" />
-          ) : (
-            <CloseIcon size={36} strokeWidth={2.4} className="text-white" />
-          )}
-        </span>
+        <ResultIcon kind={kind} />
         <div className="flex flex-col gap-[12px]">
           <h2 className="font-fraunces text-[26px] leading-[32px] text-white max-[720px]:text-[20px] max-[720px]:leading-[26px]">
             {title}

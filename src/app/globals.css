@@ -587,6 +587,121 @@ button {
   }
 }
 
+/* ResultCard's animated icon (ResultIcon.tsx), from the designer's
+   prototype. Each element's base style is where it ends up; the keyframes
+   only describe the way there, with `both` holding the first frame through
+   any delay. So with animation off, the finished icon is what shows. */
+.ri {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+/* Success: dot -> ring (0-1.5s), pulse + check + fill (1.6-2.25s),
+   confetti (2.4-3.75s). */
+.ri-s-ring {
+  transform: rotate(-90deg);
+  animation: ri-s-ring 2.25s linear both;
+}
+@keyframes ri-s-ring {
+  /* The segment's head runs clockwise from 12 o'clock while the tail lags,
+     like a spinner, until it closes into a full ring. */
+  0% { opacity: 0; stroke-dasharray: 0.1 100; transform: rotate(-90deg); }
+  11% { opacity: 1; stroke-dasharray: 0.1 100; transform: rotate(-90deg); }
+  33% { stroke-dasharray: 3 100; transform: rotate(-65deg); }
+  44% { stroke-dasharray: 20 100; transform: rotate(54deg); }
+  56% { stroke-dasharray: 65 100; transform: rotate(60deg); }
+  67% { stroke-dasharray: 100 0; transform: rotate(60deg); }
+  100% { opacity: 1; stroke-dasharray: 100 0; transform: rotate(60deg); }
+}
+.ri-s-pulse {
+  animation: ri-s-pulse 0.45s ease-out 1.6s forwards;
+}
+@keyframes ri-s-pulse {
+  from { opacity: 0.45; transform: scale(0.95); }
+  to { opacity: 0; transform: scale(1.3); }
+}
+.ri-s-disc {
+  animation: ri-s-disc 0.3s ease-out 1.95s both;
+}
+@keyframes ri-s-disc {
+  from { opacity: 0; transform: scale(0.92); }
+  to { opacity: 1; transform: scale(1); }
+}
+.ri-s-check {
+  stroke-dashoffset: 0;
+  animation: ri-draw 0.4s ease-out 1.75s both;
+}
+.ri-s-confetti {
+  animation: ri-s-confetti 1.2s cubic-bezier(0.2, 0.7, 0.3, 1) forwards;
+}
+@keyframes ri-s-confetti {
+  0% { opacity: 1; transform: translate(0, 0) rotate(0deg); }
+  65% { opacity: 1; }
+  100% { opacity: 0; transform: translate(var(--dx), var(--dy)) rotate(var(--rot)); }
+}
+
+/* Failure: dot pops inside a halo (0-0.35s), halo collapses (0.45-0.7s),
+   X draws and dots burst out and settle (0.55-1.1s). */
+.ri-f-halo {
+  animation: ri-f-halo 0.8s ease-out both;
+}
+@keyframes ri-f-halo {
+  0% { opacity: 1; transform: scale(0); }
+  40% { opacity: 1; transform: scale(1); }
+  60% { opacity: 1; transform: scale(0.97); }
+  /* Shrinks behind the disc (41/60 = 0.68) rather than fading. */
+  85% { opacity: 1; transform: scale(0.68); }
+  100% { opacity: 0; transform: scale(0.68); }
+}
+.ri-f-disc {
+  animation: ri-f-disc 0.8s ease-out both;
+}
+@keyframes ri-f-disc {
+  0% { transform: scale(0); }
+  35% { transform: scale(1.1); }
+  60% { transform: scale(1.08); }
+  85% { transform: scale(1); }
+}
+.ri-f-stroke {
+  stroke-dashoffset: 0;
+  animation: ri-draw 0.35s ease-out 0.55s both;
+}
+.ri-f-dot {
+  animation: ri-f-dot 0.5s cubic-bezier(0.3, 0.6, 0.3, 1) 0.6s both;
+}
+@keyframes ri-f-dot {
+  0% { opacity: 0; transform: translate(var(--dx), var(--dy)) scale(0.6); }
+  25% { opacity: 1; transform: translate(var(--dx), var(--dy)) scale(1); }
+  100% { opacity: 1; transform: translate(0, 0) scale(1); }
+}
+/* They arrive hollow and fill in as they settle. */
+.ri-f-dot-ring {
+  animation: ri-f-dot-fill 0.3s ease-out 0.8s both;
+}
+@keyframes ri-f-dot-fill {
+  from { fill: transparent; }
+  to { fill: #fff; }
+}
+.ri-f-dot-core {
+  animation: ri-fade-in 0.2s ease-out 0.95s both;
+}
+
+@keyframes ri-draw {
+  from { stroke-dashoffset: 100; }
+  to { stroke-dashoffset: 0; }
+}
+@keyframes ri-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ri,
+  .ri-f-dot-ring,
+  .ri-f-dot-core {
+    animation: none;
+  }
+}
+
 /* iOS-style "liquid glass" (landing nav, the app header and dashboard
    cards): a heavy, colour-boosted blur of whatever is behind, a specular rim that catches light hardest on the
    top-left and bottom-right edges, a sheen across the top half and a faint
