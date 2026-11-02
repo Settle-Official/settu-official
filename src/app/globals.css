@@ -640,66 +640,66 @@ button {
   100% { opacity: 0; transform: translate(var(--dx), var(--dy)) rotate(var(--rot)); }
 }
 
-/* Failure, timed off the prototype at full frame rate: the disc pops inside
-   its halo (0-0.1s); the X starts as two dots while the halo is still up
-   (0.17s) and grows, slow then fast then easing off, through a ">" into the
-   X (done ~0.67s); the halo snaps away behind the disc (0.3-0.36s); the dots
-   burst out hollow and settle, filled (0.43-0.75s). */
-.ri-f-halo {
-  animation: ri-f-halo 0.4s linear both;
-}
-@keyframes ri-f-halo {
-  0% { opacity: 1; transform: scale(0); animation-timing-function: ease-out; }
-  25% { opacity: 1; transform: scale(1); }
-  75% { opacity: 1; transform: scale(1); animation-timing-function: ease-in; }
-  /* Shrinks behind the disc (41/60 = 0.68) rather than fading. */
-  90% { opacity: 1; transform: scale(0.68); }
-  100% { opacity: 0; transform: scale(0.68); }
-}
+/* Failure. Same beats as the prototype, but every move is one continuous
+   eased tween, and each stage starts before the last one settles, so
+   nothing steps or stops dead:
+   - 0-0.5s     disc and halo swell in (expo-out)
+   - 0.3-0.85s  X fades in as two dots and draws through ">" (ease-in-out)
+   - 0.5-1.0s   halo sinks behind the disc (ease-in-out)
+   - 0.6-1.3s   dots drift out, fill and settle (expo-out) */
 .ri-f-disc {
-  animation: ri-f-disc 0.4s linear both;
+  animation: ri-f-disc 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 @keyframes ri-f-disc {
-  0% { transform: scale(0); animation-timing-function: ease-out; }
-  25% { transform: scale(1.04); }
-  75% { transform: scale(1.04); animation-timing-function: ease-in-out; }
-  90% { transform: scale(1); }
+  from { transform: scale(0); }
+  to { transform: scale(1); }
 }
+/* Two tweens on one element: in with the disc, then down behind it. At
+   0.66 it sits just inside the disc (41/60 = 0.683), edge included, so it
+   never needs to fade out. */
+.ri-f-halo {
+  opacity: 1;
+  transform: scale(0.66);
+  animation:
+    ri-f-halo-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) both,
+    ri-f-halo-out 0.5s cubic-bezier(0.65, 0, 0.35, 1) 0.5s forwards;
+}
+@keyframes ri-f-halo-in {
+  from { transform: scale(0); }
+  to { transform: scale(1); }
+}
+@keyframes ri-f-halo-out {
+  from { transform: scale(1); }
+  to { transform: scale(0.66); }
+}
+/* The round cap of a zero-length dash is the starting dot; it fades in,
+   then the stroke grows from it. */
 .ri-f-stroke {
-  animation: ri-f-stroke 0.67s linear both;
+  animation:
+    ri-fade-in 0.2s ease-out 0.3s both,
+    ri-f-stroke 0.55s cubic-bezier(0.65, 0, 0.35, 1) 0.3s both;
 }
-/* Hidden until 0.17s, then a dot (the round cap of a zero-length dash) that
-   grows into the stroke: crawling at first, then sweeping through. The
-   curve is fitted to the prototype's frames (~8% drawn at 0.33s, 25% at
-   0.47s, the ">" at 0.53s, done at 0.67s). */
 @keyframes ri-f-stroke {
-  0%,
-  24.9% { opacity: 0; stroke-dasharray: 0.1 100; }
-  25% {
-    opacity: 1;
-    stroke-dasharray: 0.1 100;
-    animation-timing-function: cubic-bezier(0.85, 0, 0.65, 0.85);
-  }
-  100% { opacity: 1; stroke-dasharray: 100 0; }
+  from { stroke-dasharray: 0.1 100; }
+  to { stroke-dasharray: 100 0; }
 }
 .ri-f-dot {
-  animation: ri-f-dot 0.32s cubic-bezier(0.3, 0.6, 0.3, 1) 0.43s both;
+  animation: ri-f-dot 0.7s cubic-bezier(0.16, 1, 0.3, 1) 0.6s both;
 }
 @keyframes ri-f-dot {
-  0% { opacity: 0; transform: translate(var(--dx), var(--dy)) scale(0.5); }
-  35% { opacity: 1; transform: translate(var(--dx), var(--dy)) scale(1); }
-  100% { opacity: 1; transform: translate(0, 0) scale(1); }
+  from { opacity: 0; transform: translate(var(--dx), var(--dy)) scale(0.4); }
+  to { opacity: 1; transform: translate(0, 0) scale(1); }
 }
 /* They arrive hollow and fill in as they settle. */
 .ri-f-dot-ring {
-  animation: ri-f-dot-fill 0.12s ease-out 0.52s both;
+  animation: ri-f-dot-fill 0.4s ease-in-out 0.75s both;
 }
 @keyframes ri-f-dot-fill {
-  from { fill: transparent; }
+  from { fill: rgba(255, 255, 255, 0); }
   to { fill: #fff; }
 }
 .ri-f-dot-core {
-  animation: ri-fade-in 0.12s ease-out 0.56s both;
+  animation: ri-fade-in 0.35s ease-in-out 0.9s both;
 }
 
 @keyframes ri-draw {
