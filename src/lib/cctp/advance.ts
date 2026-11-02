@@ -84,6 +84,12 @@ async function advanceLocked(
               messageHex: record.attestationMessage,
               attestationHex: record.attestationSignature,
             });
+      // Null: the message was already minted on-chain (see submitBaseMint),
+      // so there's nothing left to send and nothing to wait for.
+      if (mintTxHash === null) {
+        await updateCctpTransfer(id, { status: "completed" });
+        return "completed";
+      }
       await updateCctpTransfer(id, { status: "minting", mintTxHash });
       return "minting";
     }

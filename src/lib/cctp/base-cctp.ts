@@ -65,6 +65,116 @@ async function assertBaseGasFloor(publicClient: ReturnType<typeof getClients>["p
   }
 }
 
+type BaseClients = ReturnType<typeof getClients>;
+
+export interface FeeQuote {
+  maxFeePerGas: bigint;
+  maxPriorityFeePerGas: bigint;
+}
+
+/** Hard ceiling on what a bump may pay, so a misbehaving node can't drain the hot wallet. */
+const MAX_FEE_CAP_WEI = BigInt(1_000_000_000); // 1 gwei; Base usually sits near 0.01
+const SEND_ATTEMPTS = 4;
+
+/**
+ * True when a node refused a transaction because one with the same nonce is
+ * already in its pool and this one doesn't pay enough more to replace it.
+ */
+export function isUnderpricedError(message: string): boolean {
+  return /replacement transaction underpriced|transaction underpriced|fee too low/i.test(message);
+}
+
+/** True when the nonce we used has since been taken by a confirmed transaction. */
+export function isNonceTooLowError(message: string): boolean {
+  return /nonce too low|nonce has already been used/i.test(message);
+}
+
+/**
+ * Doubles both fees. Nodes demand at least +10% on each to accept a
+ * replacement, so doubling clears that in one step even when the stuck
+ * transaction paid a little more than our estimate. Capped at MAX_FEE_CAP_WEI.
+ */
+export function bumpFees(fees: FeeQuote): FeeQuote {
+  const two = BigInt(2);
+  const maxFeePerGas = fees.maxFeePerGas * two;
+  const priority = fees.maxPriorityFeePerGas * two;
+  const cappedMax = maxFeePerGas > MAX_FEE_CAP_WEI ? MAX_FEE_CAP_WEI : maxFeePerGas;
+  return {
+    maxFeePerGas: cappedMax,
+    maxPriorityFeePerGas: priority > cappedMax ? cappedMax : priority,
+  };
+}
+
+/**
+ * Sends a hot-wallet transaction, riding out a stuck one with the same nonce.
+ *
+ * Live incident, 2026-11-02 (offramp order 81b5d314): a node in Base's
+ * public RPC pool held an old relayer transaction at nonce 484 that never
+ * reached the sequencer. Every mint after it was rejected "replacement
+ * transaction underpriced" because viem re-estimated the same fee each time,
+ * so the transfer burned through all 20 advance attempts in three minutes
+ * and froze as failed. Pinning the nonce and doubling the fee on that error
+ * replaces the stuck transaction instead.
+ */
+async function sendWithFeeBump(
+  { account, publicClient, walletClient }: BaseClients,
+  tx: { to: Hex; data: Hex },
+): Promise<Hex> {
+  let nonce = await publicClient.getTransactionCount({
+    address: account.address,
+    blockTag: "pending",
+  });
+  const estimate = await publicClient.estimateFeesPerGas();
+  let fees: FeeQuote = {
+    maxFeePerGas: estimate.maxFeePerGas,
+    maxPriorityFeePerGas: estimate.maxPriorityFeePerGas,
+  };
+
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await walletClient.sendTransaction({ ...tx, nonce, ...fees });
+    } catch (err: any) {
+      const message = `${err?.shortMessage ?? ""} ${err?.details ?? ""} ${err?.message ?? ""}`;
+      if (attempt >= SEND_ATTEMPTS) throw err;
+      if (isUnderpricedError(message)) {
+        fees = bumpFees(fees);
+        console.warn(
+          `[base-cctp] nonce ${nonce} underpriced; retrying at maxFee ${fees.maxFeePerGas} wei`,
+        );
+        continue;
+      }
+      if (isNonceTooLowError(message)) {
+        nonce = await publicClient.getTransactionCount({
+          address: account.address,
+          blockTag: "pending",
+        });
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
+const USED_NONCES_ABI = [
+  {
+    type: "function",
+    name: "usedNonces",
+    stateMutability: "view",
+    inputs: [{ name: "", type: "bytes32" }],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+] as const;
+
+/**
+ * The CCTP v2 message nonce: bytes 12-44, after version, source domain and
+ * destination domain (4 bytes each).
+ */
+export function cctpMessageNonce(messageHex: string): Hex {
+  const hex = messageHex.replace(/^0x/, "");
+  if (hex.length < 88) throw new Error("CCTP message too short to carry a nonce");
+  return `0x${hex.slice(24, 88)}`;
+}
+
 const ERC20_APPROVE_ABI = [
   {
     type: "function",
@@ -164,7 +274,8 @@ export async function submitBaseBurnWithHook(params: {
   maxFeeBaseInt: bigint;
   fast?: boolean;
 }): Promise<string> {
-  const { account, publicClient, walletClient } = getClients();
+  const clients = getClients();
+  const { account, publicClient } = clients;
   await assertBaseGasFloor(publicClient, account.address);
 
   const amount = usdcFloatToBaseInt(params.amountFloat);
@@ -190,7 +301,7 @@ export async function submitBaseBurnWithHook(params: {
     args: [account.address, CCTP_CONFIG.baseTokenMessengerV2],
   });
   if (allowance < amount) {
-    const approveTx = await walletClient.sendTransaction({
+    const approveTx = await sendWithFeeBump(clients, {
       to: CCTP_CONFIG.baseUsdc,
       data: encodeFunctionData({
         abi: ERC20_APPROVE_ABI,
@@ -202,7 +313,7 @@ export async function submitBaseBurnWithHook(params: {
     await waitForAllowance(publicClient, account.address, amount);
   }
 
-  const burnTx = await walletClient.sendTransaction({
+  const burnTx = await sendWithFeeBump(clients, {
     to: CCTP_CONFIG.baseTokenMessengerV2,
     data: encodeFunctionData({
       abi: DEPOSIT_FOR_BURN_WITH_HOOK_ABI,
@@ -232,11 +343,18 @@ export async function submitBaseBurnWithHook(params: {
 export async function submitBaseMint(params: {
   messageHex: string;
   attestationHex: string;
-}): Promise<string> {
-  const { account, publicClient, walletClient } = getClients();
+}): Promise<string | null> {
+  const clients = getClients();
+  const { account, publicClient } = clients;
+
+  // Already minted (by an earlier attempt that we lost track of, or by hand)?
+  // Then retrying can only revert, and a run of reverts freezes the transfer
+  // as failed even though the money arrived. Null tells the caller "done".
+  if (await isMessageAlreadyMinted(publicClient, params.messageHex)) return null;
+
   await assertBaseGasFloor(publicClient, account.address);
 
-  const tx = await walletClient.sendTransaction({
+  const tx = await sendWithFeeBump(clients, {
     to: CCTP_CONFIG.baseMessageTransmitterV2,
     data: encodeFunctionData({
       abi: RECEIVE_MESSAGE_ABI,
@@ -246,4 +364,17 @@ export async function submitBaseMint(params: {
   });
   await publicClient.waitForTransactionReceipt({ hash: tx });
   return tx;
+}
+
+async function isMessageAlreadyMinted(
+  publicClient: BaseClients["publicClient"],
+  messageHex: string,
+): Promise<boolean> {
+  const used = await publicClient.readContract({
+    address: CCTP_CONFIG.baseMessageTransmitterV2,
+    abi: USED_NONCES_ABI,
+    functionName: "usedNonces",
+    args: [cctpMessageNonce(messageHex)],
+  });
+  return used !== BigInt(0);
 }
