@@ -45,14 +45,14 @@ const CONFETTI = (() => {
   return Array.from({ length: 36 }, (_, i) => {
     const angle = (i / 36) * Math.PI * 2 + rand() * 0.35;
     const start = 30 + rand() * 8;
-    const end = 52 + rand() * 30;
+    const end = 56 + rand() * 34;
     return {
       x: r2(C + Math.cos(angle) * start),
       y: r2(C + Math.sin(angle) * start),
       dx: r2(Math.cos(angle) * (end - start)),
       dy: r2(Math.sin(angle) * (end - start)),
       rot: Math.round(rand() * 540 - 270),
-      w: r2(2 + rand() * 2.5),
+      w: r2(4 + rand() * 3.5),
       colour: CONFETTI_COLOURS[i % CONFETTI_COLOURS.length],
       delay: r2(rand() * 0.15),
     };
@@ -131,10 +131,10 @@ function SuccessIcon() {
           key={i}
           className="ri ri-s-confetti"
           x={r2(p.x - p.w / 2)}
-          y={r2(p.y - 0.9)}
+          y={r2(p.y - 1.4)}
           width={p.w}
-          height={1.8}
-          rx={0.6}
+          height={2.8}
+          rx={0.9}
           fill={p.colour}
           opacity={0}
           style={
