@@ -11,7 +11,7 @@ export const metadata: Metadata = {
 };
 
 // Update whenever the policy's substance changes.
-const LAST_UPDATED = "13 October 2026";
+const LAST_UPDATED = "10 November 2026";
 
 function Section({ title, children }: { readonly title: string; readonly children: ReactNode }) {
   return (
@@ -63,14 +63,14 @@ export default function PrivacyPolicyPage() {
           <p>
             Settu lets you convert between USDC and your local currency. To do that we
             handle some personal information: your wallet address, the bank details you
-            give for a payout or refund, and, when you buy USDC, identity details our
-            payment partner is required to check.
+            give for a payout or refund, and, when you buy USDC, identity details we are
+            required to collect.
           </p>
           <List>
             <li>We collect only what a transfer needs.</li>
             <li>
-              Identity details for buying USDC (date of birth, ID number, BVN) are passed
-              to our payment partner with your order. <span className={strong}>Settu does
+              Identity details for buying USDC (date of birth, ID number, BVN) are sent
+              with your order to our payment partner. <span className={strong}>Settu does
               not store them.</span>
             </li>
             <li>We do not sell your information, and we do not use it for advertising.</li>
@@ -117,17 +117,21 @@ export default function PrivacyPolicyPage() {
               holder&rsquo;s name.
             </li>
             <li>
-              Identity details our payment partner is required to verify before it can
-              accept a bank transfer: your full name (taken from your refund account), date of
+              Identity details Settu is responsible for collecting from anyone who pays in
+              by bank transfer: your full name (taken from your refund account), date of
               birth, and either your National Identification Number (NIN), or a passport
               or driver&rsquo;s licence number together with your Bank Verification Number
               (BVN).
             </li>
           </List>
           <p>
-            Those identity details are sent to our payment partner with that one order.
+            Those identity details are sent to our payment partner with that one order,
+            which checks they are complete and that the name matches your bank account.
             They are not saved on Settu&rsquo;s servers, not kept in your browser, and not
             included in our internal alerts. You are asked for them again on each purchase.
+            From January 2027 we will also check your NIN or BVN against government records
+            through Prembly, an identity verification provider; we will then keep the
+            result of that check, not the ID numbers themselves.
           </p>
 
           <p className={strong}>When you use the Settu Agent</p>
@@ -170,9 +174,8 @@ export default function PrivacyPolicyPage() {
               This is necessary to provide the service you asked for.
             </li>
             <li>
-              <span className={strong}>To meet verification requirements:</span> the
-              payment providers we work with must check the identity of anyone paying in
-              by bank transfer.
+              <span className={strong}>To meet our legal obligations:</span> Settu must
+              identify the people it serves and guard against money laundering and fraud.
             </li>
             <li>
               <span className={strong}>To keep transfers safe:</span> detecting and
@@ -203,6 +206,10 @@ export default function PrivacyPolicyPage() {
               purchases the identity details described above. Paycrest and the licensed
               payment providers it routes through handle that information under their own
               privacy policies and legal obligations.
+            </li>
+            <li>
+              <span className={strong}>Prembly</span>, from January 2027, will receive your
+              name, date of birth and NIN or BVN to check them against government records.
             </li>
             <li>
               <span className={strong}>Blockchain networks and Circle.</span> Transfers
@@ -243,8 +250,9 @@ export default function PrivacyPolicyPage() {
         <Section title="How long we keep it">
           <List>
             <li>
-              <span className={strong}>Identity details for a purchase:</span> not kept by
-              Settu at all.
+              <span className={strong}>Identity details for a purchase:</span> the ID
+              numbers are not kept by Settu at all. Once Prembly checks are live, the
+              result of each check is kept for five years.
             </li>
             <li>
               <span className={strong}>Bank details attached to an order:</span> removed
@@ -305,8 +313,8 @@ export default function PrivacyPolicyPage() {
             complain to the Nigeria Data Protection Commission.
           </p>
           <p>
-            For identity details checked by our payment partner, contact us and we will
-            help direct your request to them.
+            For identity details held by our payment partner or Prembly, contact us and we
+            will help direct your request to them.
           </p>
         </Section>
 

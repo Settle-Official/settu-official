@@ -117,9 +117,9 @@ export function OnrampKycFields({
             : "rounded-[20px] bg-[#2b2a2a] px-[30px] py-[16px] font-[family-name:var(--font-sora)] text-[14px] leading-[22px] text-[#bdbcbc] max-[720px]:rounded-[14px] max-[720px]:px-[16px] max-[720px]:text-[12px] max-[720px]:leading-[18px]"
         }
       >
-        Our payment partner must verify who is paying before it can accept your
-        transfer. These details go to them with this order only. Settu does not
-        store them.{" "}
+        We need these details to identify who is paying. They are sent with this
+        order to our payment partner, which checks them against your bank
+        account. Settu does not store them.{" "}
         <Link
           href="/privacy"
           target="_blank"
