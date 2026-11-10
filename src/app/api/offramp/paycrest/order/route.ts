@@ -4,6 +4,7 @@ import { setOrderMeta } from "@/lib/offramp/order-meta-store";
 import { alertOfframpEvent } from "@/lib/notify/telegram";
 import { selectTopProviders } from "@/lib/offramp/provider-routing";
 import { PLATFORM_FEE_RATE } from "@/lib/offramp/fiat-conversion";
+import { marketRateFromToleranceError } from "@/lib/offramp/paycrest-order-errors";
 
 // How far the live book rate may fall below the rate the client was quoted
 // before we refuse to place the order. The quote's own 5-minute validUntil is
@@ -130,17 +131,44 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const order = await paycrest.createOfframpOrderV2({
-      amount,
-      token,
-      network,
-      rate: finalRate,
-      currency: recipient.currency,
-      recipient,
-      refundAddress: returnAddress,
-      reference: reference || undefined,
-      ...(providerIds.length ? { providerIds } : {}),
-    });
+    const placeOrder = (orderRate: number) =>
+      paycrest.createOfframpOrderV2({
+        amount,
+        token,
+        network,
+        rate: orderRate,
+        currency: recipient.currency,
+        recipient,
+        refundAddress: returnAddress,
+        reference: reference || undefined,
+        ...(providerIds.length ? { providerIds } : {}),
+      });
+
+    let order: Awaited<ReturnType<typeof placeOrder>>;
+    try {
+      order = await placeOrder(finalRate);
+    } catch (error) {
+      // Paycrest only accepts a rate within a small tolerance of its own
+      // market rate, and the provider book we price from can sit outside it.
+      // Its rejection names that market rate: place the order at it once, as
+      // long as that doesn't pay the user meaningfully less than their quote.
+      const marketRate = marketRateFromToleranceError(error);
+      if (marketRate === null) throw error;
+      if (marketRate < rate * (1 - RATE_DRIFT_TOLERANCE)) {
+        return NextResponse.json(
+          {
+            code: "RATE_MOVED",
+            error: "Rate moved since the quote was issued",
+            message:
+              "The best available rate has dropped since you were quoted. Please refresh and try again.",
+            details: { quotedRate: rate, availableRate: marketRate },
+          },
+          { status: 409 },
+        );
+      }
+      finalRate = marketRate;
+      order = await placeOrder(finalRate);
+    }
 
     const orderId: string | undefined = (order as any)?.id;
     // Net of the 0.3% Paycrest deducts account-side, so this matches both the

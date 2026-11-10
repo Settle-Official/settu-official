@@ -38,6 +38,7 @@ import { isMobileBrowser } from "@/lib/platform";
 import { sourceChainOptions } from "@/lib/offramp/source-chain-options";
 import { raceBurnAgainstRecovery } from "@/lib/offramp/burn-race";
 import { transfersAwaitingBurn } from "@/lib/offramp/resume-burn";
+import { friendlyOrderError } from "@/lib/offramp/paycrest-order-errors";
 
 /** Run a promise with a timeout. Rejects with a clear message on expiry. */
 function withTimeout<T>(
@@ -1114,25 +1115,18 @@ export function StellarampDashboard({
         });
       } catch (fetchErr: any) {
         if (fetchErr?.name === "AbortError") {
-          throw new Error(
-            "Paycrest order request timed out (20s). Please try again.",
-          );
+          throw new Error(friendlyOrderError({}, 504));
         }
-        throw new Error(`Paycrest order network error: ${fetchErr.message}`);
+        console.error("Paycrest order network error", fetchErr);
+        throw new Error(friendlyOrderError({}, 502));
       } finally {
         clearTimeout(orderTimer);
       }
       if (!orderResponse.ok) {
         const payload = await orderResponse.json().catch(() => ({}));
-        const details =
-          payload?.details && typeof payload.details === "object"
-            ? ` | details=${JSON.stringify(payload.details)}`
-            : payload?.details
-              ? ` | details=${String(payload.details)}`
-              : "";
-        throw new Error(
-          `${payload?.message || payload?.error || `Paycrest order failed: ${orderResponse.status}`}${details}`,
-        );
+        // The raw payload is for the console; the user gets a plain line.
+        console.error("Paycrest order failed", orderResponse.status, payload);
+        throw new Error(friendlyOrderError(payload, orderResponse.status));
       }
       const orderPayload = await orderResponse.json();
       const paycrestOrder = orderPayload?.data || orderPayload;
@@ -1549,25 +1543,18 @@ export function StellarampDashboard({
         });
       } catch (fetchErr: any) {
         if (fetchErr?.name === "AbortError") {
-          throw new Error(
-            "Paycrest order request timed out (20s). Please try again.",
-          );
+          throw new Error(friendlyOrderError({}, 504));
         }
-        throw new Error(`Paycrest order network error: ${fetchErr.message}`);
+        console.error("Paycrest order network error", fetchErr);
+        throw new Error(friendlyOrderError({}, 502));
       } finally {
         clearTimeout(orderTimer);
       }
       if (!orderResponse.ok) {
         const payload = await orderResponse.json().catch(() => ({}));
-        const details =
-          payload?.details && typeof payload.details === "object"
-            ? ` | details=${JSON.stringify(payload.details)}`
-            : payload?.details
-              ? ` | details=${String(payload.details)}`
-              : "";
-        throw new Error(
-          `${payload?.message || payload?.error || `Paycrest order failed: ${orderResponse.status}`}${details}`,
-        );
+        // The raw payload is for the console; the user gets a plain line.
+        console.error("Paycrest order failed", orderResponse.status, payload);
+        throw new Error(friendlyOrderError(payload, orderResponse.status));
       }
       const orderPayload = await orderResponse.json();
       const paycrestOrder = orderPayload?.data || orderPayload;
@@ -1885,25 +1872,18 @@ export function StellarampDashboard({
         });
       } catch (fetchErr: any) {
         if (fetchErr?.name === "AbortError") {
-          throw new Error(
-            "Paycrest order request timed out (20s). Please try again.",
-          );
+          throw new Error(friendlyOrderError({}, 504));
         }
-        throw new Error(`Paycrest order network error: ${fetchErr.message}`);
+        console.error("Paycrest order network error", fetchErr);
+        throw new Error(friendlyOrderError({}, 502));
       } finally {
         clearTimeout(orderTimer);
       }
       if (!orderResponse.ok) {
         const payload = await orderResponse.json().catch(() => ({}));
-        const details =
-          payload?.details && typeof payload.details === "object"
-            ? ` | details=${JSON.stringify(payload.details)}`
-            : payload?.details
-              ? ` | details=${String(payload.details)}`
-              : "";
-        throw new Error(
-          `${payload?.message || payload?.error || `Paycrest order failed: ${orderResponse.status}`}${details}`,
-        );
+        // The raw payload is for the console; the user gets a plain line.
+        console.error("Paycrest order failed", orderResponse.status, payload);
+        throw new Error(friendlyOrderError(payload, orderResponse.status));
       }
       const orderPayload = await orderResponse.json();
       const paycrestOrder = orderPayload?.data || orderPayload;
