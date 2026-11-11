@@ -5,6 +5,7 @@
 import { createPairing, getSignClient } from "@/lib/wallet/sign-client";
 import { openSheet, closeSheet, watchSheetDismissal } from "@/lib/wallet/appkit";
 import { isMobileBrowser } from "@/lib/platform";
+import { wcLog } from "@/lib/wallet/wc-debug";
 
 const CHAIN = "stellar:pubnet";
 const SIGN_METHOD = "stellar_signXDR";
@@ -48,6 +49,11 @@ export async function connectStellarViaWalletConnect(): Promise<StellarWcSession
   // race doesn't surface as an unhandled rejection.
   const pending = approval();
   pending.catch(() => {});
+  pending.then(
+    () => wcLog("stellar: wallet approved"),
+    (e) => wcLog(`stellar: approval failed: ${(e as Error)?.message ?? e}`),
+  );
+  watcher.dismissed.catch(() => wcLog("stellar: wallet sheet closed"));
 
   try {
     const session = await Promise.race([pending, watcher.dismissed, timeout]);

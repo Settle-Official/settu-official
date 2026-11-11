@@ -9,6 +9,7 @@
 
 import { SignClient } from "@walletconnect/sign-client";
 import { enableRelayProxy, isRelayProxyEnabled } from "./relay-proxy";
+import { isWcDebug, wcLog } from "./wc-debug";
 
 // Changing this orphans existing sessions: they live under the old prefix.
 const STORAGE_PREFIX = "settu";
@@ -85,11 +86,16 @@ async function attempt<T>(
   propose: (client: Client) => Promise<T>,
   ms: number,
 ): Promise<T> {
+  wcLog(`connect attempt via ${isRelayProxyEnabled() ? "proxy" : "direct"} (${ms / 1000}s)`);
   try {
     const client = await withTimeout(getSignClient(), ms);
     client.metadata.redirect = { native: "", universal: returnTarget() };
-    return await withTimeout(propose(client), ms);
+    wcLog(`client ready, return to ${returnTarget()}`);
+    const result = await withTimeout(propose(client), ms);
+    wcLog("pairing uri ready");
+    return result;
   } catch (error) {
+    wcLog(`attempt failed: ${(error as Error)?.message ?? error}`);
     discardClient();
     throw error;
   }
@@ -113,6 +119,7 @@ export async function createPairing<T>(
     // else, and routing around it would hide it.
     if (!(error instanceof RelayTimeoutError)) throw error;
     enableRelayProxy();
+    wcLog("direct timed out: switching this device to the proxy");
     return attempt(propose, PROXY_TIMEOUT_MS);
   }
 }
@@ -140,6 +147,20 @@ export function getSignClient() {
         redirect: { native: "", universal: returnTarget() },
       },
     });
+    if (isWcDebug()) {
+      void clientPromise
+        .then((client) => {
+          const relayer = client.core.relayer;
+          relayer.on("relayer_connect", () => wcLog("relayer connected"));
+          relayer.on("relayer_disconnect", () => wcLog("relayer disconnected"));
+          relayer.on("relayer_message", (m: { topic?: string }) =>
+            wcLog(`message in on ${m?.topic?.slice(0, 8) ?? "?"}`),
+          );
+          client.on("session_connect", () => wcLog("session_connect event"));
+          client.on("proposal_expire", () => wcLog("proposal expired"));
+        })
+        .catch(() => {});
+    }
   }
   return clientPromise;
 }

@@ -1,6 +1,7 @@
 import { EVM_SOURCE_CHAINS } from "@/lib/cctp/evm-chains";
 import { openSheet, closeSheet, watchSheetDismissal } from "@/lib/wallet/appkit";
 import { isMobileBrowser } from "@/lib/platform";
+import { wcLog } from "@/lib/wallet/wc-debug";
 import { createPairing, getSignClient } from "@/lib/wallet/sign-client";
 
 // The shared client, not one of our own. Two SignClients share the "wc@2:core"
@@ -75,6 +76,11 @@ export async function proposeEvmSession(
   // race doesn't surface as an unhandled rejection.
   const pending = approval();
   pending.catch(() => {});
+  pending.then(
+    () => wcLog("evm: wallet approved"),
+    (e) => wcLog(`evm: approval failed: ${(e as Error)?.message ?? e}`),
+  );
+  watcher.dismissed.catch(() => wcLog("evm: wallet sheet closed"));
 
   let session;
   try {

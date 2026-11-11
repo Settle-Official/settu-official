@@ -4,6 +4,7 @@ import "./globals.css";
 import "lenis/dist/lenis.css";
 import { SmoothScroll } from "@/components/SmoothScroll";
 import { RELAY_SOCKET_SHIM } from "@/lib/wallet/relay-proxy";
+import { WcDebugOverlay } from "@/components/WcDebugOverlay";
 
 const ibmPlexMono = IBM_Plex_Mono({
   subsets: ["latin"],
@@ -66,6 +67,7 @@ export default function RootLayout({
       >
         {children}
         <SmoothScroll />
+        <WcDebugOverlay />
         <script
           dangerouslySetInnerHTML={{
             // Production only. Dev rebuilds change chunk filenames constantly,
