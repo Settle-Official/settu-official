@@ -105,6 +105,9 @@ export function useEvmWallet() {
   // openConnect is declared before connectWalletConnect, so it reaches it
   // through a ref rather than being reordered.
   const connectWalletConnectRef = useRef<(() => Promise<void>) | null>(null);
+  const connectInjectedRef = useRef<((rdns: string) => Promise<void>) | null>(null);
+  const injectedWalletsRef = useRef<InjectedWallet[]>([]);
+  injectedWalletsRef.current = injectedWallets;
 
   // Discover installed browser wallets (EIP-6963) for the lifetime of the
   // component — they can announce at any time, so we stay subscribed rather
@@ -175,6 +178,14 @@ export function useEvmWallet() {
     // Returns the connect promise on mobile so the caller can surface a
     // failure — the modal that would normally show `error` never opens there.
     if (isMobileBrowser()) {
+      // Inside a wallet app's own browser the wallet is injected into the
+      // page. Connect to it directly: no relay, so it works on networks that
+      // block WalletConnect (see src/lib/evm/open-in-wallet.ts).
+      const inWallet = injectedWalletsRef.current[0];
+      if (inWallet) {
+        await connectInjectedRef.current?.(inWallet.info.rdns);
+        return;
+      }
       await connectWalletConnectRef.current?.();
       return;
     }
@@ -276,6 +287,7 @@ export function useEvmWallet() {
   }, []);
 
   connectWalletConnectRef.current = connectWalletConnect;
+  connectInjectedRef.current = connectInjected;
 
   const disconnect = useCallback(async () => {
     attemptRef.current++;

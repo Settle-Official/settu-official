@@ -6,6 +6,7 @@ import { CaretDownIcon } from "@/components/app/icons";
 import { useScreenBack } from "@/components/app/ScreenBack";
 import { PHONE_QUERY, useMediaQuery } from "@/components/app/useMediaQuery";
 import { FlowModal } from "@/components/app/FlowModal";
+import { OpenInWalletLinks } from "@/components/app/OpenInWalletLinks";
 import { OfframpStatusPanel } from "@/components/app/OfframpStatusPanel";
 import type { OfframpStep } from "@/components/TransactionProgressModal";
 import { MIN_USDC_AMOUNT } from "@/lib/offramp/fiat-conversion";
@@ -1020,6 +1021,7 @@ export function FormCard({
           />
         )}
       </button>
+      {isEvmSource && !isConnected && !isConnecting && <OpenInWalletLinks />}
     </div>
     {flowOverlay}
     </>
