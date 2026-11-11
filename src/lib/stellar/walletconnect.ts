@@ -2,7 +2,7 @@
 // sheet never appears when another AppKit instance owns the modal element,
 // which hung mobile connects forever. Desktop still goes through the kit.
 
-import { getSignClient } from "@/lib/wallet/sign-client";
+import { createPairing, getSignClient } from "@/lib/wallet/sign-client";
 import { openSheet, closeSheet, watchSheetDismissal } from "@/lib/wallet/appkit";
 import { isMobileBrowser } from "@/lib/platform";
 
@@ -26,13 +26,15 @@ export interface StellarWcSession {
 // Requiring more than stellar_signXDR, or any events, makes wallets that
 // support fewer reject the whole proposal.
 export async function connectStellarViaWalletConnect(): Promise<StellarWcSession> {
-  const client = await getSignClient();
-
-  const { uri, approval } = await client.connect({
-    requiredNamespaces: {
-      stellar: { methods: [SIGN_METHOD], chains: [CHAIN], events: [] },
-    },
-  });
+  // Bounded, and drops the shared client on failure. Unbounded, a wedged relay
+  // socket hangs here forever and every retry reuses the same dead client.
+  const { uri, approval } = await createPairing((client) =>
+    client.connect({
+      requiredNamespaces: {
+        stellar: { methods: [SIGN_METHOD], chains: [CHAIN], events: [] },
+      },
+    }),
+  );
 
   // Watch before opening so the close-after-open transition can't be missed.
   const watcher = watchSheetDismissal();
