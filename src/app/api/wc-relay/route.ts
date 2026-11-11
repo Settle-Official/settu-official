@@ -27,6 +27,8 @@ const FORWARDED_PARAMS = [
   "packageName",
 ] as const;
 
+const PRODUCTION_ORIGIN = "https://settu.xyz";
+
 // Close codes a server may send. 1005/1006 are reserved for "no code" and
 // "abnormal", and ws throws if asked to send them.
 function sendableCode(code: number): number {
@@ -51,8 +53,13 @@ export async function GET(request: Request) {
     if (value !== null) upstreamUrl.searchParams.set(name, value);
   }
   // The relay checks Origin against the project's allowed domains, so pass the
-  // browser's through rather than presenting as a server.
-  const origin = request.headers.get("origin");
+  // browser's through rather than presenting as a server. Preview deployments
+  // live on *.vercel.app, which isn't on that list, so there we present the
+  // production origin; without this, WalletConnect can't be tested on a preview.
+  const origin =
+    process.env.VERCEL_ENV === "preview"
+      ? PRODUCTION_ORIGIN
+      : request.headers.get("origin");
 
   return upgradeWebSocket(
     (client) =>
