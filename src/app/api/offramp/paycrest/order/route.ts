@@ -5,6 +5,10 @@ import { alertOfframpEvent } from "@/lib/notify/telegram";
 import { selectTopProviders } from "@/lib/offramp/provider-routing";
 import { PLATFORM_FEE_RATE } from "@/lib/offramp/fiat-conversion";
 import { marketRateFromToleranceError } from "@/lib/offramp/paycrest-order-errors";
+import {
+  isPayableAccountIdentifier,
+  normalizeAccountIdentifier,
+} from "@/lib/offramp/utils/validation";
 
 // How far the live book rate may fall below the rate the client was quoted
 // before we refuse to place the order. The quote's own 5-minute validUntil is
@@ -40,7 +44,10 @@ export async function POST(request: NextRequest) {
 
     const recipient = {
       institution: String(body?.recipient?.institution || "").trim(),
-      accountIdentifier: String(body?.recipient?.accountIdentifier || "").trim(),
+      accountIdentifier: normalizeAccountIdentifier(
+        String(body?.recipient?.institution || ""),
+        String(body?.recipient?.accountIdentifier || ""),
+      ),
       accountName: String(body?.recipient?.accountName || "").trim(),
       memo: body?.recipient?.memo
         ? String(body.recipient.memo).trim()
@@ -73,6 +80,18 @@ export async function POST(request: NextRequest) {
             hasReturnAddress: Boolean(returnAddress),
             recipient,
           },
+        },
+        { status: 400 }
+      );
+    }
+
+    // Refuse here, before the user burns: an order Paycrest accepts with a
+    // number its providers can't pay is refunded only after the USDC moved.
+    if (!isPayableAccountIdentifier(recipient.institution, recipient.accountIdentifier)) {
+      return NextResponse.json(
+        {
+          error: "Invalid account number",
+          message: "Nigerian account numbers are 10 digits — please check the account number.",
         },
         { status: 400 }
       );

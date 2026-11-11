@@ -1,11 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { PaycrestAdapter } from "@/lib/offramp/adapters/paycrest-adapter";
-import { validateAccountNumber } from "@/lib/offramp/utils/validation";
+import {
+  isPayableAccountIdentifier,
+  normalizeAccountIdentifier,
+} from "@/lib/offramp/utils/validation";
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { institution, accountIdentifier } = body;
+    const institution = body?.institution;
+    const accountIdentifier = normalizeAccountIdentifier(
+      institution,
+      body?.accountIdentifier,
+    );
 
     if (!institution || !accountIdentifier) {
       return NextResponse.json(
@@ -14,7 +21,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!validateAccountNumber(accountIdentifier)) {
+    if (!isPayableAccountIdentifier(institution, accountIdentifier)) {
       return NextResponse.json(
         { error: "Invalid account number format" },
         { status: 400 }
@@ -32,7 +39,9 @@ export async function POST(request: NextRequest) {
       accountIdentifier
     );
 
-    return NextResponse.json({ data: accountName });
+    // accountIdentifier is echoed back normalised, for callers that want to
+    // show the number the payout will actually use.
+    return NextResponse.json({ data: accountName, accountIdentifier });
   } catch (error: any) {
     return NextResponse.json(
       { error: error.message || "Failed to verify account" },

@@ -1,6 +1,6 @@
 import { fetchCurrencies, fetchInstitutions, verifyAccount } from "./paycrest-directory";
 import { sourceChainOptions, type OfframpSourceChainKey } from "./source-chain-options";
-import { validateAmount } from "./utils/validation";
+import { normalizeAccountIdentifier, validateAmount } from "./utils/validation";
 import { resolveInstitutionAlias } from "./institution-aliases";
 
 export interface AgentOrderExtraction {
@@ -129,7 +129,7 @@ export async function resolveAgentOrder(
   const sourceChainRaw = extraction.sourceChain!;
   const currencyRaw = extraction.destinationCurrency!.toUpperCase();
   const institutionName = extraction.institutionName!;
-  const accountIdentifier = extraction.accountIdentifier!;
+  const rawAccountIdentifier = extraction.accountIdentifier!;
 
   if (!validateAmount(amount)) {
     return { status: "clarify", message: "What amount would you like to offramp?" };
@@ -172,6 +172,10 @@ export async function resolveAgentOrder(
     };
   }
 
+  const accountIdentifier = normalizeAccountIdentifier(
+    institutionMatch.code,
+    rawAccountIdentifier,
+  );
   const verifyResult = await verifyAccount(institutionMatch.code, accountIdentifier);
   // NGN's verify-account always returns a real name — a "verified, no name"
   // result there would be unusual, so it's still treated as unverified. Every
