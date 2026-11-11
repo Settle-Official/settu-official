@@ -43,6 +43,15 @@ let kitPromise: Promise<Kit> | null = null;
  */
 let walletConnectModuleRef: ModuleInterface | null = null;
 
+/**
+ * Stellar wallets that inject themselves into their own app's browser. Inside
+ * one of those, connecting needs no WalletConnect relay, which is the only way
+ * through on carriers that block the relay (Freighter and LOBSTR use
+ * WalletConnect even in their in-app browsers, so they can't help there).
+ * Filled by initKit on mobile.
+ */
+let injectedMobileModules: ModuleInterface[] = [];
+
 // Set when mobile paired through our own SignClient instead of the kit.
 let directSession: { address: string; topic: string } | null = null;
 
@@ -212,12 +221,23 @@ async function initKit(): Promise<Kit> {
   // of silently driving a modal that was never mounted.
   await warmSharedAppKit();
 
-  const [{ StellarWalletsKit, Networks }, { defaultModules }, walletConnect] =
-    await Promise.all([
-      import("@creit.tech/stellar-wallets-kit"),
-      import("@creit.tech/stellar-wallets-kit/modules/utils"),
-      import("@creit.tech/stellar-wallets-kit/modules/wallet-connect"),
-    ]);
+  const [
+    { StellarWalletsKit, Networks },
+    { defaultModules },
+    walletConnect,
+    { HanaModule },
+    { BitgetModule },
+    { OneKeyModule },
+    { KleverModule },
+  ] = await Promise.all([
+    import("@creit.tech/stellar-wallets-kit"),
+    import("@creit.tech/stellar-wallets-kit/modules/utils"),
+    import("@creit.tech/stellar-wallets-kit/modules/wallet-connect"),
+    import("@creit.tech/stellar-wallets-kit/modules/hana"),
+    import("@creit.tech/stellar-wallets-kit/modules/bitget"),
+    import("@creit.tech/stellar-wallets-kit/modules/onekey"),
+    import("@creit.tech/stellar-wallets-kit/modules/klever"),
+  ]);
 
   // defaultModules() deliberately omits WalletConnect because it needs a
   // projectId. It's also the only transport that reaches a mobile wallet app,
@@ -263,9 +283,20 @@ async function initKit(): Promise<Kit> {
   //
   // Note we can't express this with the kit's `authModal.hideUnsupportedWallets`
   // option — it's declared and settable in 2.6.0 but no component reads it.
+  //
+  // The exception is a wallet that injects itself into its own in-app browser
+  // (Hana, Bitget, OneKey, Klever). Those are registered too, so a page opened
+  // inside one can connect to it directly; mobile never shows the kit's
+  // picker, so they can't surface as "Install" entries.
   let modules: ModuleInterface[];
   if (walletConnectModule && isMobileBrowser()) {
-    modules = [walletConnectModule];
+    injectedMobileModules = [
+      new HanaModule(),
+      new BitgetModule(),
+      new OneKeyModule(),
+      new KleverModule(),
+    ];
+    modules = [walletConnectModule, ...injectedMobileModules];
   } else {
     modules = defaultModules();
     if (walletConnectModule) modules.push(walletConnectModule);
@@ -279,6 +310,19 @@ async function initKit(): Promise<Kit> {
     theme: mobile ? MOBILE_KIT_THEME : KIT_THEME,
   });
   return StellarWalletsKit;
+}
+
+async function firstAvailable(
+  modules: ModuleInterface[],
+): Promise<ModuleInterface | null> {
+  for (const module of modules) {
+    try {
+      if (await module.isAvailable()) return module;
+    } catch {
+      // A module that can't tell is treated as absent.
+    }
+  }
+  return null;
 }
 
 function toWallet(kit: Kit, address: string | undefined): StellarWallet | null {
@@ -320,6 +364,25 @@ export async function connectWallet(): Promise<StellarWallet> {
   // appear while another AppKit instance owns the modal element, which is what
   // left this hanging on "connecting".
   if (onMobile) {
+    // Inside a wallet's own browser that injects itself: connect directly,
+    // with no relay involved.
+    const kit = await getKit();
+    const injected = await firstAvailable(injectedMobileModules);
+    if (injected) {
+      // signTransaction prefers a stored WalletConnect session; this
+      // connection replaces any such leftover.
+      setDirectSession(null);
+      kit.setWallet(injected.productId);
+      try {
+        const { address } = await kit.getAddress();
+        const wallet = toWallet(kit, address);
+        if (!wallet) throw new Error("Wallet did not return an address");
+        broadcastWallet(wallet);
+        return wallet;
+      } catch (error: any) {
+        throw new Error(explainConnectError(error));
+      }
+    }
     try {
       const session = await connectStellarViaWalletConnect();
       setDirectSession(session);
