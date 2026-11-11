@@ -22,6 +22,13 @@ export function getSignClient() {
     }
     const origin =
       typeof window !== "undefined" ? window.location.origin : "https://settu.xyz";
+    // Where the wallet sends the user back. It has to be the page that holds
+    // the pairing: the origin alone is the landing page, and returning there
+    // tears down the /app screen waiting for the response.
+    const returnTo =
+      typeof window !== "undefined"
+        ? `${origin}${window.location.pathname}`
+        : origin;
     clientPromise = SignClient.init({
       projectId,
       customStoragePrefix: STORAGE_PREFIX,
@@ -33,7 +40,7 @@ export function getSignClient() {
         // Without this the wallet has no way to hand its response back: the
         // user approves, the wallet reports success, and the signature is
         // dropped on the relay. Confirmed against Freighter on mobile.
-        redirect: { native: "", universal: origin },
+        redirect: { native: "", universal: returnTo },
       },
     });
   }
