@@ -669,7 +669,9 @@ export function FormCard({
   const buttonLabel = isExecutingOfframp
     ? "Processing"
     : isConnecting
-      ? "Waiting for signature…"
+      ? // This is the wallet CONNECT step, not a signature. Calling it
+        // "waiting for signature" sent a stuck connect to the wrong place.
+        "Connecting…"
       : !isConnected
         ? "Connect Wallet"
         : hasInsufficientBalance

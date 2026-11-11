@@ -1,7 +1,7 @@
 import { EVM_SOURCE_CHAINS } from "@/lib/cctp/evm-chains";
 import { openSheet, closeSheet, watchSheetDismissal } from "@/lib/wallet/appkit";
 import { isMobileBrowser } from "@/lib/platform";
-import { getSignClient } from "@/lib/wallet/sign-client";
+import { createPairing, getSignClient } from "@/lib/wallet/sign-client";
 
 // The shared client, not one of our own. Two SignClients share the "wc@2:core"
 // storage namespace while keeping separate in-memory state, so a relay response
@@ -27,27 +27,30 @@ export interface EvmSession {
 export async function proposeEvmSession(
   onUri: (uri: string) => void,
 ): Promise<EvmSession> {
-  const client = await getClient();
-
   // Only Ethereum is required; the rest are optional. Listing all six as
   // required means a wallet that lacks any one of them rejects the whole
   // proposal, which silently excludes wallets that would otherwise work.
-  const { uri, approval } = await client.connect({
-    requiredNamespaces: {
-      eip155: {
-        methods: ["eth_sendTransaction", "personal_sign"],
-        chains: ["eip155:1"],
-        events: ["chainChanged", "accountsChanged"],
+  //
+  // Bounded, and drops the shared client on failure. Unbounded, a wedged relay
+  // socket hangs here forever and every retry reuses the same dead client.
+  const { uri, approval } = await createPairing((client) =>
+    client.connect({
+      requiredNamespaces: {
+        eip155: {
+          methods: ["eth_sendTransaction", "personal_sign"],
+          chains: ["eip155:1"],
+          events: ["chainChanged", "accountsChanged"],
+        },
       },
-    },
-    optionalNamespaces: {
-      eip155: {
-        methods: ["eth_sendTransaction", "personal_sign", "wallet_switchEthereumChain"],
-        chains: ALL_CHAIN_IDS,
-        events: ["chainChanged", "accountsChanged"],
+      optionalNamespaces: {
+        eip155: {
+          methods: ["eth_sendTransaction", "personal_sign", "wallet_switchEthereumChain"],
+          chains: ALL_CHAIN_IDS,
+          events: ["chainChanged", "accountsChanged"],
+        },
       },
-    },
-  });
+    }),
+  );
 
   // Watch before opening so the close-after-open transition can't be missed.
   const watcher = watchSheetDismissal();

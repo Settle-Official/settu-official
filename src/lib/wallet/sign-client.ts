@@ -12,7 +12,52 @@ import { SignClient } from "@walletconnect/sign-client";
 // Changing this orphans existing sessions: they live under the old prefix.
 const STORAGE_PREFIX = "settu";
 
+// A relay that accepts the WebSocket but cannot carry a message leaves
+// connect() pending forever rather than rejecting. Bounded so that surfaces as
+// an error the user can act on instead of a button stuck on "connecting".
+const PAIRING_TIMEOUT_MS = 20_000;
+
 let clientPromise: ReturnType<typeof SignClient.init> | null = null;
+
+type Client = Awaited<ReturnType<typeof SignClient.init>>;
+
+function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    work,
+    new Promise<never>((_resolve, reject) =>
+      setTimeout(
+        () =>
+          reject(
+            new Error(
+              "Couldn't reach the WalletConnect network. Some mobile carriers " +
+                "block it over cellular data — try Wi-Fi, and turn off iCloud " +
+                "Private Relay or any VPN, then try again.",
+            ),
+          ),
+        ms,
+      ),
+    ),
+  ]);
+}
+
+/**
+ * Pairs through the shared client, bounded, and drops that client if it fails.
+ *
+ * The cached client is the reason a failure used to be permanent: once its
+ * socket is wedged, every later attempt reuses it and hangs with no error at
+ * all. Clearing it means the next try builds a fresh connection.
+ */
+export async function createPairing<T>(
+  propose: (client: Client) => Promise<T>,
+): Promise<T> {
+  try {
+    const client = await withTimeout(getSignClient(), PAIRING_TIMEOUT_MS);
+    return await withTimeout(propose(client), PAIRING_TIMEOUT_MS);
+  } catch (error) {
+    clientPromise = null;
+    throw error;
+  }
+}
 
 export function getSignClient() {
   if (!clientPromise) {
@@ -22,6 +67,13 @@ export function getSignClient() {
     }
     const origin =
       typeof window !== "undefined" ? window.location.origin : "https://settu.xyz";
+    // Where the wallet sends the user back. It has to be the page that holds
+    // the pairing: the origin alone is the landing page, and returning there
+    // tears down the /app screen waiting for the response.
+    const returnTo =
+      typeof window !== "undefined"
+        ? `${origin}${window.location.pathname}`
+        : origin;
     clientPromise = SignClient.init({
       projectId,
       customStoragePrefix: STORAGE_PREFIX,
@@ -33,7 +85,7 @@ export function getSignClient() {
         // Without this the wallet has no way to hand its response back: the
         // user approves, the wallet reports success, and the signature is
         // dropped on the relay. Confirmed against Freighter on mobile.
-        redirect: { native: "", universal: origin },
+        redirect: { native: "", universal: returnTo },
       },
     });
   }
