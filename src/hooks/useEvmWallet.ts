@@ -105,6 +105,25 @@ export function useEvmWallet() {
   // openConnect is declared before connectWalletConnect, so it reaches it
   // through a ref rather than being reordered.
   const connectWalletConnectRef = useRef<(() => Promise<void>) | null>(null);
+  const connectInjectedRef = useRef<((rdns: string) => Promise<void>) | null>(null);
+  // Read inside openConnect, which has no deps: reading the state directly
+  // there would capture an empty list from the first render.
+  const injectedWalletsRef = useRef<InjectedWallet[]>([]);
+  injectedWalletsRef.current = injectedWallets;
+
+  // Re-probe, then give discovery a moment: subscribeInjectedWallets only
+  // falls back to a legacy window.ethereum 400ms after the 6963 request, and
+  // in-app browsers are exactly the wallets that announce late or not at all.
+  const findInjectedWallet = useCallback(async (): Promise<InjectedWallet | null> => {
+    refreshInjectedRef.current();
+    for (let waited = 0; waited < 900; waited += 150) {
+      if (injectedWalletsRef.current.length > 0) {
+        return injectedWalletsRef.current[0];
+      }
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+    return injectedWalletsRef.current[0] ?? null;
+  }, []);
 
   // Discover installed browser wallets (EIP-6963) for the lifetime of the
   // component — they can announce at any time, so we stay subscribed rather
@@ -175,6 +194,15 @@ export function useEvmWallet() {
     // Returns the connect promise on mobile so the caller can surface a
     // failure — the modal that would normally show `error` never opens there.
     if (isMobileBrowser()) {
+      // A phone has no extensions, but a wallet's in-app browser injects its
+      // provider straight into the page. That path needs no relay, so it keeps
+      // working on cellular where carriers interfere with WalletConnect's
+      // WebSocket — the same reason Phantom's in-app browser already works.
+      const injected = await findInjectedWallet();
+      if (injected) {
+        await connectInjectedRef.current?.(injected.info.rdns);
+        return;
+      }
       await connectWalletConnectRef.current?.();
       return;
     }
@@ -276,6 +304,7 @@ export function useEvmWallet() {
   }, []);
 
   connectWalletConnectRef.current = connectWalletConnect;
+  connectInjectedRef.current = connectInjected;
 
   const disconnect = useCallback(async () => {
     attemptRef.current++;

@@ -28,10 +28,14 @@ function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
       setTimeout(
         () =>
           reject(
+            // Leads with the workaround that actually works on cellular: an
+            // in-app browser injects its provider and needs no relay at all.
             new Error(
-              "Couldn't reach the WalletConnect network. Some mobile carriers " +
-                "block it over cellular data — try Wi-Fi, and turn off iCloud " +
-                "Private Relay or any VPN, then try again.",
+              "Couldn't reach the WalletConnect network — some mobile carriers " +
+                "block it on cellular data. Open settu.xyz inside your wallet's " +
+                "own browser (MetaMask, Trust, Coinbase Wallet) and it will " +
+                "connect directly. Wi-Fi works too, as does turning off a VPN " +
+                "or iCloud Private Relay.",
             ),
           ),
         ms,

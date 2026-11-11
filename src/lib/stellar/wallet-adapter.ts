@@ -376,9 +376,9 @@ function explainConnectError(error: any): string {
   if (/failed to publish/i.test(message)) {
     return (
       "Your connection to the WalletConnect network dropped mid-handshake. " +
-      "Some mobile carriers block this over cellular data — try switching to " +
-      "Wi-Fi. If you have iCloud Private Relay or a VPN on, try turning that " +
-      "off too, then try again."
+      "Some mobile carriers block this on cellular data. Opening settu.xyz " +
+      "inside your wallet's own browser connects directly and avoids it; " +
+      "Wi-Fi works too, as does turning off a VPN or iCloud Private Relay."
     );
   }
 
