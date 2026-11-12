@@ -7,7 +7,7 @@
  * would shove the whole screen down a beat after it loads.
  */
 export const NOTICE: string | null =
-  "LOBSTR is currently experiencing app connection issues that may affect connecting with Settu. Use Freighter on Stellar instead. The issue originates from LOBSTR and is not caused by Settu. We’re monitoring the situation and will update you when services are restored. Thank you for your patience and understanding.";
+  "Can’t connect your wallet on mobile data? Some mobile networks are blocking wallet connections. Turn on the free Cloudflare 1.1.1.1 app (on Android, you can set Private DNS to one.one.one.one instead), or switch to Wi-Fi, then try again.";
 
 export function NoticeBanner() {
   if (!NOTICE) return null;
