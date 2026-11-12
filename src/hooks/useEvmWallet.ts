@@ -180,7 +180,7 @@ export function useEvmWallet() {
     if (isMobileBrowser()) {
       // Inside a wallet app's own browser the wallet is injected into the
       // page. Connect to it directly: no relay, so it works on networks that
-      // block WalletConnect (see src/lib/evm/open-in-wallet.ts).
+      // block WalletConnect's relay.
       const inWallet = injectedWalletsRef.current[0];
       if (inWallet) {
         await connectInjectedRef.current?.(inWallet.info.rdns);
