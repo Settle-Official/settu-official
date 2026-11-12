@@ -17,6 +17,7 @@ import { useNotifications } from "./Notifications";
 import { SettuLogo } from "@/components/brand/SettuLogo";
 import { SettuMark } from "@/components/brand/SettuMark";
 import { NoticeBanner } from "./NoticeBanner";
+import { NoticeModal } from "./NoticeModal";
 import {
   ArrowLeftIcon,
   BellIcon,
@@ -325,6 +326,8 @@ export function AppShell({ children }: { readonly children: ReactNode }) {
         {/* On every screen, not just Overview where the design draws it: a
             notice about a wallet outage matters most mid-transaction. */}
         <NoticeBanner />
+        {/* The same notice as a popup on phones and tablets, once per visit. */}
+        <NoticeModal />
 
         {/* Agent Mode is a full-bleed chat surface with no card behind it
             (per its own design), unlike every other screen's translucent

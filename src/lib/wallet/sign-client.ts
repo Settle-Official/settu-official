@@ -8,54 +8,118 @@
 // signature that never arrives.
 
 import { SignClient } from "@walletconnect/sign-client";
+import { enableRelayProxy, isRelayProxyEnabled } from "./relay-proxy";
+import { isWcDebug, wcLog } from "./wc-debug";
+import { BLOCKED_NETWORK_HELP } from "./network-help";
 
 // Changing this orphans existing sessions: they live under the old prefix.
 const STORAGE_PREFIX = "settu";
 
-// A relay that accepts the WebSocket but cannot carry a message leaves
-// connect() pending forever rather than rejecting. Bounded so that surfaces as
-// an error the user can act on instead of a button stuck on "connecting".
-const PAIRING_TIMEOUT_MS = 20_000;
+// A relay that accepts the WebSocket but cannot carry a message, or that the
+// network blocks outright, leaves connect() pending forever rather than
+// rejecting. Bounded so it surfaces as an error.
+//
+// The direct attempt is kept short because a blocked carrier never answers,
+// and we have the proxy to fall back to. The proxied attempt gets longer: it
+// is the last resort, and it adds a hop.
+const DIRECT_TIMEOUT_MS = 10_000;
+const PROXY_TIMEOUT_MS = 20_000;
+
+const UNREACHABLE_MESSAGE = `Couldn't reach the wallet connection network. ${BLOCKED_NETWORK_HELP}`;
 
 let clientPromise: ReturnType<typeof SignClient.init> | null = null;
 
 type Client = Awaited<ReturnType<typeof SignClient.init>>;
 
+class RelayTimeoutError extends Error {
+  constructor() {
+    super(UNREACHABLE_MESSAGE);
+    this.name = "RelayTimeoutError";
+  }
+}
+
 function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   return Promise.race([
     work,
-    new Promise<never>((_resolve, reject) =>
-      setTimeout(
-        () =>
-          reject(
-            new Error(
-              "Couldn't reach the WalletConnect network. Some mobile carriers " +
-                "block it over cellular data — try Wi-Fi, and turn off iCloud " +
-                "Private Relay or any VPN, then try again.",
-            ),
-          ),
-        ms,
-      ),
-    ),
-  ]);
+    new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new RelayTimeoutError()), ms);
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
+/**
+ * Drops the shared client and shuts its socket for good.
+ *
+ * Only forgetting it isn't enough. A forgotten client keeps its socket, and on
+ * the next network change (switching to Wi-Fi, say) WalletConnect reconnects it.
+ * It then shares storage and topics with the fresh client, and can take the
+ * wallet's approval meant for that one, which the user sees as an approval
+ * that never lands.
+ */
+function discardClient(): void {
+  const dead = clientPromise;
+  clientPromise = null;
+  dead
+    ?.then(async (client) => {
+      const relayer = client.core.relayer as unknown as {
+        transportOpen: (...args: unknown[]) => Promise<void>;
+      };
+      // Reconnects go through transportOpen; make it a no-op on this one.
+      relayer.transportOpen = async () => {};
+      await client.core.relayer.transportClose();
+    })
+    .catch(() => {});
+}
+
+// Where the wallet sends the user back. It has to be the page holding the
+// pairing: the origin alone is the landing page, and returning there tears
+// down the /app screen waiting for the response. Read per connect, because the
+// client outlives the page it was created on.
+function returnTarget(): string {
+  if (typeof window === "undefined") return "https://settu.xyz";
+  return `${window.location.origin}${window.location.pathname}`;
+}
+
+async function attempt<T>(
+  propose: (client: Client) => Promise<T>,
+  ms: number,
+): Promise<T> {
+  wcLog(`connect attempt via ${isRelayProxyEnabled() ? "proxy" : "direct"} (${ms / 1000}s)`);
+  try {
+    const client = await withTimeout(getSignClient(), ms);
+    client.metadata.redirect = { native: "", universal: returnTarget() };
+    wcLog(`client ready, return to ${returnTarget()}`);
+    const result = await withTimeout(propose(client), ms);
+    wcLog("pairing uri ready");
+    return result;
+  } catch (error) {
+    wcLog(`attempt failed: ${(error as Error)?.message ?? error}`);
+    discardClient();
+    throw error;
+  }
 }
 
 /**
  * Pairs through the shared client, bounded, and drops that client if it fails.
  *
- * The cached client is the reason a failure used to be permanent: once its
- * socket is wedged, every later attempt reuses it and hangs with no error at
- * all. Clearing it means the next try builds a fresh connection.
+ * If the relay can't be reached directly, the device switches to the relay
+ * proxy on our own domain (relay-proxy.ts) and tries once more. That choice is
+ * remembered, so later page loads start on the proxy.
  */
 export async function createPairing<T>(
   propose: (client: Client) => Promise<T>,
 ): Promise<T> {
+  if (isRelayProxyEnabled()) return attempt(propose, PROXY_TIMEOUT_MS);
   try {
-    const client = await withTimeout(getSignClient(), PAIRING_TIMEOUT_MS);
-    return await withTimeout(propose(client), PAIRING_TIMEOUT_MS);
+    return await attempt(propose, DIRECT_TIMEOUT_MS);
   } catch (error) {
-    clientPromise = null;
-    throw error;
+    // Only a timeout points at a blocked network; a rejection is something
+    // else, and routing around it would hide it.
+    if (!(error instanceof RelayTimeoutError)) throw error;
+    enableRelayProxy();
+    wcLog("direct timed out: switching this device to the proxy");
+    return attempt(propose, PROXY_TIMEOUT_MS);
   }
 }
 
@@ -67,13 +131,6 @@ export function getSignClient() {
     }
     const origin =
       typeof window !== "undefined" ? window.location.origin : "https://settu.xyz";
-    // Where the wallet sends the user back. It has to be the page that holds
-    // the pairing: the origin alone is the landing page, and returning there
-    // tears down the /app screen waiting for the response.
-    const returnTo =
-      typeof window !== "undefined"
-        ? `${origin}${window.location.pathname}`
-        : origin;
     clientPromise = SignClient.init({
       projectId,
       customStoragePrefix: STORAGE_PREFIX,
@@ -85,9 +142,24 @@ export function getSignClient() {
         // Without this the wallet has no way to hand its response back: the
         // user approves, the wallet reports success, and the signature is
         // dropped on the relay. Confirmed against Freighter on mobile.
-        redirect: { native: "", universal: returnTo },
+        // Refreshed before every connect; see attempt().
+        redirect: { native: "", universal: returnTarget() },
       },
     });
+    if (isWcDebug()) {
+      void clientPromise
+        .then((client) => {
+          const relayer = client.core.relayer;
+          relayer.on("relayer_connect", () => wcLog("relayer connected"));
+          relayer.on("relayer_disconnect", () => wcLog("relayer disconnected"));
+          relayer.on("relayer_message", (m: { topic?: string }) =>
+            wcLog(`message in on ${m?.topic?.slice(0, 8) ?? "?"}`),
+          );
+          client.on("session_connect", () => wcLog("session_connect event"));
+          client.on("proposal_expire", () => wcLog("proposal expired"));
+        })
+        .catch(() => {});
+    }
   }
   return clientPromise;
 }

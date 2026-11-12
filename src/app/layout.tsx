@@ -3,6 +3,8 @@ import { IBM_Plex_Mono, Sora, Space_Grotesk } from "next/font/google";
 import "./globals.css";
 import "lenis/dist/lenis.css";
 import { SmoothScroll } from "@/components/SmoothScroll";
+import { RELAY_SOCKET_SHIM } from "@/lib/wallet/relay-proxy";
+import { WcDebugOverlay } from "@/components/WcDebugOverlay";
 
 const ibmPlexMono = IBM_Plex_Mono({
   subsets: ["latin"],
@@ -55,11 +57,17 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en" className={sora.variable}>
+      <head>
+        {/* First thing on the page: WalletConnect keeps whichever
+            window.WebSocket exists when it loads. See relay-proxy.ts. */}
+        <script dangerouslySetInnerHTML={{ __html: RELAY_SOCKET_SHIM }} />
+      </head>
       <body
         className={`${ibmPlexMono.className} ${ibmPlexMono.variable} ${spaceGrotesk.variable}`}
       >
         {children}
         <SmoothScroll />
+        <WcDebugOverlay />
         <script
           dangerouslySetInnerHTML={{
             // Production only. Dev rebuilds change chunk filenames constantly,
