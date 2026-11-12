@@ -17,6 +17,7 @@ import type { ModuleInterface, SwkAppTheme } from "@creit.tech/stellar-wallets-k
 import { isMobileBrowser } from "@/lib/platform";
 import { warmSharedAppKit } from "@/lib/wallet/appkit";
 import { getSignClient } from "@/lib/wallet/sign-client";
+import { BLOCKED_NETWORK_HELP } from "@/lib/wallet/network-help";
 import {
   connectStellarViaWalletConnect,
   signXdrViaWalletConnect,
@@ -437,12 +438,7 @@ function explainConnectError(error: any): string {
   // clearing the kit's storage won't help. iCloud Private Relay or a VPN can
   // cause the same symptom for someone who has one of those enabled.
   if (/failed to publish/i.test(message)) {
-    return (
-      "Your connection to the WalletConnect network dropped mid-handshake. " +
-      "Some mobile carriers block this over cellular data — try switching to " +
-      "Wi-Fi. If you have iCloud Private Relay or a VPN on, try turning that " +
-      "off too, then try again."
-    );
+    return `Your wallet connection dropped mid-handshake. ${BLOCKED_NETWORK_HELP}`;
   }
 
   if (/origin not allowed/i.test(message) || /\b3000\b/.test(message)) {

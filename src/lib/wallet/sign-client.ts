@@ -10,6 +10,7 @@
 import { SignClient } from "@walletconnect/sign-client";
 import { enableRelayProxy, isRelayProxyEnabled } from "./relay-proxy";
 import { isWcDebug, wcLog } from "./wc-debug";
+import { BLOCKED_NETWORK_HELP } from "./network-help";
 
 // Changing this orphans existing sessions: they live under the old prefix.
 const STORAGE_PREFIX = "settu";
@@ -24,9 +25,7 @@ const STORAGE_PREFIX = "settu";
 const DIRECT_TIMEOUT_MS = 10_000;
 const PROXY_TIMEOUT_MS = 20_000;
 
-const UNREACHABLE_MESSAGE =
-  "Couldn't reach the WalletConnect network. Check your connection and try " +
-  "again — if you're on mobile data, try Wi-Fi.";
+const UNREACHABLE_MESSAGE = `Couldn't reach the wallet connection network. ${BLOCKED_NETWORK_HELP}`;
 
 let clientPromise: ReturnType<typeof SignClient.init> | null = null;
 

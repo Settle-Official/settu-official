@@ -6,6 +6,7 @@ import { createPairing, getSignClient } from "@/lib/wallet/sign-client";
 import { openSheet, closeSheet, watchSheetDismissal } from "@/lib/wallet/appkit";
 import { isMobileBrowser } from "@/lib/platform";
 import { wcLog } from "@/lib/wallet/wc-debug";
+import { BLOCKED_NETWORK_HELP } from "@/lib/wallet/network-help";
 
 const CHAIN = "stellar:pubnet";
 const SIGN_METHOD = "stellar_signXDR";
@@ -15,9 +16,7 @@ const SIGN_METHOD = "stellar_signXDR";
 const APPROVAL_TIMEOUT_MS = 90_000;
 
 // Carrier blocking of the relay is the confirmed cause, so lead with it.
-const TIMEOUT_MESSAGE =
-  "Couldn't complete the connection in time. Some mobile carriers block the " +
-  "connection over cellular data — try switching to Wi-Fi.";
+const TIMEOUT_MESSAGE = `Couldn't complete the connection in time. ${BLOCKED_NETWORK_HELP}`;
 
 export interface StellarWcSession {
   address: string;
