@@ -25,6 +25,7 @@ import {
 } from "@/lib/cctp/evm-chains";
 import { TransactionStorage, Transaction } from "@/lib/transaction-storage";
 import { ErrorToast } from "@/components/ErrorToast";
+import { driveBridgeTransfer } from "@/lib/offramp/bridge-stream";
 import {
   TransactionProgressModal,
   type OfframpStep,
@@ -1280,7 +1281,7 @@ export function StellarampDashboard({
         paycrestOrderId: payoutOrderId,
         connectedAddress: wallet?.publicKey,
       });
-      new EventSource(`/api/offramp/bridge/stream/${stellarTxHash}`);
+      driveBridgeTransfer(stellarTxHash);
 
       // Update transaction with tx hash
       TransactionStorage.update(txId, {
@@ -1670,7 +1671,7 @@ export function StellarampDashboard({
             connectedAddress,
           });
         }
-        new EventSource(`/api/offramp/bridge/stream/${settlementTxHash}`);
+        driveBridgeTransfer(settlementTxHash);
       } else {
         // Base: plain USDC transfer() straight to Paycrest's receive address.
         const res = await fetch("/api/offramp/bridge/base-direct-tx", {
@@ -1957,7 +1958,7 @@ export function StellarampDashboard({
           connectedAddress,
         });
       }
-      new EventSource(`/api/offramp/bridge/stream/${burnSignature}`);
+      driveBridgeTransfer(burnSignature);
 
       TransactionStorage.update(txId, {
         stellarTxHash: burnSignature, // reused field — Solana burn signature

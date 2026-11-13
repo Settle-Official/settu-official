@@ -19,6 +19,21 @@ export async function GET(
   { params }: { params: Promise<{ transferId: string }> },
 ) {
   const { transferId } = await params;
+
+  // Nothing left to stream: answer 204, the one response that makes an
+  // EventSource stop reconnecting for good. Closing the stream instead reads
+  // to the browser as a dropped connection, and it reconnects every ~3s for
+  // as long as the tab is open. That loop, from clients that never close their
+  // EventSource, was ~95% of all function invocations (Nov 2026).
+  //
+  // An unknown id still streams: registration can land a moment after the
+  // stream opens (it falls back to sendBeacon), and this stream is what drives
+  // the transfer to mint. The client bounds that wait.
+  const initial = await getCctpTransfer(transferId).catch(() => null);
+  if (initial?.status === "completed" || initial?.status === "failed") {
+    return new Response(null, { status: 204 });
+  }
+
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
