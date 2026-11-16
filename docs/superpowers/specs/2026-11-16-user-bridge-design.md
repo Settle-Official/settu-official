@@ -147,6 +147,14 @@ One contract per chain family. Each one, in a single user-signed call:
 - The contract holds **no balance** after a call.
 - It stores only three things: the quote-signer public key, the fee wallet, and the **maximum fee cap** (start at 1%).
 - An **owner** account controls the contract. It's separate from the server and held by the business owner. Only the owner can change the signer, the fee wallet or the cap, and can pause the contract.
+- **The cap is changeable by Settu from the admin console (owner's decision), but only with the owner wallet signing.** It is never changed with a server-held key.
+  - **Why the owner wallet:** the cap exists so that a stolen quote-signing key can't overcharge users. A server-side key that could also raise the cap would defeat that.
+  - **Admin console "Fee cap" panel:**
+    - shows the current cap read live from all 8 contracts
+    - takes one new value
+    - has the owner connect the owner wallet for each family (EVM, Stellar, Solana) and sign the `setMaxFee` call on each chain: 8 transactions, in one guided sitting
+    - re-reads every contract afterwards and flags any chain still on the old value
+  - **The fee setting is limited by the cap:** it can't exceed the lowest cap across all chains. Lowering the cap below the current fee is refused until the fee is lowered first.
 - **A quote is checked before anything moves.** It must:
   - be signed by the stored signer key,
   - not be expired (about 2 minutes),
@@ -269,6 +277,7 @@ The existing `advance.ts` state machine and terminal guards apply. The mint step
 - **Revive** and **Retry mint** actions
 - relayer balances on all 8 chains
 - the fee setting
+- the fee cap panel (§5)
 
 ---
 
@@ -304,6 +313,7 @@ These are the owner's decisions:
 - **Option C:** Settu's own contract on each chain, with the fee taken in the same transaction as the bridge.
 - **Allbridge-style From/To cards**, each with its own chain picker and wallet connect.
 - **The swap button** swaps the cards.
+- **The fee cap (starting at 1%) can be changed from the admin console**, signed by the owner wallet on each chain.
 - **Pasting an address is allowed, with a warning.**
 - **Destination addresses are validated** per chain before the user can proceed.
 - **The stepper says "Verifying the transfer".**
