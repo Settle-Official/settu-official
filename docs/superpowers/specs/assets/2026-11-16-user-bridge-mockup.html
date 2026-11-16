@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Settu bridge mockup</title>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@400;600&family=Inter:wght@400;500;600&family=Sora:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:#191818;color:#fff;font-family:Sora,system-ui,sans-serif;padding:28px 20px 60px}
+  .note{max-width:1180px;margin:0 auto 20px;font:14px/1.6 Inter,system-ui;color:#a19d9d}
+  .note b{color:#fff}
+  .grid{max-width:1180px;margin:0 auto;display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:24px;align-items:start}
+  @media(max-width:980px){.grid{grid-template-columns:1fr}}
+  .cap{font:600 12px/1.4 Inter;letter-spacing:.06em;text-transform:uppercase;color:#8d8c8c;margin:0 0 10px}
+  /* The app's content panel */
+  .panel{border-radius:30px;background:rgba(83,79,79,.2);padding:40px;display:flex;flex-direction:column;gap:30px}
+  @media(max-width:720px){.panel{padding:40px 20px}}
+  .h2{font:22px/27px Inter;margin:0}
+  .label{font:20px/25px Sora;color:#bdbcbc}
+  @media(max-width:720px){.label{font-size:15px;line-height:19px}}
+  /* From / To cards */
+  .leg{border-radius:20px;background:#2b2a2a;padding:24px;display:flex;flex-direction:column;gap:14px}
+  .leg-top{display:flex;justify-content:space-between;align-items:center;gap:12px}
+  .pill{height:46px;min-width:170px;display:flex;align-items:center;justify-content:center;gap:10px;border-radius:40px;border:1px solid rgba(255,255,255,.15);box-shadow:inset 0 1px 0 0 rgba(255,255,255,.25);padding:0 16px;font:16px Inter;color:#fff;cursor:pointer;white-space:nowrap}
+  .pill .dot{width:9px;height:9px;border-radius:50%;background:#61c85e}
+  /* AppSelect */
+  .select{height:70px;border-radius:20px;border:1px solid rgba(215,214,214,.7);padding:0 20px;display:flex;align-items:center;justify-content:space-between;font:20px/25px Sora;color:#fff;cursor:pointer;background:transparent}
+  .caret{width:24px;height:24px;color:#a5a2a2}
+  .field{height:70px;border-radius:20px;border:1px solid rgba(215,214,214,.7);padding:0 20px;display:flex;align-items:center;gap:10px;font:20px/24px Inter;color:#fff}
+  .field .v{flex:1}
+  .tag{font:14px/17px Inter;color:#fff;border-radius:999px;background:rgba(201,169,98,.35);padding:5px 12px}
+  .max{font:14px Inter;color:#c9a962;cursor:pointer}
+  .meta{display:flex;flex-wrap:wrap;align-items:center;gap:10px;font:16px/19px Inter;color:#fff}
+  .meta .sep{width:6px;height:6px;border-radius:50%;background:#c4c4c4}
+  .addr{height:56px;border-radius:16px;border:1px solid rgba(215,214,214,.7);padding:0 16px;display:flex;align-items:center;font:14px ui-monospace,Menlo,monospace;color:#fff;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+  .warn{border-radius:16px;border:1px solid rgba(224,122,126,.55);background:#232222;padding:12px 16px;font:14px/21px Sora;color:#f1d6d7}
+  .warn b{color:#fff;font-weight:600}
+  .or{font:13px Inter;color:#8d8c8c;text-align:center}
+  .swap{width:52px;height:52px;border-radius:50%;margin:-22px auto;position:relative;z-index:2;display:flex;align-items:center;justify-content:center;background:#1e1c1c;border:1px solid rgba(255,255,255,.15);box-shadow:inset 0 1px 0 0 rgba(255,255,255,.25);color:#c9a962;cursor:pointer;transition:transform .35s}
+  .swap:hover{transform:rotate(180deg)}
+  /* Fast / Standard, same control as the USDC/NGN switch */
+  .seg{display:flex;gap:4px;border-radius:999px;background:rgba(255,255,255,.05);padding:4px}
+  .seg button{flex:1;border:0;border-radius:999px;padding:12px 10px;font:15px/18px Inter;color:#bdbcbc;background:transparent;cursor:pointer}
+  .seg button.on{background:rgba(201,169,98,.35);color:#fff}
+  .seg small{display:block;font-size:12px;color:#a19d9d;margin-top:2px}
+  /* Receive card */
+  .recv{border-radius:20px;background:#2b2a2a}
+  .recv-top{display:flex;justify-content:space-between;align-items:center;padding:20px 30px}
+  .recv-top .k{font:13px/16px Inter;color:#a19d9d}
+  .recv-top .big{font:600 26px/32px Inter;color:#c9a962}
+  .showfee{font:16px Inter;color:#fff}
+  dl{margin:0;display:grid;grid-template-columns:1fr auto;gap:12px 20px;border-top:1px solid rgba(255,255,255,.1);padding:20px 30px;font:15px/19px Inter;color:#dcd6d6}
+  dd{margin:0;text-align:right;color:#fff}
+  .cta{height:80px;border:0;border-radius:40px;background:#ecc56f;color:#111010;font:600 20px/25px Sora;width:100%}
+  /* Dropdown (open) */
+  .dd{border-radius:20px;border:1px solid rgba(255,255,255,.15);background:#1e1c1c;box-shadow:0 24px 48px rgba(0,0,0,.5);padding:6px}
+  .dd div{border-radius:12px;padding:12px 14px;font:16px Sora;color:#fff}
+  .dd .sel{background:rgba(201,169,98,.2)}
+  /* Stepper (OfframpStatusPanel) */
+  .stepper{border-radius:20px;background:#232222;padding:28px 24px;display:flex;flex-direction:column;gap:28px}
+  .stepper h3{margin:0;font:18px/23px Sora}
+  ol{list-style:none;margin:0;padding:0}
+  li{display:flex;gap:14px}
+  .rail{display:flex;flex-direction:column;align-items:center}
+  .c{width:24px;height:24px;border-radius:50%;border:1px solid #6a6969;display:flex;align-items:center;justify-content:center;font-size:13px}
+  .c.done{background:#c9a962;border-color:#c9a962;color:#1a1a1a}
+  .c.cur{border:1px dashed #fff}
+  .line{width:1px;flex:1;background:#4d4c4c;margin:4px 0}
+  .t{padding-bottom:26px;font:15px/24px Sora;color:#8d8c8c}
+  .t.done{color:#c9a962}.t.cur{color:#fff}
+  /* Result card */
+  .result{display:flex;flex-direction:column;align-items:center;gap:28px}
+  .rcard{width:100%;border-radius:20px;background:#232222;padding:40px 30px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:24px}
+  .disc{width:82px;height:82px;border-radius:50%;background:#24ac5c;display:flex;align-items:center;justify-content:center}
+  .rcard h3{margin:0;font:26px/32px Fraunces;color:#fff}
+  .rcard p{margin:12px 0 0;font:18px/28px Sora;color:#e6e2e2}
+  .ghost{height:64px;width:100%;border-radius:40px;border:1px solid rgba(255,255,255,.6);display:flex;align-items:center;justify-content:center;font:18px Sora;color:#fff}
+</style>
+</head>
+<body>
+<p class="note"><b>Bridge, v3:</b> built from the offramp screen's own pieces: the content panel, its chain dropdown and fields, the "You'll receive about" card, the Processing stepper and the success card. Click <b>⇅</b> to swap From and To. Answer in the terminal.</p>
+
+<div class="grid">
+  <div>
+    <p class="cap">1 · Bridge screen</p>
+    <div class="panel">
+      <h2 class="h2">Bridge USDC</h2>
+
+      <div>
+        <div class="leg" id="from">
+          <div class="leg-top">
+            <span class="label">From</span>
+            <span class="pill w"><span class="dot"></span>7xKp…f3Qa</span>
+          </div>
+          <div class="select"><span class="nm">Solana</span><svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 9l6 6 6-6"/></svg></div>
+          <div class="field"><span class="v">100.00</span><span class="max">Max</span><span class="tag">USDC</span></div>
+          <div class="meta"><span>Min 1 USDC</span><span class="sep"></span><span class="bal">Balance: 250.00 USDC</span></div>
+        </div>
+
+        <div class="swap" title="Swap From and To" onclick="(function(){
+          var f=document.querySelector('#from .nm'),t=document.querySelector('#to .nm');
+          var x=f.textContent;f.textContent=t.textContent;t.textContent=x;
+          document.getElementById('rk').textContent='You’ll receive on '+t.textContent;
+        })()">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 4v16M3 8l4-4 4 4M17 20V4M13 16l4 4 4-4"/></svg>
+        </div>
+
+        <div class="leg" id="to">
+          <div class="leg-top">
+            <span class="label">To</span>
+            <span class="pill">Connect wallet</span>
+          </div>
+          <div class="select"><span class="nm">Base</span><svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 9l6 6 6-6"/></svg></div>
+          <div class="or">or paste a Base address</div>
+          <div class="addr">0x7EF9BC8B9cea37b8236Ce85EcD63fa32e753df94</div>
+          <div class="warn"><b>Check this address carefully.</b> Bridged USDC can't be recalled or redirected. If this isn't your Base address, the funds are lost for good.</div>
+        </div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <span class="label">Transfer speed</span>
+        <div class="seg">
+          <button>Standard<small>~15 min</small></button>
+          <button class="on">Fast<small>~20 seconds</small></button>
+        </div>
+      </div>
+
+      <div class="recv">
+        <div class="recv-top">
+          <span style="display:flex;flex-direction:column;gap:4px"><span class="k" id="rk">You’ll receive on Base</span><span class="big">98.86 USDC</span></span>
+          <span class="showfee">Hide fee ⌃</span>
+        </div>
+        <dl>
+          <dt>You send</dt><dd>100.00 USDC</dd>
+          <dt>Settu fee (0.5%)</dt><dd>0.50 USDC</dd>
+          <dt>Fast transfer fee</dt><dd>0.01 USDC</dd>
+          <dt>Network fee on Base</dt><dd>0.63 USDC</dd>
+          <dt>Estimated time</dt><dd>~20 seconds</dd>
+        </dl>
+      </div>
+
+      <button class="cta">Bridge 100 USDC</button>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:28px">
+    <div>
+      <p class="cap">Chain dropdown, open (same list on both cards)</p>
+      <div class="dd">
+        <div class="sel">Solana</div><div>Base</div><div>Stellar</div><div>Ethereum</div><div>Arbitrum</div><div>Optimism</div><div>Avalanche</div><div>Polygon</div>
+      </div>
+    </div>
+
+    <div>
+      <p class="cap">2 · Progress (opens over the screen)</p>
+      <div class="stepper">
+        <h3>Bridging 100 USDC</h3>
+        <ol>
+          <li><div class="rail"><span class="c done">✓</span><span class="line"></span></div><span class="t done">Confirm transaction in wallet</span></li>
+          <li><div class="rail"><span class="c done">✓</span><span class="line"></span></div><span class="t done">Sending from Solana</span></li>
+          <li><div class="rail"><span class="c cur"></span><span class="line"></span></div><span class="t cur">Verifying the transfer</span></li>
+          <li><div class="rail"><span class="c"></span><span class="line"></span></div><span class="t">Delivering on Base</span></li>
+          <li><div class="rail"><span class="c"></span></div><span class="t" style="padding-bottom:0">Arrived in your wallet</span></li>
+        </ol>
+      </div>
+    </div>
+
+    <div>
+      <p class="cap">3 · Result (existing success card)</p>
+      <div class="result">
+        <div class="rcard">
+          <div class="disc"><svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div>
+          <div><h3>Done! 98.86 USDC arrived</h3><p>Sent to 0x7EF9…DF94 on Base.</p></div>
+        </div>
+        <div class="ghost">View transaction →</div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
