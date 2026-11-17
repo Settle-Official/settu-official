@@ -54,7 +54,7 @@ function deps(over: Partial<BuildQuoteDeps> = {}): Partial<BuildQuoteDeps> {
     randomBytes: () => NONCE,
     getFeeBps: async (speed) => (speed === "fast" ? 60 : 30),
     maxFeeBps: () => 100,
-    getBurnFeeQuote: async () => ({ minimumFeeBps: 1.3 }),
+    getFastFeeBps: async () => 1.3,
     estimateNetworkFee: async () => ({ usdcAtomic: BigInt(630_000), nativeAtomic: BigInt(7_000) }),
     checkDestinationLive: async (chain) =>
       chain === "solana"
@@ -270,9 +270,9 @@ test("Fast: maxFee = fastFeeMaxAtomic, minFinality 1000, settuFee net of it", as
     await buildQuote(
       { ...baseReq, speed: "fast" },
       deps({
-        getBurnFeeQuote: async (p) => {
+        getFastFeeBps: async (p) => {
           pairs.push(p);
-          return { minimumFeeBps: 1.3 };
+          return 1.3;
         },
       }),
     ),
@@ -288,7 +288,7 @@ test("fast_unavailable -> 409", async () => {
   const r = err(
     await buildQuote(
       { ...baseReq, speed: "fast" },
-      deps({ ...noSign, getBurnFeeQuote: async () => ({ minimumFeeBps: 80 }) }),
+      deps({ ...noSign, getFastFeeBps: async () => 80 }),
     ),
   );
   assert.equal(r.code, "fast_unavailable");
@@ -326,7 +326,7 @@ test("an Iris failure -> unavailable (503)", async () => {
       { ...baseReq, speed: "fast" },
       deps({
         ...noSign,
-        getBurnFeeQuote: async () => {
+        getFastFeeBps: async () => {
           throw new Error("Iris fee quote failed: 500");
         },
       }),
@@ -371,13 +371,14 @@ test("Solana destination: mintRecipient is the recipient's USDC ATA; ATA rent re
   assert.deepEqual(feeOpts, [["solana", "base", { needsSolanaAta: true }]]);
 });
 
-test("Solana destination without an ATA from the live check -> refuses", async () => {
-  await assert.rejects(
-    buildQuote(
+test("Solana destination without an ATA from the live check -> refuses (internal)", async () => {
+  const r = err(
+    await buildQuote(
       { ...baseReq, dest: "solana", recipient: SOL_RECIPIENT },
       deps({ ...noSign, checkDestinationLive: async () => ({ ok: true }) }),
     ),
   );
+  assert.equal(r.code, "internal");
 });
 
 test("Stellar destination: forwarder as mintRecipient, recipient in hookData", async () => {
@@ -501,4 +502,113 @@ test("native mode: a balance read failure -> unavailable", async () => {
     ),
   );
   assert.equal(r.code, "unavailable");
+});
+
+// ------------------------------------------------------------- fix round 1
+
+test("Fast with no Iris Fast entry (null) -> 409 fast_unavailable, never signed", async () => {
+  const r = err(
+    await buildQuote({ ...baseReq, speed: "fast" }, deps({ ...noSign, getFastFeeBps: async () => null })),
+  );
+  assert.equal(r.code, "fast_unavailable");
+  assert.equal(httpStatusFor(r.code), 409);
+});
+
+test("Fast with a malformed Iris body (via the strict parser) -> fast_unavailable", async () => {
+  const { parseFastMinimumFeeBps } = await import("../cctp/iris-client");
+  for (const body of [[{ finalityThreshold: 1000, minimumFee: "x" }], [{ finalityThreshold: 2000, minimumFee: 1 }], {}]) {
+    const r = err(
+      await buildQuote(
+        { ...baseReq, speed: "fast" },
+        deps({ ...noSign, getFastFeeBps: async () => parseFastMinimumFeeBps(body) }),
+      ),
+    );
+    assert.equal(r.code, "fast_unavailable", JSON.stringify(body));
+  }
+});
+
+test("Fast with an explicit 0 Iris fee -> signed, maxFee 0, minFinality 1000", async () => {
+  const r = ok(await buildQuote({ ...baseReq, speed: "fast" }, deps({ getFastFeeBps: async () => 0 })));
+  assert.equal(r.quote.maxFee, "0");
+  assert.equal(r.quote.minFinality, 1000);
+  assert.equal(r.quote.settuFee, "600000");
+});
+
+test("Standard never asks Iris, so a missing Fast entry doesn't matter", async () => {
+  const r = ok(
+    await buildQuote(
+      baseReq,
+      deps({ getFastFeeBps: async () => assert.fail("Standard must not read the Fast fee") }),
+    ),
+  );
+  assert.equal(r.quote.minFinality, 2000);
+});
+
+test("amount cap: >20 integer digits or >32 chars -> 400 before any network call", async () => {
+  const offline: Partial<BuildQuoteDeps> = {
+    ...noSign,
+    getFeeBps: async () => assert.fail("no reads"),
+    checkDestinationLive: async () => assert.fail("no reads"),
+    estimateNetworkFee: async () => assert.fail("no reads"),
+    getFastFeeBps: async () => assert.fail("no reads"),
+  };
+  for (const amount of ["1".repeat(21), "1." + "0".repeat(31), "9".repeat(33)]) {
+    const r = err(await buildQuote({ ...baseReq, amount }, deps(offline)));
+    assert.equal(r.code, "invalid_amount", amount);
+    assert.equal(httpStatusFor(r.code), 400);
+  }
+});
+
+test("u64-overflow amount on a Stellar or Solana source -> 400, not 503", async () => {
+  const offline: Partial<BuildQuoteDeps> = {
+    ...noSign,
+    checkDestinationLive: async () => assert.fail("no reads"),
+    estimateNetworkFee: async () => assert.fail("no reads"),
+  };
+  // u64 max ~1.8e19: 7-dp Stellar overflows at ~1.8e12 USDC, 6-dp Solana at ~1.8e13.
+  const cases: QuoteRequest[] = [
+    { ...baseReq, source: "stellar", user: G_USER, amount: "2000000000000" },
+    { ...baseReq, source: "solana", user: SOL_USER, amount: "20000000000000" },
+  ];
+  for (const req of cases) {
+    const r = err(await buildQuote(req, deps(offline)));
+    assert.equal(r.code, "invalid_amount", req.source);
+    assert.equal(httpStatusFor(r.code), 400);
+  }
+});
+
+test("Solana destination: an ATA from the live check that doesn't re-derive -> internal 500", async () => {
+  const r = err(
+    await buildQuote(
+      { ...baseReq, dest: "solana", recipient: SOL_RECIPIENT },
+      deps({
+        ...noSign,
+        checkDestinationLive: async () => ({
+          ok: true,
+          solanaAta: "CLTcs7gP4PLPaU5uLQ7oCsgAhXg9aQHXfM5rXkyXWZqi", // devnet-mint ATA, wrong here
+          needsSolanaAta: false,
+        }),
+      }),
+    ),
+  );
+  assert.equal(r.code, "internal");
+  assert.equal(httpStatusFor(r.code), 500);
+  assert.doesNotMatch(r.error, /CLTcs|42Jre|ATA/);
+});
+
+test("a Redis failure reading the fee -> unavailable with the no-price copy, not fee_config", async () => {
+  const r = err(
+    await buildQuote(
+      baseReq,
+      deps({
+        ...noSign,
+        getFeeBps: async () => {
+          throw new Error("Upstash unreachable");
+        },
+      }),
+    ),
+  );
+  assert.equal(r.code, "unavailable");
+  assert.equal(r.error, QUOTE_UNAVAILABLE_MESSAGE);
+  assert.equal(httpStatusFor(r.code), 503);
 });

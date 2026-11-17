@@ -109,3 +109,31 @@ test("fetchBurnMessage returns null when Iris has no message yet (404)", async (
     globalThis.fetch = originalFetch;
   }
 });
+
+test("parseFastMinimumFeeBps: only a 1000-threshold entry with a finite, non-negative fee counts", async () => {
+  const { parseFastMinimumFeeBps } = await import("./iris-client");
+  assert.equal(parseFastMinimumFeeBps([{ finalityThreshold: 1000, minimumFee: 1.3 }]), 1.3);
+  assert.equal(parseFastMinimumFeeBps([{ finalityThreshold: 2000, minimumFee: 0 }, { finalityThreshold: 1000, minimumFee: 0 }]), 0);
+  assert.equal(parseFastMinimumFeeBps([{ finalityThreshold: 2000, minimumFee: 0 }]), null);
+  assert.equal(parseFastMinimumFeeBps([]), null);
+  assert.equal(parseFastMinimumFeeBps({}), null);
+  assert.equal(parseFastMinimumFeeBps(null), null);
+  for (const bad of [undefined, null, "1.3", -1, Number.NaN, Infinity, {}]) {
+    assert.equal(parseFastMinimumFeeBps([{ finalityThreshold: 1000, minimumFee: bad }]), null, String(bad));
+  }
+});
+
+test("getFastMinimumFeeBps: null without a Fast entry; throws on HTTP error; getBurnFeeQuote unchanged", async () => {
+  const { getFastMinimumFeeBps, getBurnFeeQuote } = await import("./iris-client");
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify([{ finalityThreshold: 2000, minimumFee: 0 }]), { status: 200 })) as typeof fetch;
+    assert.equal(await getFastMinimumFeeBps({ sourceDomain: 6, destDomain: 3 }), null);
+    assert.deepEqual(await getBurnFeeQuote({ sourceDomain: 6, destDomain: 3 }), { minimumFeeBps: 0 });
+    globalThis.fetch = (async () => new Response("boom", { status: 500 })) as typeof fetch;
+    await assert.rejects(getFastMinimumFeeBps({ sourceDomain: 6, destDomain: 3 }));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

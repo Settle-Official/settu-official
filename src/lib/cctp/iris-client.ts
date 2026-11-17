@@ -148,6 +148,33 @@ export async function getBurnFeeQuote(params: {
 }
 
 /**
+ * Strict parse of the `/v2/burn/USDC/fees` body: the Fast (finalityThreshold
+ * 1000) entry's `minimumFee` in bps, or null when there is no such entry or
+ * its fee isn't a finite, non-negative number. An explicit 0 is a real fee.
+ * Unlike getBurnFeeQuote (which maps "missing" to 0 for the offramp), this
+ * lets the user bridge refuse a Fast quote that would deliver at Standard.
+ */
+export function parseFastMinimumFeeBps(data: unknown): number | null {
+  if (!Array.isArray(data)) return null;
+  const fast = data.find(
+    (e) => e !== null && typeof e === "object" && (e as { finalityThreshold?: unknown }).finalityThreshold === 1000,
+  ) as { minimumFee?: unknown } | undefined;
+  const fee = fast?.minimumFee;
+  return typeof fee === "number" && Number.isFinite(fee) && fee >= 0 ? fee : null;
+}
+
+/** Fast minimum fee (bps) or null when Iris offers no valid Fast fee. Throws on HTTP errors. */
+export async function getFastMinimumFeeBps(params: {
+  sourceDomain: number;
+  destDomain: number;
+}): Promise<number | null> {
+  const url = buildFeeQuoteUrl(CCTP_CONFIG.irisApiUrl, params.sourceDomain, params.destDomain);
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Iris fee quote failed: ${res.status}`);
+  return parseFastMinimumFeeBps(await res.json());
+}
+
+/**
  * Converts a Fast Transfer fee quote (bps) into an atomic maxFee for a given
  * burn amount, rounding up so we never submit below Circle's minimum (a
  * too-low maxFee leaves the burn stuck unattested). `minimumFeeBps` can carry

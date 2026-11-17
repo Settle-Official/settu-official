@@ -18,11 +18,12 @@ import { Connection, PublicKey } from "@solana/web3.js";
 import { createPublicClient, http, type Hex } from "viem";
 import { buildForwarderHookData, contractStrkeyToBytes32Hex } from "../cctp/address-encoding";
 import { CCTP_CONFIG, FINALITY_THRESHOLD } from "../cctp/constants";
-import { getBurnFeeQuote as irisGetBurnFeeQuote } from "../cctp/iris-client";
+import { getFastMinimumFeeBps } from "../cctp/iris-client";
 import { requireSolanaRpcUrl } from "../solana/config";
 import { validateDestinationAddress } from "./address";
 import {
   checkDestinationLive as liveCheck,
+  deriveUsdcAta,
   fetchHorizonAccount,
   type LiveCheckResult,
 } from "./address-live";
@@ -107,7 +108,11 @@ export interface BuildQuoteDeps {
   feeReader?: FeeReader;
   /** The fee cap in bps; throws (→ fee_config) when misconfigured. */
   maxFeeBps(): number;
-  getBurnFeeQuote(p: { sourceDomain: number; destDomain: number }): Promise<{ minimumFeeBps: number }>;
+  /**
+   * Iris Fast minimum fee (bps) for the route, or null when Iris offers no
+   * valid Fast fee (→ fast_unavailable). Throws on HTTP errors (→ unavailable).
+   */
+  getFastFeeBps(p: { sourceDomain: number; destDomain: number }): Promise<number | null>;
   estimateNetworkFee(
     dest: BridgeChainKey,
     source: BridgeChainKey,
@@ -127,10 +132,12 @@ export interface BuildQuoteDeps {
 
 const STATUS_409 = new Set(["fast_unavailable"]);
 const STATUS_503 = new Set(["fee_config", "unavailable"]);
+const STATUS_500 = new Set(["internal"]);
 
 export function httpStatusFor(code: string): number {
   if (STATUS_409.has(code)) return 409;
   if (STATUS_503.has(code)) return 503;
+  if (STATUS_500.has(code)) return 500;
   return 400;
 }
 
@@ -138,6 +145,13 @@ export function httpStatusFor(code: string): number {
 
 const ZERO = BigInt(0);
 const TEN = BigInt(10);
+const U64_MAX = (BigInt(1) << BigInt(64)) - BigInt(1);
+
+/** Input cap, checked before any network call. */
+const MAX_AMOUNT_INT_DIGITS = 20;
+const MAX_AMOUNT_LENGTH = 32;
+
+const FAST_UNAVAILABLE_MESSAGE = "Fast transfer is unavailable for this route right now.";
 
 function fail(code: string, error: string): QuoteError {
   return { error, code };
@@ -246,6 +260,18 @@ export async function buildQuote(
     return fail("invalid_fee_mode", "Pick how to pay the network fee.");
   }
   if (typeof amount !== "string") return fail("invalid_amount", "Enter a valid amount.");
+  const amountText = amount.trim();
+  const intPart = /^(\d*)/.exec(amountText)![1];
+  if (amountText.length > MAX_AMOUNT_LENGTH || intPart.length > MAX_AMOUNT_INT_DIGITS) {
+    return fail("invalid_amount", "That amount is too large.");
+  }
+  // ed25519 sources sign u64 amounts in the source's USDC decimals: reject
+  // anything whose whole part alone would overflow (400, not a signing 503).
+  if (isChainKey(source) && BRIDGE_CHAINS[source].family !== "evm" && intPart.length > 0) {
+    if (BigInt(intPart) * TEN ** BigInt(BRIDGE_CHAINS[source].usdcDecimals) > U64_MAX) {
+      return fail("invalid_amount", "That amount is too large.");
+    }
+  }
   if (typeof req.user !== "string" || typeof req.recipient !== "string") {
     return fail("invalid_request", "Invalid request.");
   }
@@ -261,15 +287,25 @@ export async function buildQuote(
   const recipient = dst.address;
 
   // ---- fee setting: refuse, never clamp
-  let feeBps: number;
-  try {
-    const cap = d.maxFeeBps();
-    feeBps = await d.getFeeBps(speed);
-    if (!Number.isInteger(feeBps) || feeBps < 0 || feeBps > cap) throw new Error("fee out of range");
-  } catch {
+  const feeConfig = () => {
     console.error("[bridge/quote] fee_config: stored fee or cap is invalid");
     return fail("fee_config", "Bridging is paused for maintenance. Try again shortly.");
+  };
+  let cap: number;
+  try {
+    cap = d.maxFeeBps();
+  } catch {
+    return feeConfig();
   }
+  let feeBps: number;
+  try {
+    feeBps = await d.getFeeBps(speed);
+  } catch (e) {
+    // A Redis outage is "no price right now", not a misconfiguration.
+    console.error("[bridge/quote] unavailable (fee read):", e instanceof Error ? e.message : "unknown error");
+    return unavailable();
+  }
+  if (!Number.isInteger(feeBps) || feeBps < 0 || feeBps > cap) return feeConfig();
 
   const sourceDomain = BRIDGE_CHAINS[source].cctpDomain;
   const destDomain = BRIDGE_CHAINS[dest].cctpDomain;
@@ -282,11 +318,16 @@ export async function buildQuote(
     live = await d.checkDestinationLive(dest, recipient);
     if (!live.ok) return fail(live.code, live.message);
     if (speed === "fast") {
-      const q = await d.getBurnFeeQuote({ sourceDomain, destDomain });
-      if (!Number.isFinite(q?.minimumFeeBps) || q.minimumFeeBps < 0) {
+      const bps = await d.getFastFeeBps({ sourceDomain, destDomain });
+      if (bps === null) {
+        // No valid Fast fee from Iris: a Fast-priced quote would deliver at Standard.
+        console.warn(`[bridge/quote] fast_unavailable (no Iris Fast fee) ${source}->${dest}`);
+        return fail("fast_unavailable", FAST_UNAVAILABLE_MESSAGE);
+      }
+      if (typeof bps !== "number" || !Number.isFinite(bps) || bps < 0) {
         throw new Error("Iris returned an invalid Fast fee");
       }
-      fastFeeBps = q.minimumFeeBps;
+      fastFeeBps = bps;
     }
     netFee = await d.estimateNetworkFee(dest, source, {
       needsSolanaAta: live.needsSolanaAta === true,
@@ -303,7 +344,7 @@ export async function buildQuote(
   const b = computeBreakdown({
     source,
     dest,
-    amount: amount.trim(),
+    amount: amountText,
     speed,
     feeBps,
     fastFeeBps,
@@ -338,6 +379,20 @@ export async function buildQuote(
     if (balance < b.nativeFeeAtomic + allowance) {
       const sym = BRIDGE_CHAINS[source].nativeSymbol;
       return fail("insufficient_native", `Not enough ${sym} to pay the network fee.`);
+    }
+  }
+
+  // ---- Solana: the mint recipient must be the ATA we derive ourselves
+  if (BRIDGE_CHAINS[dest].family === "solana") {
+    let expected: string | null = null;
+    try {
+      expected = deriveUsdcAta(recipient, BRIDGE_CHAINS.solana.usdc);
+    } catch {
+      expected = null;
+    }
+    if (!live.solanaAta || expected === null || live.solanaAta !== expected) {
+      console.error("[bridge/quote] internal: Solana ATA from the live check does not re-derive");
+      return fail("internal", "Something went wrong preparing this transfer. Try again.");
     }
   }
 
@@ -436,7 +491,7 @@ export function defaultBuildQuoteDeps(feeReader?: FeeReader): BuildQuoteDeps {
     randomBytes: (n) => new Uint8Array(nodeRandomBytes(n)),
     getFeeBps: (speed) => getBridgeFeeBps(speed, feeReader),
     maxFeeBps: readCapFromEnv,
-    getBurnFeeQuote: irisGetBurnFeeQuote,
+    getFastFeeBps: getFastMinimumFeeBps,
     estimateNetworkFee: (dest, source, opts) => estimateNetworkFeeDefault(dest, source, opts),
     checkDestinationLive: (chain, address) => liveCheck(chain, address),
     nativeBalance: async (chain, user) => {
