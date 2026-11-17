@@ -44,14 +44,30 @@ export const BRIDGE_FORBIDDEN_ADDRESSES: Record<
   BridgeChainKey,
   readonly string[]
 > = {
-  stellar: [],
+  // Testnet deployments and relayers (2026-11-17, scripts/bridge/deploy-testnets.md).
+  // A mint to any of these can't be claimed by the user. Listing them on a
+  // mainnet build too is harmless: nothing real lives at these addresses.
+  stellar: [
+    "CDN4JIXDFJXUYIPQB22NLQ3VGD43IYSLEUEI727BHWJVPLYQ5QD3V4CM", // SettuBridge
+    "GB7FOCT7PAZR33MR66UKIGRXE6EH65KOGJIM6SHKQ3NOENEMAXV3MNQW", // relayer
+  ],
   ethereum: [],
-  base: [],
-  arbitrum: [],
+  base: [
+    "0x341EBE07baDC61621D8Fa4298abcd43c7B4F5FB0", // SettuBridge
+    "0x8c01a0E89BE58373108D771878FEb2e411Cbe7D4", // relayer
+  ],
+  arbitrum: [
+    "0x341EBE07baDC61621D8Fa4298abcd43c7B4F5FB0", // SettuBridge
+    "0x8c01a0E89BE58373108D771878FEb2e411Cbe7D4", // relayer
+  ],
   optimism: [],
   avalanche: [],
   polygon: [],
-  solana: [],
+  solana: [
+    "3CGxb2E9ASpizQtoL8wykokiZ8BH19MXMWmgy17KQmD1", // settu_bridge program
+    "ccC16125PfsTLb9DQZb2a8S5b7HCVN3gj6rWGDkddCy", // its config PDA
+    "9mnTVjqtuSxq3t8zNKntXSVeYPMCZAxrKEbHLVJrJZSd", // relayer
+  ],
 };
 
 const EVM_ZERO = "0x0000000000000000000000000000000000000000";
