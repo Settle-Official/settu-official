@@ -42,6 +42,13 @@ export const CurrencyIcon = (p: IconProps) => (
   </Icon>
 );
 
+/** Two opposing arrows: the bridge's swap glyph, from the mockup. */
+export const BridgeIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M7 4v16M3 8l4-4 4 4M17 20V4M13 16l4 4 4-4" />
+  </Icon>
+);
+
 export const ChatIcon = (p: IconProps) => (
   <Icon {...p}>
     <path d="M12 3a9 9 0 0 0-7.8 13.5L3 21l4.6-1.2A9 9 0 1 0 12 3Z" />
