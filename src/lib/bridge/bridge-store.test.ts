@@ -2,7 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type { CctpTransferRecord } from "../cctp/cctp-store";
 import { registerBridge, getBridgeStatus, toStatusView, BridgeRegisterError } from "./bridge-store";
+import { PublicKey } from "@solana/web3.js";
+import { TxNotIndexedError, InvalidEventError } from "./read-source-event";
 import { BRIDGE_CHAINS } from "./chains";
+import type { QuoteRecord } from "./quote-record";
 import type { BridgedEvent } from "./read-source-event";
 
 const HASH = "0x" + "cd".repeat(32);
@@ -15,7 +18,7 @@ const EV: BridgedEvent = {
   minFinality: 2000,
 };
 
-function memDeps(ev: BridgedEvent | null, spy: { creates: number }) {
+function memDeps(ev: BridgedEvent | null, spy: { creates: number }, quote: QuoteRecord | null = null) {
   const m = new Map<string, CctpTransferRecord>();
   return {
     readEvent: async () => ev,
@@ -26,6 +29,7 @@ function memDeps(ev: BridgedEvent | null, spy: { creates: number }) {
       m.set(r.id, f);
       return f;
     },
+    getQuote: async (_n: string) => quote,
     now: () => 0,
   };
 }
@@ -62,19 +66,74 @@ test("amounts and parties come from the event", async () => {
   assert.equal(r.bridge!.sendAtomic, "1000000");
   assert.equal(r.bridge!.settuFeeAtomic, "5000");
   assert.equal(r.bridge!.networkFeeAtomic, "100");
-  assert.equal(r.bridge!.receiveMinAtomic, "994900"); // standard
+  assert.equal(r.bridge!.receiveMinAtomic, "994900"); // burn fallback
+  assert.equal(r.bridge!.receiveMinIsBurn, true);
   assert.equal(r.bridge!.speed, "standard");
   assert.equal(r.bridge!.dest, "base");
-  assert.equal(r.bridge!.recipient.toLowerCase(), "0x" + "33".repeat(20));
+  assert.equal(r.bridge!.recipient?.toLowerCase(), "0x" + "33".repeat(20));
   assert.equal(r.status, "burned");
 });
 
-test("fast: receiveMin is the burn amount, flagged", async () => {
+test("fast, no quote record: receiveMin is the burn (amount - fees), flagged", async () => {
   const d = memDeps({ ...EV, minFinality: 1000 }, { creates: 0 });
   const r = await registerBridge("base", HASH, undefined, d);
   assert.equal(r.bridge!.speed, "fast");
-  assert.equal(r.bridge!.receiveMinAtomic, "1000000");
+  assert.equal(r.bridge!.receiveMinAtomic, "994900");
   assert.equal(r.bridge!.receiveMinIsBurn, true);
+});
+
+const QR = (o: Partial<QuoteRecord> = {}): QuoteRecord => ({
+  source: "base", dest: "base", speed: "standard", user: EV.user,
+  recipient: "0xRecipientExact", maxFeeAtomic: "0", receiveMinAtomic: "990000", ...o,
+});
+
+test("quote record present: exact recipient and receiveMin, standard and fast", async () => {
+  const s = await registerBridge("base", HASH, undefined, memDeps(EV, { creates: 0 }, QR()));
+  assert.equal(s.bridge!.recipient, "0xRecipientExact");
+  assert.equal(s.bridge!.receiveMinAtomic, "990000");
+  assert.equal(s.bridge!.receiveMinIsBurn, undefined);
+  const f = await registerBridge(
+    "base", HASH,
+    undefined,
+    memDeps({ ...EV, minFinality: 1000 }, { creates: 0 }, QR({ speed: "fast", maxFeeAtomic: "4200", receiveMinAtomic: "990700" })),
+  );
+  assert.equal(f.bridge!.speed, "fast");
+  assert.equal(f.bridge!.receiveMinAtomic, "990700");
+  assert.equal(f.bridge!.fastFeeMaxAtomic, "4200");
+});
+
+test("quote record for a different route/user is ignored", async () => {
+  const r = await registerBridge("base", HASH, undefined, memDeps(EV, { creates: 0 }, QR({ user: "0x" + "99".repeat(20) })));
+  assert.equal(r.bridge!.receiveMinIsBurn, true);
+});
+
+test("fallback recipients: solana ATA base58, stellar unknown", async () => {
+  const ata = Buffer.alloc(32, 5);
+  const sol = await registerBridge("base", HASH, undefined, memDeps({ ...EV, destDomain: 5, mintRecipient: ("0x" + ata.toString("hex")) as `0x${string}` }, { creates: 0 }));
+  assert.equal(sol.bridge!.recipient, new PublicKey(ata).toBase58());
+  assert.equal(sol.bridge!.recipientIsTokenAccount, true);
+  const st = await registerBridge("base", HASH, undefined, memDeps({ ...EV, destDomain: BRIDGE_CHAINS.stellar.cctpDomain }, { creates: 0 }));
+  assert.equal(st.bridge!.recipient, undefined);
+  assert.equal(st.bridge!.recipientUnknown, true);
+});
+
+test("existing non-bridge record -> 400 not_a_bridge, onRegistered not run", async () => {
+  const d = memDeps(EV, { creates: 0 });
+  d.get = async () => base({ direction: "onramp", bridge: undefined });
+  let ran = false;
+  await assert.rejects(registerBridge("base", HASH, async () => { ran = true; }, d), (e: unknown) =>
+    e instanceof BridgeRegisterError && e.status === 400 && e.code === "not_a_bridge");
+  assert.equal(ran, false);
+});
+
+test("not indexed -> 409; invalid event -> 400", async () => {
+  const d = memDeps(EV, { creates: 0 });
+  d.readEvent = async () => { throw new TxNotIndexedError(); };
+  await assert.rejects(registerBridge("base", HASH, undefined, d), (e: unknown) =>
+    e instanceof BridgeRegisterError && e.status === 409 && e.code === "not_indexed");
+  d.readEvent = async () => { throw new InvalidEventError("x"); };
+  await assert.rejects(registerBridge("base", HASH, undefined, d), (e: unknown) =>
+    e instanceof BridgeRegisterError && e.status === 400 && e.code === "invalid_event");
 });
 
 const base = (o: Partial<CctpTransferRecord>): CctpTransferRecord => ({
@@ -113,4 +172,9 @@ test("canSelfClaim: false at 29 min, true at 30", () => {
 test("getBridgeStatus: unknown / non-bridge -> null", async () => {
   const d = memDeps(EV, { creates: 0 });
   assert.equal(await getBridgeStatus("x", d), null);
+  assert.equal(await getBridgeStatus("y", { ...d, get: async () => base({ direction: "offramp", bridge: undefined }) }), null);
+});
+
+test("canSelfClaim false when attestedAt is undefined", () => {
+  assert.equal(toStatusView(base({ status: "attested" }), 10 ** 12).canSelfClaim, false);
 });

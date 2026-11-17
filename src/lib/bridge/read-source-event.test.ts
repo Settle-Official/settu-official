@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { encodeAbiParameters, encodeEventTopics, parseAbiItem, type Hex } from "viem";
 import { Address, nativeToScVal, xdr, StrKey } from "@stellar/stellar-sdk";
-import { readBridgedEvent, decodeStellarBridged, stellarContractEvents } from "./read-source-event";
+import { InvalidEventError, readBridgedEvent, decodeStellarBridged, stellarContractEvents } from "./read-source-event";
 
 const BRIDGE = "0x1111111111111111111111111111111111111111";
 const USER = "0x2222222222222222222222222222222222222222";
@@ -106,7 +106,7 @@ test("Stellar: other contract or other topic ignored; non-divisible amount throw
   const other = StrKey.encodeContract(Buffer.alloc(32, 8));
   assert.equal(decodeStellarBridged([stellarEvent(other, BigInt(10_000_000))], CID), null);
   assert.equal(decodeStellarBridged([stellarEvent(CID, BigInt(10_000_000), "other")], CID), null);
-  assert.throws(() => decodeStellarBridged([stellarEvent(CID, BigInt(10_000_001))], CID), /divisible/);
+  assert.throws(() => decodeStellarBridged([stellarEvent(CID, BigInt(10_000_001))], CID), (e: unknown) => e instanceof InvalidEventError);
 });
 
 test("Stellar: events extracted from a v3 meta", () => {

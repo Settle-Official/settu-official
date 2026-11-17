@@ -11,7 +11,9 @@ import {
   type CctpTransferRecord,
 } from "../cctp/cctp-store";
 import { BRIDGE_CHAINS, bridgeChainByDomain, type BridgeChainKey } from "./chains";
-import { readBridgedEvent, type BridgedEvent } from "./read-source-event";
+import { PublicKey } from "@solana/web3.js";
+import { loadQuoteRecord, type QuoteRecord } from "./quote-record";
+import { InvalidEventError, readBridgedEvent, TxNotIndexedError, type BridgedEvent } from "./read-source-event";
 
 export const SELF_CLAIM_AFTER_MS = 30 * 60 * 1000;
 
@@ -22,7 +24,9 @@ export interface BridgeStatusView {
   status: BridgeViewStatus;
   source: string;
   dest: string;
-  recipient: string;
+  recipient?: string;
+  recipientIsTokenAccount?: boolean;
+  recipientUnknown?: boolean;
   sendAtomic: string;
   receiveMinAtomic: string;
   receivedAtomic?: string;
@@ -34,15 +38,18 @@ export interface BridgeStatusView {
 
 export class BridgeRegisterError extends Error {
   status: number;
-  constructor(message: string, status: number = 400) {
+  code: string;
+  constructor(message: string, status: number = 400, code: string = "invalid_request") {
     super(message);
     this.status = status;
+    this.code = code;
     this.name = "BridgeRegisterError";
   }
 }
 
 export interface BridgeStoreDeps {
   readEvent(chain: BridgeChainKey, txHash: string): Promise<BridgedEvent | null>;
+  getQuote(nonce: string): Promise<QuoteRecord | null>;
   get(id: string): Promise<CctpTransferRecord | null>;
   create(
     r: Omit<CctpTransferRecord, "createdAt" | "updatedAt" | "attempts">,
@@ -52,6 +59,13 @@ export interface BridgeStoreDeps {
 
 const defaultDeps: BridgeStoreDeps = {
   readEvent: (c, h) => readBridgedEvent(c, h),
+  getQuote: async (n) => {
+    try {
+      return await loadQuoteRecord(n);
+    } catch {
+      return null; // best-effort join; fall back to what the event proves
+    }
+  },
   get: getCctpTransfer,
   create: createCctpTransfer,
   now: Date.now,
@@ -64,9 +78,19 @@ function normaliseHash(chain: BridgeChainKey, txHash: string): string | null {
   return null;
 }
 
-/** Last 20 bytes for an EVM destination; otherwise the raw bytes32 hex. */
-function recipientFrom(destFamily: string, mintRecipient: string): string {
-  return destFamily === "evm" ? `0x${mintRecipient.slice(-40)}` : mintRecipient;
+/** What the event alone proves about the recipient. */
+function fallbackRecipient(
+  destFamily: string,
+  mintRecipient: string,
+): Pick<BridgeMeta, "recipient" | "recipientIsTokenAccount" | "recipientUnknown"> {
+  if (destFamily === "evm") return { recipient: `0x${mintRecipient.slice(-40)}` };
+  if (destFamily === "solana") {
+    return {
+      recipient: new PublicKey(Buffer.from(mintRecipient.slice(2), "hex")).toBase58(),
+      recipientIsTokenAccount: true,
+    };
+  }
+  return { recipientUnknown: true };
 }
 
 export async function registerBridge(
@@ -83,15 +107,24 @@ export async function registerBridge(
   if (!id) throw new BridgeRegisterError("Invalid transaction hash.");
 
   let record = await deps.get(id);
+  if (record && (record.direction !== "bridge" || !record.bridge)) {
+    throw new BridgeRegisterError("That transaction is not a bridge transfer.", 400, "not_a_bridge");
+  }
   if (!record) {
     let ev: BridgedEvent | null;
     try {
       ev = await deps.readEvent(chain, id);
     } catch (e) {
+      if (e instanceof TxNotIndexedError) {
+        throw new BridgeRegisterError("Transaction not confirmed yet. Try again shortly.", 409, "not_indexed");
+      }
+      if (e instanceof InvalidEventError) {
+        throw new BridgeRegisterError("That transaction's bridge event is invalid.", 400, "invalid_event");
+      }
       console.error("[bridge/register] read failed:", e instanceof Error ? e.message : "unknown");
-      throw new BridgeRegisterError("Could not read the transaction. Try again shortly.", 503);
+      throw new BridgeRegisterError("Could not read the transaction. Try again shortly.", 503, "unavailable");
     }
-    if (!ev) throw new BridgeRegisterError("No Settu bridge event found in that transaction.");
+    if (!ev) throw new BridgeRegisterError("No Settu bridge event found in that transaction.", 400, "no_event");
 
     let dest;
     try {
@@ -100,20 +133,33 @@ export async function registerBridge(
       throw new BridgeRegisterError("Transaction targets an unknown destination.");
     }
     const fast = ev.minFinality === 1000;
+    const speed = fast ? "fast" : "standard";
+    const q = await deps.getQuote(ev.nonce);
+    // Only trust the quote record if it describes this very transfer.
+    const quote =
+      q &&
+      q.source === chain &&
+      q.dest === dest.key &&
+      q.speed === speed &&
+      q.user.toLowerCase() === ev.user.toLowerCase()
+        ? q
+        : null;
+    const burn = ev.amount - ev.settuFee - ev.networkFee;
     const meta: BridgeMeta = {
       source: chain,
       dest: dest.key,
       user: ev.user,
-      recipient: recipientFrom(dest.family, ev.mintRecipient),
-      speed: fast ? "fast" : "standard",
+      ...(quote
+        ? { recipient: quote.recipient }
+        : fallbackRecipient(dest.family, ev.mintRecipient)),
+      speed,
       quoteNonce: ev.nonce,
       sendAtomic: ev.amount.toString(),
       settuFeeAtomic: ev.settuFee.toString(),
       networkFeeAtomic: ev.networkFee.toString(),
-      fastFeeMaxAtomic: "0",
-      // Fast: Circle's maxFee isn't emitted, so the burn amount stands in.
-      receiveMinAtomic: (fast ? ev.amount : ev.amount - ev.settuFee - ev.networkFee).toString(),
-      ...(fast ? { receiveMinIsBurn: true } : {}),
+      fastFeeMaxAtomic: quote ? quote.maxFeeAtomic : "0",
+      receiveMinAtomic: quote ? quote.receiveMinAtomic : burn.toString(),
+      ...(quote ? {} : { receiveMinIsBurn: true }),
     };
     record = await deps.create({
       id,
@@ -152,7 +198,9 @@ export function toStatusView(r: CctpTransferRecord, now: number = Date.now()): B
     status: VIEW_STATUS[r.status],
     source: m.source,
     dest: m.dest,
-    recipient: m.recipient,
+    ...(m.recipient !== undefined ? { recipient: m.recipient } : {}),
+    ...(m.recipientIsTokenAccount ? { recipientIsTokenAccount: true } : {}),
+    ...(m.recipientUnknown ? { recipientUnknown: true } : {}),
     sendAtomic: m.sendAtomic,
     receiveMinAtomic: m.receiveMinAtomic,
     ...(m.receivedAtomic !== undefined ? { receivedAtomic: m.receivedAtomic } : {}),

@@ -45,10 +45,14 @@ export async function advanceCctpTransfer(id: string): Promise<CctpStatus> {
   }
 }
 
-async function advanceLocked(
+export async function advanceLocked(
   id: string,
   record: NonNullable<Awaited<ReturnType<typeof getCctpTransfer>>>,
 ): Promise<CctpStatus> {
+  // User-bridge records must never fall into the onramp mint path below
+  // (Stellar mint-and-forward). Task 14 replaces this with the real bridge
+  // mint dispatch.
+  if (record.direction === "bridge") return record.status;
   try {
     if (record.status === "burned" || record.status === "attesting") {
       const attestation = await fetchAttestation({

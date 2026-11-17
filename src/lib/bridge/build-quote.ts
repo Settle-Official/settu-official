@@ -39,6 +39,7 @@ import {
   signEvmQuote,
   type BridgeQuote,
 } from "./quote";
+import { saveQuoteRecord as saveQuoteRecordDefault, type QuoteRecord } from "./quote-record";
 import { computeBreakdown, type Breakdown, type Speed } from "./quote-math";
 
 export const QUOTE_UNAVAILABLE_MESSAGE = "Couldn't get a price right now — try again in a moment";
@@ -126,6 +127,8 @@ export interface BuildQuoteDeps {
   bridgeContractFor(chain: BridgeChainKey): string;
   evmSignerKey(): Hex;
   ed25519SignerSecret(): Uint8Array;
+  /** Best-effort: records what the quote promised, keyed by nonce (failure never fails the quote). */
+  saveQuoteRecord(nonce: string, rec: QuoteRecord): Promise<void>;
 }
 
 // ---------------------------------------------------------------- HTTP mapping
@@ -431,6 +434,20 @@ export async function buildQuote(
     signature = toHex(signEd25519Quote(bytes, d.ed25519SignerSecret()));
   }
 
+  try {
+    await d.saveQuoteRecord(quote.nonce, {
+      source,
+      dest,
+      speed,
+      user,
+      recipient,
+      maxFeeAtomic: b.fastFeeMaxAtomic.toString(),
+      receiveMinAtomic: b.receiveAtomic.toString(),
+    });
+  } catch (e) {
+    console.error("[bridge/quote] quote record write failed:", e instanceof Error ? e.message : "unknown error");
+  }
+
   return {
     quote: serializeQuote(quote),
     signature,
@@ -523,5 +540,6 @@ export function defaultBuildQuoteDeps(feeReader?: FeeReader): BuildQuoteDeps {
     bridgeContractFor: envBridgeContractFor,
     evmSignerKey: loadEvmQuoteSignerKey,
     ed25519SignerSecret: loadEd25519QuoteSignerSecret,
+    saveQuoteRecord: saveQuoteRecordDefault,
   };
 }

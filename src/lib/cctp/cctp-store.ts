@@ -39,8 +39,11 @@ export interface BridgeMeta {
   dest: string;
   /** Source-chain address that sent the transaction (from the on-chain event). */
   user: string;
-  /** Destination recipient: the 0x address for EVM dests, else the mintRecipient bytes32 hex. */
-  recipient: string;
+  /** Destination wallet address (exact when the quote record was found); absent when unknown (Stellar dest, no quote record). */
+  recipient?: string;
+  /** recipient is a Solana token account (ATA), not the wallet. */
+  recipientIsTokenAccount?: boolean;
+  recipientUnknown?: boolean;
   speed: "fast" | "standard";
   quoteNonce: string;
   sendAtomic: string;

@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(toStatusView(record), { headers: NO_STORE });
   } catch (e) {
     if (e instanceof BridgeRegisterError) {
-      return NextResponse.json({ error: e.message }, { status: e.status, headers: NO_STORE });
+      return NextResponse.json({ error: e.message, code: e.code }, { status: e.status, headers: NO_STORE });
     }
     console.error("[bridge/register] failed:", e instanceof Error ? e.message : "unknown");
     return NextResponse.json({ error: "Could not register the transfer." }, { status: 503, headers: NO_STORE });

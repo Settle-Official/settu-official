@@ -67,6 +67,7 @@ function deps(over: Partial<BuildQuoteDeps> = {}): Partial<BuildQuoteDeps> {
     bridgeContractFor: (c) => contracts[c],
     evmSignerKey: () => TEST_ONLY_EVM_PRIVATE_KEY,
     ed25519SignerSecret: () => TEST_ONLY_ED25519_SEED,
+    saveQuoteRecord: async () => {},
     ...over,
   };
 }
@@ -611,4 +612,24 @@ test("a Redis failure reading the fee -> unavailable with the no-price copy, not
   assert.equal(r.code, "unavailable");
   assert.equal(r.error, QUOTE_UNAVAILABLE_MESSAGE);
   assert.equal(httpStatusFor(r.code), 503);
+});
+
+test("signed quote is recorded by nonce with recipient, speed, maxFee, receiveMin", async () => {
+  const saved: { nonce: string; rec: any }[] = [];
+  const r = ok(await buildQuote({ ...baseReq, speed: "fast" }, deps({
+    saveQuoteRecord: async (nonce, rec) => { saved.push({ nonce, rec }); },
+  })));
+  assert.equal(saved.length, 1);
+  assert.equal(saved[0].nonce, r.quote.nonce);
+  assert.equal(saved[0].rec.recipient, EVM_RECIPIENT);
+  assert.equal(saved[0].rec.speed, "fast");
+  assert.equal(saved[0].rec.source, "base");
+  assert.equal(saved[0].rec.dest, "arbitrum");
+  assert.equal(saved[0].rec.receiveMinAtomic, r.breakdown.receiveAtomic);
+  assert.equal(saved[0].rec.maxFeeAtomic, r.breakdown.fastFeeMaxAtomic);
+});
+
+test("a failing quote-record write does not fail the quote", async () => {
+  const r = await buildQuote(baseReq, deps({ saveQuoteRecord: async () => { throw new Error("redis down"); } }));
+  assert.ok(!("error" in r));
 });

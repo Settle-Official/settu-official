@@ -14,6 +14,22 @@ import { BRIDGE_CHAINS, type BridgeChainKey } from "./chains";
 import { bridgeContractFor } from "./contracts";
 import { sorobanRpc } from "../stellar/soroban-rpc";
 
+/** The tx isn't visible on the node yet (retryable). */
+export class TxNotIndexedError extends Error {
+  constructor() {
+    super("transaction not indexed yet");
+    this.name = "TxNotIndexedError";
+  }
+}
+
+/** The tx's event is malformed (permanent). */
+export class InvalidEventError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InvalidEventError";
+  }
+}
+
 export interface BridgedEvent {
   nonce: Hex;
   /** Source-chain address in native form (0x… or G…). */
@@ -35,9 +51,9 @@ export interface EvmLogLike {
 }
 
 export interface ReadEventDeps {
-  /** Logs of a successful tx, or null if not found / reverted. */
+  /** Logs of a successful tx; null if it reverted; throws TxNotIndexedError if not found. */
   evmLogs(chain: BridgeChainKey, txHash: string): Promise<EvmLogLike[] | null>;
-  /** Contract events of a successful Soroban tx, or null if not found / failed. */
+  /** Contract events of a successful Soroban tx; null if it failed; throws TxNotIndexedError if not found. */
   stellarEvents(txHash: string): Promise<xdr.ContractEvent[] | null>;
 }
 
@@ -75,7 +91,7 @@ export function decodeEvmBridged(logs: EvmLogLike[], contract: string): BridgedE
 }
 
 function to6(v: bigint, what: string): bigint {
-  if (v % BigInt(10) !== BigInt(0)) throw new Error(`Stellar ${what} ${v} is not divisible by 10 (7 -> 6 decimals)`);
+  if (v % BigInt(10) !== BigInt(0)) throw new InvalidEventError(`Stellar ${what} ${v} is not divisible by 10 (7 -> 6 decimals)`);
   return v / BigInt(10);
 }
 
@@ -136,12 +152,13 @@ export const defaultReadEventDeps: ReadEventDeps = {
       if (r.status !== "success") return null;
       return r.logs.map((l) => ({ address: l.address, topics: l.topics, data: l.data }));
     } catch (e) {
-      if (e instanceof Error && e.name === "TransactionReceiptNotFoundError") return null;
+      if (e instanceof Error && e.name === "TransactionReceiptNotFoundError") throw new TxNotIndexedError();
       throw e;
     }
   },
   async stellarEvents(txHash) {
     const res = await sorobanRpc("getTransaction", { hash: txHash });
+    if (res?.status === "NOT_FOUND") throw new TxNotIndexedError();
     if (res?.status !== "SUCCESS" || !res.resultMetaXdr) return null;
     return stellarContractEvents(res.resultMetaXdr);
   },
