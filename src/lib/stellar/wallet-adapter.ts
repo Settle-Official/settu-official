@@ -18,6 +18,7 @@ import { isMobileBrowser } from "@/lib/platform";
 import { warmSharedAppKit } from "@/lib/wallet/appkit";
 import { getSignClient } from "@/lib/wallet/sign-client";
 import { BLOCKED_NETWORK_HELP } from "@/lib/wallet/network-help";
+import { MAINNET_PASSPHRASE, resolveSignOptions } from "./sign-options";
 import {
   connectStellarViaWalletConnect,
   signXdrViaWalletConnect,
@@ -31,8 +32,7 @@ export interface StellarWallet {
   isConnected: boolean;
 }
 
-export const NETWORK_PASSPHRASE =
-  "Public Global Stellar Network ; September 2015";
+export const NETWORK_PASSPHRASE = MAINNET_PASSPHRASE;
 
 type Kit = typeof import("@creit.tech/stellar-wallets-kit").StellarWalletsKit;
 
@@ -574,19 +574,26 @@ export async function onWalletStateChange(
   });
 }
 
+/**
+ * `networkPassphrase` is optional and defaults to mainnet (NETWORK_PASSPHRASE):
+ * the offramp passes nothing and is unchanged. The admin console passes the
+ * passphrase its owner transaction was built for.
+ */
 export async function signTransaction(
   xdr: string,
   address?: string,
+  networkPassphrase: string = NETWORK_PASSPHRASE,
 ): Promise<string> {
+  const opts = resolveSignOptions(networkPassphrase);
   // A mobile session paired outside the kit has to sign through the same
   // session; the kit knows nothing about it and would fail to find a wallet.
   if (directSession) {
-    return signXdrViaWalletConnect(directSession.topic, xdr);
+    return signXdrViaWalletConnect(directSession.topic, xdr, opts.wcChainId);
   }
 
   const kit = await getKit();
   const { signedTxXdr } = await kit.signTransaction(xdr, {
-    networkPassphrase: NETWORK_PASSPHRASE,
+    networkPassphrase: opts.networkPassphrase,
     address,
   });
   return signedTxXdr;

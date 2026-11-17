@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   bridgeCapsGet,
   bridgeCapsPost,
+  bridgeCapsSubmitPost,
   bridgeFeeGet,
   bridgeFeePut,
   bridgeListGet,
@@ -40,6 +41,7 @@ const ALL_EXPLODE: Partial<BridgeAdminDeps> = {
   scheduleDrive: explode,
   recordAction: explode,
   relayerBalances: explode,
+  submitStellar: explode,
 };
 
 const ok = (rows: Partial<ChainLimitsRow>[]): ChainLimitsRow[] => rows as ChainLimitsRow[];
@@ -56,6 +58,7 @@ test("every bridge admin route answers 401 without admin auth (real isAuthorised
       bridgeListGet(req(), null, ALL_EXPLODE),
       bridgeRevivePost(req(), { id: "0xabc", operator: "ann" }, ALL_EXPLODE),
       bridgeRelayersGet(req(), ALL_EXPLODE),
+      bridgeCapsSubmitPost(req(), { signedXdr: "AAAA" }, ALL_EXPLODE),
     ];
     for (const r of await Promise.all(calls)) {
       assert.equal(r.status, 401);
@@ -70,6 +73,7 @@ test("every bridge admin route answers 401 without admin auth (real isAuthorised
 function authed(over: Partial<BridgeAdminDeps> = {}): Partial<BridgeAdminDeps> {
   return {
     isAdmin: () => true,
+    recordAction: async () => {},
     getFeeBps: async (s) => (s === "standard" ? 30 : 60),
     feeAudit: async () => [],
     envCapBps: () => 100,
@@ -197,6 +201,7 @@ test("GET caps serialises bigints and passes not_deployed / not_available rows t
     status: "ok",
     label: "Base",
     family: "evm",
+    nativeSymbol: "ETH",
     maxFeeBps: "100",
     maxNetworkFee: "1",
     maxNativeFee: "2",
@@ -210,7 +215,7 @@ test("POST caps: OwnerTxError → 400 with its code; bad value → 400", async (
   const { OwnerTxError } = await import("../bridge/owner-txs");
   const r = await bridgeCapsPost(
     req(),
-    { chain: "base", limit: "maxFeeBps", value: "20", ownerAddress: "0x1" },
+    { chain: "base", limit: "maxFeeBps", value: "20", ownerAddress: "0x1", operator: "Ann" },
     authed({
       buildSetLimitTx: async () => {
         throw new OwnerTxError("cap_below_fee", "Lower the bridge fee first");
@@ -222,13 +227,13 @@ test("POST caps: OwnerTxError → 400 with its code; bad value → 400", async (
 
   const bad = await bridgeCapsPost(
     req(),
-    { chain: "base", limit: "maxFeeBps", value: "1.5", ownerAddress: "0x1" },
+    { chain: "base", limit: "maxFeeBps", value: "1.5", ownerAddress: "0x1", operator: "Ann" },
     authed({ buildSetLimitTx: explode }),
   );
   assert.equal(bad.status, 400);
   const badChain = await bridgeCapsPost(
     req(),
-    { chain: "nope", limit: "maxFeeBps", value: "1", ownerAddress: "0x1" },
+    { chain: "nope", limit: "maxFeeBps", value: "1", ownerAddress: "0x1", operator: "Ann" },
     authed({ buildSetLimitTx: explode }),
   );
   assert.equal(badChain.status, 400);
@@ -237,7 +242,7 @@ test("POST caps: OwnerTxError → 400 with its code; bad value → 400", async (
 test("POST caps: unexpected failure → 503 without leaking the message", async () => {
   const r = await bridgeCapsPost(
     req(),
-    { chain: "base", limit: "maxFeeBps", value: "80", ownerAddress: "0x1" },
+    { chain: "base", limit: "maxFeeBps", value: "80", ownerAddress: "0x1", operator: "Ann" },
     authed({
       buildSetLimitTx: async () => {
         throw new Error("secret rpc url https://key@node");
@@ -379,4 +384,66 @@ test("relayer balances: unset → not_configured with no RPC; failures are per-r
   assert.equal(by.base.decimals, 18);
   assert.equal(by.polygon.status, "error");
   assert.equal(rpc, 6);
+});
+
+test("POST caps records a bridge-limit-build audit entry; requires an operator", async () => {
+  const entries: unknown[] = [];
+  const r = await bridgeCapsPost(
+    req(),
+    { chain: "base", limit: "maxNativeFee", value: "123", ownerAddress: "0x1", operator: "Ann" },
+    authed({
+      buildSetLimitTx: async () => ({ family: "evm", chainId: 8453, to: "0x1" as never, data: "0x" }),
+      recordAction: async (e) => {
+        entries.push(e);
+      },
+    }),
+  );
+  assert.equal(r.status, 200);
+  assert.deepEqual(entries, [
+    { action: "bridge-limit-build", orderId: "base", operator: "Ann", outcome: "built", detail: "maxNativeFee=123" },
+  ]);
+
+  const anon = await bridgeCapsPost(
+    req(),
+    { chain: "base", limit: "maxNativeFee", value: "123", ownerAddress: "0x1" },
+    authed({ buildSetLimitTx: explode }),
+  );
+  assert.equal(anon.status, 400);
+  assert.equal((anon.body as { code: string }).code, "operator_required");
+});
+
+test("POST caps/submit sends the signed XDR to the configured (testnet-aware) Stellar RPC", async () => {
+  const { CCTP_CONFIG } = await import("../cctp/constants");
+  const sent: [string, string][] = [];
+  const r = await bridgeCapsSubmitPost(
+    req(),
+    { signedXdr: "AAAAsigned" },
+    authed({
+      stellarRpcUrl: () => CCTP_CONFIG.stellarRpcUrl,
+      submitStellar: async (url, x) => {
+        sent.push([url, x]);
+        return { hash: "ab".repeat(32), status: "PENDING" };
+      },
+    }),
+  );
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.body, { hash: "ab".repeat(32), status: "PENDING" });
+  assert.deepEqual(sent, [[CCTP_CONFIG.stellarRpcUrl, "AAAAsigned"]]);
+});
+
+test("POST caps/submit: default RPC url is CCTP_CONFIG.stellarRpcUrl; rejection → 400; bad body → 400", async () => {
+  const { CCTP_CONFIG } = await import("../cctp/constants");
+  const { defaultBridgeAdminDeps } = await import("./bridge-admin");
+  assert.equal(defaultBridgeAdminDeps().stellarRpcUrl(), CCTP_CONFIG.stellarRpcUrl);
+
+  const rejected = await bridgeCapsSubmitPost(
+    req(),
+    { signedXdr: "AAAA" },
+    authed({ submitStellar: async () => ({ hash: "x", status: "ERROR" }) }),
+  );
+  assert.equal(rejected.status, 400);
+  assert.equal((rejected.body as { code: string }).code, "submit_failed");
+
+  const bad = await bridgeCapsSubmitPost(req(), { signedXdr: "" }, authed({ submitStellar: explode }));
+  assert.equal(bad.status, 400);
 });

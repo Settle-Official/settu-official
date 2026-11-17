@@ -33,7 +33,8 @@ export const OWNER_LIMITS: readonly OwnerLimit[] = ["maxFeeBps", "maxNetworkFee"
 
 export type OwnerTx =
   | { family: "evm"; chainId: number; to: Address; data: Hex }
-  | { family: "stellar"; xdr: string };
+  /** networkPassphrase: what the XDR was built for; the browser wallet must sign with it. */
+  | { family: "stellar"; xdr: string; networkPassphrase: string };
 
 export class OwnerTxError extends Error {
   readonly code: string;
@@ -242,6 +243,7 @@ export async function buildSetLimitTx(
     return {
       family: "stellar",
       xdr: await buildAndAssemble(server, account, op, "This limit change can't be prepared (simulation failed)."),
+      networkPassphrase: CCTP_CONFIG.stellarNetworkPassphrase,
     };
   } catch (e) {
     if (e instanceof BuildTxError) throw new OwnerTxError(e.code, e.message);

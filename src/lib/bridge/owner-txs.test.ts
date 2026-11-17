@@ -171,6 +171,9 @@ test("Stellar maxFeeBps builds an unsigned simulated invoke of set_max_fee_bps(u
   );
   assert.equal(tx.family, "stellar");
   if (tx.family !== "stellar") return;
+  // The browser wallet must sign for the network the XDR was built for.
+  const { CCTP_CONFIG } = await import("../cctp/constants");
+  assert.equal(tx.networkPassphrase, CCTP_CONFIG.stellarNetworkPassphrase);
   const env = xdr.TransactionEnvelope.fromXDR(tx.xdr, "base64");
   assert.equal(env.v1().signatures().length, 0); // unsigned
   const built = StellarSdk.TransactionBuilder.fromXDR(

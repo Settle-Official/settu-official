@@ -85,9 +85,11 @@ async function focusWallet(topic: string): Promise<void> {
   }
 }
 
+/** `chainId` defaults to pubnet; the offramp passes nothing and is unchanged. */
 export async function signXdrViaWalletConnect(
   topic: string,
   xdr: string,
+  chainId: string = CHAIN,
 ): Promise<string> {
   const client = await getSignClient();
 
@@ -99,7 +101,7 @@ export async function signXdrViaWalletConnect(
 
   const pending = client.request<{ signedXDR: string }>({
     topic,
-    chainId: CHAIN,
+    chainId,
     request: { method: SIGN_METHOD, params: { xdr } },
   });
   await focusWallet(topic);

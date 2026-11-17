@@ -20,6 +20,7 @@ import { createPublicClient, getAddress, http, isAddress } from "viem";
 import { isAuthorisedAdmin } from "./auth";
 import { recordAdminAction, type AuditEntry } from "./audit";
 import { fetchHorizonAccount } from "../bridge/address-live";
+import { CCTP_CONFIG } from "../cctp/constants";
 import { toStatusView, type BridgeStatusView } from "../bridge/bridge-store";
 import { BRIDGE_CHAINS, type BridgeChainKey } from "../bridge/chains";
 import {
@@ -84,6 +85,10 @@ export interface BridgeAdminDeps {
   scheduleDrive(id: string): Promise<void>;
   recordAction(entry: Omit<AuditEntry, "at">): Promise<void>;
   relayerBalances(): Promise<RelayerRow[]>;
+  /** Soroban RPC for owner-tx submits: CCTP_CONFIG.stellarRpcUrl (testnet-aware). */
+  stellarRpcUrl(): string;
+  /** Submit a signed XDR as-is (no re-serialisation). */
+  submitStellar(rpcUrl: string, signedXdr: string): Promise<{ hash: string; status: string }>;
 }
 
 const UNAUTHORIZED: AdminResult = { status: 401, body: { error: "Unauthorized", code: "unauthorized" } };
@@ -189,7 +194,7 @@ export async function bridgeFeePut(
 /** Adds label/family so the client never imports the chain registry (server env). */
 function serialiseRow(r: ChainLimitsRow): Record<string, unknown> {
   const c = BRIDGE_CHAINS[r.chain];
-  const meta = { label: c?.label ?? r.chain, family: c?.family };
+  const meta = { label: c?.label ?? r.chain, family: c?.family, nativeSymbol: c?.nativeSymbol };
   if (r.status !== "ok") return { ...r, ...meta };
   return {
     ...r,
@@ -225,7 +230,7 @@ export async function bridgeCapsGet(request: NextRequest, overrides: Partial<Bri
   }
 }
 
-/** Body: { chain, limit, value: decimal string (atomic units / bps), ownerAddress }. */
+/** Body: { chain, limit, value: decimal string (atomic units / bps), ownerAddress, operator }. Audited. */
 export async function bridgeCapsPost(
   request: NextRequest,
   body: unknown,
@@ -243,13 +248,49 @@ export async function bridgeCapsPost(
     return fail(400, "invalid_value", "The value must be a whole number in the contract's units.");
   }
   if (typeof ownerAddress !== "string" || !ownerAddress) return fail(400, "invalid_owner", "Connect the owner wallet.");
+  const operator = operatorOf(body);
+  if (!operator) return OPERATOR_REQUIRED;
+  const audit = (outcome: string) =>
+    d.recordAction({ action: "bridge-limit-build", orderId: chain, operator, outcome, detail: `${limit}=${value}` });
   try {
     const tx = await d.buildSetLimitTx(chain as BridgeChainKey, limit as OwnerLimit, BigInt(value), ownerAddress);
+    await audit("built");
     return { status: 200, body: tx };
   } catch (e) {
-    if (e instanceof OwnerTxError) return fail(400, e.code, e.message);
+    if (e instanceof OwnerTxError) {
+      await audit(`refused: ${e.code}`).catch(() => {});
+      return fail(400, e.code, e.message);
+    }
     logFailure("caps POST", e);
     return fail(503, "unavailable", "Couldn't prepare the transaction right now — try again in a moment.");
+  }
+}
+
+/**
+ * Body: { signedXdr } — the owner-signed Stellar limit change, submitted to
+ * the configured (testnet-aware) Soroban RPC. Admin-only; the offramp's
+ * public submit route stays mainnet-only and untouched.
+ */
+export async function bridgeCapsSubmitPost(
+  request: NextRequest,
+  body: unknown,
+  overrides: Partial<BridgeAdminDeps> = {},
+): Promise<AdminResult> {
+  const d = withDefaults(overrides);
+  if (!d.isAdmin(request)) return UNAUTHORIZED;
+  const signedXdr = isRecord(body) && typeof body.signedXdr === "string" ? body.signedXdr.trim() : "";
+  if (!signedXdr || !/^[A-Za-z0-9+/=]+$/.test(signedXdr)) {
+    return fail(400, "invalid_request", "Missing signed transaction.");
+  }
+  try {
+    const r = await d.submitStellar(d.stellarRpcUrl(), signedXdr);
+    if (r.status === "ERROR") {
+      return fail(400, "submit_failed", "The network rejected the transaction.");
+    }
+    return { status: 200, body: { hash: r.hash, status: r.status } };
+  } catch (e) {
+    logFailure("caps submit", e);
+    return fail(503, "unavailable", "Couldn't submit the transaction right now — try again in a moment.");
   }
 }
 
@@ -475,6 +516,23 @@ async function solanaBalanceDefault(address: string): Promise<bigint> {
   return BigInt(await new Connection(url, "confirmed").getBalance(new PublicKey(address)));
 }
 
+async function submitStellarDefault(rpcUrl: string, signedXdr: string): Promise<{ hash: string; status: string }> {
+  const res = await fetch(rpcUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "sendTransaction", params: { transaction: signedXdr } }),
+    signal: AbortSignal.timeout(RPC_TIMEOUT_MS),
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`Soroban RPC HTTP ${res.status}`);
+  const json = (await res.json()) as { result?: { hash?: string; status?: string }; error?: { message?: string } };
+  if (json.error || !json.result?.hash || !json.result.status) {
+    throw new Error(`Soroban sendTransaction failed: ${json.error?.message ?? "no hash"}`);
+  }
+  if (json.result.status === "ERROR") console.error("[admin/bridge] owner tx rejected:", JSON.stringify(json.result));
+  return { hash: json.result.hash, status: json.result.status };
+}
+
 async function getBridgeDefault(id: string): Promise<AdminBridgeRow | null> {
   const r = await getCctpTransfer(id);
   return r && r.direction === "bridge" && r.bridge ? toAdminRow(r) : null;
@@ -495,6 +553,8 @@ export function defaultBridgeAdminDeps(): BridgeAdminDeps {
     revive: async (id) => (await import("../cctp/revive")).reviveStuckTransfer(id),
     scheduleDrive: (id) => scheduleDrive(id, 0),
     recordAction: recordAdminAction,
+    stellarRpcUrl: () => CCTP_CONFIG.stellarRpcUrl,
+    submitStellar: submitStellarDefault,
     relayerBalances: () =>
       readRelayerBalances({
         env: (k) => process.env[k],

@@ -67,6 +67,7 @@ interface CapRow {
   chain: string;
   label: string;
   family: Family;
+  nativeSymbol?: string;
   status: "ok" | "not_deployed" | "not_available" | "error";
   maxFeeBps?: string;
   maxNetworkFee?: string;
@@ -103,7 +104,7 @@ interface RelayerRow {
 }
 type OwnerTx =
   | { family: "evm"; chainId: number; to: `0x${string}`; data: `0x${string}` }
-  | { family: "stellar"; xdr: string };
+  | { family: "stellar"; xdr: string; networkPassphrase: string };
 
 /** "pending" | "signing" | sent hash | error message, per chain. */
 type Step = { state: "signing" } | { state: "sent"; hash: string } | { state: "error"; message: string };
@@ -202,15 +203,16 @@ export function BridgeAdminPanel({ operator }: { readonly operator: string }) {
   const signOne = async (row: CapRow, limit: Limit, value: bigint, owner: string): Promise<string> => {
     const tx = await api<OwnerTx>("/api/admin/bridge/caps", {
       method: "POST",
-      body: JSON.stringify({ chain: row.chain, limit, value: value.toString(), ownerAddress: owner }),
+      body: JSON.stringify({ chain: row.chain, limit, value: value.toString(), ownerAddress: owner, operator }),
     });
     if (tx.family === "evm") {
       await evm.switchChain(tx.chainId);
       const [hash] = await evm.signAndSendCalls([{ to: tx.to, data: tx.data }], tx.chainId);
       return hash;
     }
-    const signedXdr = await signStellarTransaction(tx.xdr, owner);
-    const sent = await api<{ hash: string }>("/api/offramp/bridge/submit-soroban", {
+    // Sign for the network the server built it for (testnet on testnet).
+    const signedXdr = await signStellarTransaction(tx.xdr, owner, tx.networkPassphrase);
+    const sent = await api<{ hash: string }>("/api/admin/bridge/caps/submit", {
       method: "POST",
       body: JSON.stringify({ signedXdr }),
     });
@@ -232,6 +234,7 @@ export function BridgeAdminPanel({ operator }: { readonly operator: string }) {
   const signFamily = async (family: Family) => {
     setError(null);
     if (!caps) return;
+    if (!named) return setError("Enter your name at the top first — every action is attributed.");
     const parsed = percentToBps(newCap);
     if (!parsed.ok) return setError(parsed.error);
     if (parsed.bps < highestFee) return setError("Lower the bridge fee first");
@@ -265,6 +268,7 @@ export function BridgeAdminPanel({ operator }: { readonly operator: string }) {
 
   const signLimit = async (row: CapRow) => {
     setError(null);
+    if (!named) return setError("Enter your name at the top first — every action is attributed.");
     const parsed = parseAtomic(limitEdit.value, limitDecimals(row.family, limitEdit.limit));
     if (!parsed.ok) return setError(parsed.error);
     setSigning(row.family);
@@ -475,7 +479,8 @@ export function BridgeAdminPanel({ operator }: { readonly operator: string }) {
                         network {formatAtomic(row.maxNetworkFee!, limitDecimals(row.family, "maxNetworkFee"))} USDC
                       </span>
                       <span className={TEXT}>
-                        native {formatAtomic(row.maxNativeFee!, limitDecimals(row.family, "maxNativeFee"))}
+                        native {formatAtomic(row.maxNativeFee!, limitDecimals(row.family, "maxNativeFee"))}{" "}
+                        {row.nativeSymbol ?? ""}
                       </span>
                       <button
                         type="button"
@@ -519,13 +524,13 @@ export function BridgeAdminPanel({ operator }: { readonly operator: string }) {
                       className={`${FIELD} bg-[#1e1c1c]`}
                     >
                       <option value="maxNetworkFee">Max network fee (USDC)</option>
-                      <option value="maxNativeFee">Max native fee</option>
+                      <option value="maxNativeFee">Max native fee ({row.nativeSymbol ?? "native"})</option>
                     </select>
                     <input
                       inputMode="decimal"
                       value={limitEdit.value}
                       onChange={(e) => setLimitEdit((l) => ({ ...l, value: e.target.value }))}
-                      placeholder="New value"
+                      placeholder={limitEdit.limit === "maxNativeFee" ? `New value (${row.nativeSymbol ?? "native"})` : "New value (USDC)"}
                       style={BORDER}
                       className={`${FIELD} w-[160px]`}
                     />

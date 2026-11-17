@@ -38,3 +38,11 @@ test("parseAtomic / formatAtomic round-trip, strict on excess decimals", () => {
   assert.equal(formatAtomic("0", 7), "0");
   assert.equal(formatAtomic("123", 7), "0.0000123");
 });
+
+test("limitDecimals pinned to the contracts' units", async () => {
+  const { limitDecimals } = await import("./admin-units");
+  assert.equal(limitDecimals("evm", "maxNetworkFee"), 6); // USDC atomic
+  assert.equal(limitDecimals("evm", "maxNativeFee"), 18); // wei
+  assert.equal(limitDecimals("stellar", "maxNetworkFee"), 7); // max_network_fee: 7-dp USDC (Ruling J)
+  assert.equal(limitDecimals("stellar", "maxNativeFee"), 7); // max_native_fee: stroops
+});
