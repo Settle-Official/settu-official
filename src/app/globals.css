@@ -1,4 +1,9 @@
 @import "tailwindcss";
+/* A long-running dev server served CSS without the bridge screens' classes
+   (they were added after it started); naming the folders keeps them in the
+   scan. Harmless alongside auto-detection. */
+@source "../components/bridge";
+@source "./app/bridge";
 
 /*
  * Theme tokens. The product is dark-only — the light theme and its toggle
