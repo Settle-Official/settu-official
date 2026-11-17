@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { BRIDGE_CHAINS, type BridgeChainKey } from "@/lib/bridge/chains";
 import { BridgeRegisterError, registerBridge, toStatusView } from "@/lib/bridge/bridge-store";
+import { scheduleDrive } from "@/lib/bridge/schedule";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,7 +11,9 @@ const NO_STORE = { "Cache-Control": "no-store" };
 /**
  * POST /api/bridge/register { chain, txHash } -> BridgeStatusView.
  * Idempotent. Only the chain and hash are read from the client; every
- * amount comes from the on-chain event.
+ * amount comes from the on-chain event. Registration schedules server-side
+ * driving (QStash, src/lib/bridge/schedule.ts), so the bridge completes even
+ * if the user closes the app.
  */
 export async function POST(request: NextRequest) {
   let body: unknown;
@@ -30,7 +33,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid request." }, { status: 400, headers: NO_STORE });
   }
   try {
-    const record = await registerBridge(chain as BridgeChainKey, txHash);
+    const record = await registerBridge(chain as BridgeChainKey, txHash, (id) => scheduleDrive(id));
     return NextResponse.json(toStatusView(record), { headers: NO_STORE });
   } catch (e) {
     if (e instanceof BridgeRegisterError) {
