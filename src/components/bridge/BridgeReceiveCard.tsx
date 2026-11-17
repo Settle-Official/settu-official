@@ -36,7 +36,7 @@ export function BridgeReceiveCard({
   const native = BRIDGE_CHAINS[source];
 
   return (
-    <div className="rounded-[20px] bg-[#2b2a2a] max-[720px]:rounded-[14px]">
+    <div className="rounded-[20px] bg-[#232222] max-[720px]:rounded-[14px]">
       <div className="flex items-center justify-between gap-[20px] px-[30px] py-[20px] font-[family-name:var(--font-inter)] text-[16px] leading-[19px] text-white max-[720px]:gap-[10px] max-[720px]:px-[16px] max-[720px]:py-[16px]">
         <span className="flex min-w-0 flex-col gap-[4px]">
           <span className="text-[13px] leading-[16px] text-[#a19d9d] max-[720px]:text-[12px] max-[720px]:leading-[15px]">

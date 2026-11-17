@@ -145,7 +145,7 @@ export function BridgePanel({
 
       {/* Two columns on desktop: the From/To cards on the left, the speed,
           fee, receive card and button on the right. One column below 1100px. */}
-      <div className="grid grid-cols-2 items-start gap-x-[40px] gap-y-[30px] max-[1100px]:grid-cols-1 max-[720px]:gap-y-[24px]">
+      <div className="grid grid-cols-2 items-start gap-x-[64px] gap-y-[30px] max-[1300px]:gap-x-[40px] max-[1100px]:grid-cols-1 max-[720px]:gap-y-[24px]">
         <div>
           <BridgeLegCard
             side="From"
@@ -292,7 +292,7 @@ export function BridgePanel({
           </BridgeLegCard>
         </div>
 
-        <div className="flex flex-col gap-[30px] max-[720px]:gap-[24px]">
+        <div className="flex flex-col gap-[30px] rounded-[20px] bg-[#2b2a2a] p-[24px] max-[720px]:gap-[24px] max-[720px]:rounded-[14px] max-[720px]:p-[16px]">
           <SpeedToggle
             label="Transfer speed"
             value={state.speed}
