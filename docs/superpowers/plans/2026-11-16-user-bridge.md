@@ -572,6 +572,44 @@ Each contract implements the same logic (spec §5). The function is `bridge(quot
 
 ---
 
+### Task 17a: Admin bridge explorer (live)
+
+This was added at the owner's request on 2026-11-17: an admin-only page that shows every bridge transaction live, like an indexer.
+
+**Files:**
+- Modify: `src/lib/bridge/bridge-store.ts`. On create, also `ZADD bridge:index <createdAt> <id>`.
+- Create: `src/lib/bridge/explorer.ts`:
+  - `listBridges({ cursor?, limit = 50, status?, source?, dest?, speed?, from?, to?, q? }): Promise<{ rows: ExplorerRow[]; nextCursor?: string }>` reads the index newest-first and MGETs the records. `q` matches the tx hash, user, or recipient (exact or prefix).
+  - `bridgeTotals(window: "24h" | "7d"): Promise<{ count; volumeAtomic; feesAtomic; inProgress; failedOrStuck }>`.
+- Create: `src/app/api/admin/bridge/explorer/route.ts` (GET, guarded by `isAuthorisedAdmin`, `Cache-Control: no-store`).
+- Create: `src/app/admin/bridge/page.tsx`, `src/components/admin/BridgeExplorer.tsx`.
+- Modify: `src/lib/bridge/event-sweep.ts` (Task 15). Swept bridges are indexed too.
+- Test: `src/lib/bridge/explorer.test.ts`, plus an auth-guard test for the route.
+
+**Interfaces:**
+- `ExplorerRow = BridgeStatusView & { createdAt; speed; settuFeeAtomic; networkFeeAtomic; nativeFeeAtomic; attempts; lastError?; stuck: boolean }`.
+  - `stuck` is true when the bridge isn't final and was last updated more than 30 minutes ago.
+  - Addresses shown are the user's real source and destination addresses, not the bytes32 mint recipient.
+
+**UI** (existing admin console style):
+- **Summary strip:** 24h and 7d count, volume, fees, in progress, failed or stuck.
+- **Table, newest first:** time, route, speed, sender → recipient (short, with copy), sent / received / fee, a status pill (Submitted, Verifying, Delivering, Completed, Failed, Stuck), source and dest tx explorer links, age.
+- **Row detail:** full fee breakdown, timeline (burned, attested, minted), last error, attempts, and the existing Revive / Retry mint actions from Task 17.
+- **Filters:** status, route, speed, date. **Search:** by tx hash or address.
+- **Live:** poll the explorer endpoint every **10 s only while `document.visibilityState === "visible"`**. New rows animate in at the top. **No SSE.**
+
+- [ ] **Step 1: Failing tests:**
+  - The index is ordered newest-first.
+  - Each filter narrows the results.
+  - `q` finds a row by source tx hash and by recipient.
+  - `stuck` flips at 30 minutes.
+  - Totals sum only the window.
+  - The route returns 401 without admin auth.
+- [ ] **Step 2:** FAIL. **Step 3:** Implement. **Step 4:** PASS. Check the page manually in the dev server against the admin console style.
+- [ ] **Step 5:** Commit: `feat(bridge): admin bridge explorer`.
+
+---
+
 ## Phase 5: User interface
 
 ### Task 18: Bridge route and navigation
