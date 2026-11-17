@@ -18,6 +18,27 @@ export interface PublishRequest {
   body: { id: string; attempt: number };
   delay: number;
   deduplicationId: string;
+  /**
+   * Register path: no client-side HTTP retries and a REGISTER_PUBLISH_TIMEOUT_MS
+   * cap, so a degraded QStash can't stall registration (the sweep is the
+   * backstop). Drive-route follow-ups leave this unset (SDK defaults).
+   */
+  fast?: boolean;
+}
+
+export const REGISTER_PUBLISH_TIMEOUT_MS = 3_000;
+
+/** Reject after `ms` (the underlying call isn't cancelled, just no longer awaited). */
+export async function withTimeout<T>(p: Promise<T>, ms: number, what = "operation"): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${what} timed out after ${ms} ms`)), ms);
+  });
+  try {
+    return await Promise.race([p, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export interface ScheduleDeps {
@@ -36,13 +57,18 @@ export const defaultScheduleDeps: ScheduleDeps = {
   baseUrl: () => process.env.APP_BASE_URL?.trim() || undefined,
   async publish(req) {
     // devMode false: never swap in the public dev-server keys via QSTASH_DEV.
-    const client = new Client({ token: process.env.QSTASH_TOKEN!.trim(), devMode: false });
-    await client.publishJSON({
+    const client = new Client({
+      token: process.env.QSTASH_TOKEN!.trim(),
+      devMode: false,
+      ...(req.fast ? { retry: { retries: 0 } } : {}),
+    });
+    const sent = client.publishJSON({
       url: req.url,
       body: req.body,
       delay: req.delay,
       deduplicationId: req.deduplicationId,
     });
+    await (req.fast ? withTimeout(sent, REGISTER_PUBLISH_TIMEOUT_MS, "QStash publish") : sent);
   },
   log: (m) => console.warn(m),
 };
@@ -58,6 +84,7 @@ export async function scheduleDrive(
   id: string,
   attempt: number = 0,
   deps: ScheduleDeps = defaultScheduleDeps,
+  opts: { fast?: boolean } = {},
 ): Promise<void> {
   const delay = DRIVE_DELAYS_S[attempt];
   if (delay === undefined) return; // ladder done; the 5-minute sweep takes over
@@ -77,5 +104,11 @@ export async function scheduleDrive(
     body: { id, attempt },
     delay,
     deduplicationId: `bridge-drive-${id}-${attempt}`,
+    ...(opts.fast ? { fast: true } : {}),
   });
+}
+
+/** `onRegistered` for the register route and the sweep: first rung, fast publish. */
+export function scheduleDriveOnRegister(id: string, deps: ScheduleDeps = defaultScheduleDeps): Promise<void> {
+  return scheduleDrive(id, 0, deps, { fast: true });
 }

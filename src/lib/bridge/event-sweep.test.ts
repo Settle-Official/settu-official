@@ -7,6 +7,9 @@ import { BridgeRegisterError, registerBridge } from "./bridge-store";
 import type { BridgeChainKey } from "./chains";
 import { readBridgedEvent } from "./read-source-event";
 import {
+  CONFIRMATIONS,
+  MAX_ADVANCES_PER_RUN,
+  OVERLAP_BLOCKS,
   EVM_CHUNK_BLOCKS,
   FIRST_RUN_LOOKBACK,
   MAX_CHUNKS_PER_CHAIN,
@@ -51,6 +54,7 @@ interface World {
   logs: string[];
   latest: Record<string, bigint>;
   logsFor: (chain: BridgeChainKey, from: bigint, to: bigint) => EvmSweepLog[];
+  runs: number;
 }
 
 function world(): World {
@@ -63,6 +67,7 @@ function world(): World {
     logs: [],
     latest: {},
     logsFor: () => [],
+    runs: 0,
   };
 }
 
@@ -108,6 +113,7 @@ function sweepDeps(w: World, over: Partial<SweepDeps> = {}): SweepDeps {
       await registerBridge(chain, hash, async () => {}, storeDeps);
     },
     listPending: async () => [...w.pending],
+    nextAdvanceRun: async () => w.runs++,
     advance: async (id): Promise<CctpStatus> => {
       w.calls.push(`advance:${id}`);
       w.advanced.push(id);
@@ -122,6 +128,8 @@ test("bounds are as documented", () => {
   assert.equal(EVM_CHUNK_BLOCKS, 2000);
   assert.equal(FIRST_RUN_LOOKBACK, 2000);
   assert.ok(MAX_CHUNKS_PER_CHAIN >= 1 && MAX_CHUNKS_PER_CHAIN <= 5);
+  assert.deepEqual(CONFIRMATIONS, { ethereum: 12, base: 30, optimism: 30, arbitrum: 240, polygon: 128, avalanche: 5 });
+  assert.equal(OVERLAP_BLOCKS, 50);
 });
 
 test("Review focus 4: Bridged event with no Redis record is created and advanced; a second sweep creates it once", async () => {
@@ -154,13 +162,13 @@ test("same tx seen twice in one run registers once", async () => {
   assert.equal(w.calls.filter((c) => c.startsWith("register:")).length, 1);
 });
 
-test("first run (no cursor) starts at latest - 2000; cursor set to the last block processed", async () => {
+test("first run (no cursor) starts at confirmedHead - 2000 and stops at the confirmed head", async () => {
   const w = world();
-  w.latest.base = BigInt(10_000);
+  w.latest.base = BigInt(10_000); // base CONFIRMATIONS 30 -> head 9970
   await sweepBridgedEvents(sweepDeps(w));
   const scans = w.calls.filter((c) => c.startsWith("logs:"));
-  assert.deepEqual(scans, ["logs:base:8000-9999", "logs:base:10000-10000"]);
-  assert.equal(w.cursors.get("base"), "10000");
+  assert.deepEqual(scans, ["logs:base:7970-9969", "logs:base:9970-9970"]);
+  assert.equal(w.cursors.get("base"), "9970");
 });
 
 test("resumes from cursor + 1, at most MAX_CHUNKS_PER_CHAIN chunks per run", async () => {
@@ -170,17 +178,74 @@ test("resumes from cursor + 1, at most MAX_CHUNKS_PER_CHAIN chunks per run", asy
   await sweepBridgedEvents(sweepDeps(w));
   const scans = w.calls.filter((c) => c.startsWith("logs:"));
   assert.equal(scans.length, MAX_CHUNKS_PER_CHAIN);
-  assert.equal(scans[0], "logs:base:1001-3000");
-  assert.equal(w.cursors.get("base"), String(1000 + MAX_CHUNKS_PER_CHAIN * 2000));
+  assert.equal(scans[0], "logs:base:951-2950"); // overlap: cursor - 50 + 1
+  assert.equal(w.cursors.get("base"), String(950 + MAX_CHUNKS_PER_CHAIN * 2000));
 });
 
-test("caught up: cursor == latest -> no scan, cursor untouched", async () => {
+test("caught up: confirmed head <= cursor -> no scan, cursor untouched", async () => {
+  for (const cursor of ["9970", "10000"]) {
+    const w = world();
+    w.cursors.set("base", cursor);
+    w.latest.base = BigInt(10_000); // head 9970
+    await sweepBridgedEvents(sweepDeps(w));
+    assert.equal(w.calls.filter((c) => c.startsWith("logs:")).length, 0, cursor);
+    assert.equal(w.calls.filter((c) => c.startsWith("cursor:")).length, 0, cursor);
+  }
+});
+
+test("blocks within CONFIRMATIONS of the head are not scanned and the cursor doesn't pass them", async () => {
   const w = world();
-  w.cursors.set("base", "10000");
-  w.latest.base = BigInt(10_000);
-  await sweepBridgedEvents(sweepDeps(w));
-  assert.equal(w.calls.filter((c) => c.startsWith("logs:")).length, 0);
-  assert.equal(w.calls.filter((c) => c.startsWith("cursor:")).length, 0);
+  w.cursors.set("base", "9000");
+  w.latest.base = BigInt(10_000); // head 9970
+  const AT = BigInt(9_980); // event inside the unconfirmed tail
+  w.logsFor = (_c, from, to) => (from <= AT && AT <= to ? [evmLog()] : []);
+  const r1 = await sweepBridgedEvents(sweepDeps(w));
+  assert.equal(r1.created, 0);
+  for (const c of w.calls.filter((x) => x.startsWith("logs:"))) {
+    assert.ok(BigInt(c.split("-")[1]) <= BigInt(9_970), c);
+  }
+  assert.equal(w.cursors.get("base"), "9970");
+
+  w.latest.base = BigInt(10_100); // head 10070: now confirmed
+  const r2 = await sweepBridgedEvents(sweepDeps(w));
+  assert.equal(r2.created, 1);
+  assert.equal(w.cursors.get("base"), "10070");
+});
+
+test("other chains use their own CONFIRMATIONS (arbitrum 240)", async () => {
+  const w = world();
+  w.cursors.set("arbitrum", "9000");
+  w.latest.arbitrum = BigInt(10_000);
+  await sweepBridgedEvents(sweepDeps(w, { chains: ["arbitrum"] }));
+  assert.equal(w.cursors.get("arbitrum"), "9760");
+});
+
+test("overlap re-scan finds an event placed just below the old cursor", async () => {
+  const w = world();
+  w.cursors.set("base", "1000");
+  w.latest.base = BigInt(1_100); // head 1070
+  const AT = BigInt(990); // e.g. a lagging node returned [] for it last run
+  w.logsFor = (_c, from, to) => (from <= AT && AT <= to ? [evmLog()] : []);
+  const r = await sweepBridgedEvents(sweepDeps(w));
+  assert.equal(r.created, 1);
+  assert.equal(w.calls[0], "logs:base:951-1070");
+});
+
+test("an event in the overlap isn't registered twice across runs", async () => {
+  const w = world();
+  w.cursors.set("base", "1000");
+  w.latest.base = BigInt(1_100); // head 1070
+  const AT = BigInt(1_060);
+  w.logsFor = (_c, from, to) => (from <= AT && AT <= to ? [evmLog()] : []);
+  const r1 = await sweepBridgedEvents(sweepDeps(w));
+  assert.equal(r1.created, 1);
+  assert.equal(w.cursors.get("base"), "1070");
+  w.latest.base = BigInt(1_200); // head 1170; run 2 scans 1021-1170, which includes 1060
+  const r2 = await sweepBridgedEvents(sweepDeps(w));
+  assert.ok(w.calls.includes("logs:base:1021-1170"));
+  assert.equal(r2.created, 0);
+  assert.equal(w.calls.filter((c) => c.startsWith("create:")).length, 1);
+  assert.equal(w.calls.filter((c) => c.startsWith("register:")).length, 1);
 });
 
 test("cursor advances only after the chunk's events are processed", async () => {
@@ -190,7 +255,7 @@ test("cursor advances only after the chunk's events are processed", async () => 
   w.logsFor = () => [evmLog()];
   await sweepBridgedEvents(sweepDeps(w));
   const reg = w.calls.indexOf(`register:${TX.toLowerCase()}`);
-  const cur = w.calls.indexOf("cursor:base:3000");
+  const cur = w.calls.indexOf("cursor:base:2950");
   assert.ok(reg >= 0 && cur > reg, `register before cursor: ${w.calls.join(",")}`);
 });
 
@@ -198,7 +263,7 @@ test("retryable registration failure: cursor NOT advanced, later chunks not scan
   const w = world();
   w.cursors.set("base", "1000");
   w.latest.base = BigInt(100_000);
-  w.logsFor = (_c, from) => (from === BigInt(1001) ? [evmLog()] : []);
+  w.logsFor = (_c, from) => (from === BigInt(951) ? [evmLog()] : []);
   const d = sweepDeps(w, {
     register: async () => {
       throw new BridgeRegisterError("Transaction not confirmed yet.", 409, "not_indexed");
@@ -215,7 +280,7 @@ test("getLogs failure: cursor NOT advanced, other chains still swept", async () 
   const w = world();
   w.cursors.set("base", "1000");
   w.cursors.set("arbitrum", "500");
-  w.latest.arbitrum = BigInt(600);
+  w.latest.arbitrum = BigInt(1_000); // head 760
   const d = sweepDeps(w, {
     chains: ["base", "arbitrum"],
     evmGetLogs: async (c, _a, from, to) => {
@@ -226,7 +291,7 @@ test("getLogs failure: cursor NOT advanced, other chains still swept", async () 
   });
   await sweepBridgedEvents(d);
   assert.equal(w.cursors.get("base"), "1000");
-  assert.equal(w.cursors.get("arbitrum"), "600");
+  assert.equal(w.cursors.get("arbitrum"), "760");
 });
 
 test("permanent (400) registration failure is logged and skipped; cursor advances", async () => {
@@ -240,7 +305,7 @@ test("permanent (400) registration failure is logged and skipped; cursor advance
     },
   });
   await sweepBridgedEvents(d);
-  assert.equal(w.cursors.get("base"), "2000");
+  assert.equal(w.cursors.get("base"), "1970");
   assert.ok(w.logs.some((l) => /invalid_event/.test(l)));
 });
 
@@ -399,7 +464,7 @@ test("Stellar: retryable registration failure leaves the cursor", async () => {
 test("malformed contract config is logged as an error for that chain only", async () => {
   const w = world();
   w.cursors.set("arbitrum", "500");
-  w.latest.arbitrum = BigInt(600);
+  w.latest.arbitrum = BigInt(1_000);
   const d = sweepDeps(w, {
     chains: ["base", "arbitrum"],
     contractFor: (c) => {
@@ -409,5 +474,37 @@ test("malformed contract config is logged as an error for that chain only", asyn
   });
   await sweepBridgedEvents(d);
   assert.ok(w.logs.some((l) => /base/.test(l) && /0x EVM address/.test(l)));
-  assert.equal(w.cursors.get("arbitrum"), "600");
+  assert.equal(w.cursors.get("arbitrum"), "760");
+});
+
+test("advance pass rotates its start so no bridge starves behind MAX_ADVANCES_PER_RUN", async () => {
+  const w = world();
+  const base = { sourceDomain: 6, destDomain: 7, burnTxHash: "h", mintRecipient: "m", attempts: 0, createdAt: 1, updatedAt: 1 };
+  const ids = Array.from({ length: 30 }, (_, i) => `b${String(i).padStart(2, "0")}`);
+  for (const id of [...ids].reverse()) {
+    w.store.set(id, { ...base, id, direction: "bridge", status: "attesting" } as CctpTransferRecord);
+    w.pending.add(id);
+  }
+  const d = sweepDeps(w, { chains: [], advance: async (id) => { w.advanced.push(id); return "attesting"; } });
+
+  const r1 = await sweepBridgedEvents(d);
+  const run1 = [...w.advanced];
+  w.advanced.length = 0;
+  const r2 = await sweepBridgedEvents(d);
+  const run2 = [...w.advanced];
+
+  assert.equal(r1.advanced, MAX_ADVANCES_PER_RUN);
+  assert.equal(r2.advanced, MAX_ADVANCES_PER_RUN);
+  assert.deepEqual(run1, ids.slice(0, 25));
+  for (const starved of ids.slice(25)) assert.ok(run2.includes(starved), starved);
+  assert.equal(new Set([...run1, ...run2]).size, 30);
+});
+
+test("advance offset unavailable: falls back to start 0, pass still runs", async () => {
+  const w = world();
+  w.store.set("b1", { id: "b1", direction: "bridge", status: "burned" } as CctpTransferRecord);
+  w.pending.add("b1");
+  const d = sweepDeps(w, { chains: [], nextAdvanceRun: async () => { throw new Error("redis down"); } });
+  const r = await sweepBridgedEvents(d);
+  assert.equal(r.advanced, 1);
 });

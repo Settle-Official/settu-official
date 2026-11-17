@@ -1,9 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { DRIVE_DELAYS_S, driveUrl, scheduleDrive, type ScheduleDeps } from "./schedule";
+import {
+  DRIVE_DELAYS_S,
+  REGISTER_PUBLISH_TIMEOUT_MS,
+  driveUrl,
+  scheduleDrive,
+  scheduleDriveOnRegister,
+  withTimeout,
+  type ScheduleDeps,
+} from "./schedule";
 
 function deps(over: Partial<ScheduleDeps> = {}) {
-  const published: { url: string; body: unknown; delay: number; deduplicationId: string }[] = [];
+  const published: { url: string; body: unknown; delay: number; deduplicationId: string; fast?: boolean }[] = [];
   const logs: string[] = [];
   const d: ScheduleDeps = {
     token: () => "tok",
@@ -57,4 +65,24 @@ test("APP_BASE_URL unset: no-op, no throw", async () => {
 
 test("driveUrl strips trailing slashes and encodes the id", () => {
   assert.equal(driveUrl("https://a.b//", "x y"), "https://a.b/api/bridge/drive/x%20y");
+});
+
+test("register path: attempt 0, fast publish (no client retries, short timeout)", async () => {
+  const { d, published } = deps();
+  await scheduleDriveOnRegister("0xabc", d);
+  assert.equal(published.length, 1);
+  assert.equal(published[0].delay, 15);
+  assert.equal(published[0].fast, true);
+  assert.equal(REGISTER_PUBLISH_TIMEOUT_MS, 3_000);
+});
+
+test("drive-route follow-ups are not fast (SDK defaults)", async () => {
+  const { d, published } = deps();
+  await scheduleDrive("0xabc", 1, d);
+  assert.equal(published[0].fast, undefined);
+});
+
+test("withTimeout rejects a hung publish and passes a quick one through", async () => {
+  await assert.rejects(withTimeout(new Promise(() => {}), 20, "QStash publish"), /QStash publish timed out after 20 ms/);
+  assert.equal(await withTimeout(Promise.resolve(7), 20), 7);
 });

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { BRIDGE_CHAINS, type BridgeChainKey } from "@/lib/bridge/chains";
 import { BridgeRegisterError, registerBridge, toStatusView } from "@/lib/bridge/bridge-store";
-import { scheduleDrive } from "@/lib/bridge/schedule";
+import { scheduleDriveOnRegister } from "@/lib/bridge/schedule";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid request." }, { status: 400, headers: NO_STORE });
   }
   try {
-    const record = await registerBridge(chain as BridgeChainKey, txHash, (id) => scheduleDrive(id));
+    const record = await registerBridge(chain as BridgeChainKey, txHash, scheduleDriveOnRegister);
     return NextResponse.json(toStatusView(record), { headers: NO_STORE });
   } catch (e) {
     if (e instanceof BridgeRegisterError) {

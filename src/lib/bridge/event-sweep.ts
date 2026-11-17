@@ -7,8 +7,16 @@
  * Per chain, resumes from the Redis cursor `bridge:sweep-cursor:<chain>`:
  *  - EVM: `eth_getLogs` on our contract address only, in chunks of
  *    EVM_CHUNK_BLOCKS (2,000) blocks, inclusive. The cursor is the last block
- *    fully processed. First run (no cursor): start at latest - 2,000 —
- *    anything older is the register route's / support's job, not the sweep's.
+ *    fully processed. Scans stop at a confirmed head,
+ *    `latest − CONFIRMATIONS[chain]`, never the tip: a load-balanced RPC node
+ *    a few blocks behind returns [] for blocks it hasn't seen, and a shallow
+ *    reorg can move a Bridged tx to a later block — at the tip either would
+ *    let the cursor pass an event that's then never seen again. Each run
+ *    also re-scans OVERLAP_BLOCKS (50) below the cursor as a second guard
+ *    (repeats are harmless: an existing record is never re-registered).
+ *    Resume: from max(cursor − 50, 0) + 1. First run (no cursor): from
+ *    confirmedHead − 2,000 — anything older is the register route's /
+ *    support's job. confirmedHead <= cursor -> nothing to do this run.
  *  - Stellar: Soroban `getEvents` filtered by our contract id. The cursor is
  *    the RPC's pagination cursor. First run: startLedger = latest - 2,000.
  *  - Solana: out of scope here (Task 8) — skipped with a log line.
@@ -24,7 +32,8 @@
  *  - EVM: at most MAX_CHUNKS_PER_CHAIN chunks (6,000 blocks) per chain per run;
  *    chains run in parallel, each chunk sequentially.
  *  - Stellar: at most MAX_STELLAR_PAGES pages of STELLAR_PAGE_LIMIT events.
- *  - Advance pass: at most MAX_ADVANCES_PER_RUN bridge records.
+ *  - Advance pass: at most MAX_ADVANCES_PER_RUN bridge records, the start
+ *    rotated each run (Redis counter `bridge:sweep-advance-offset`).
  * A chain behind by more than that catches up over several runs.
  *
  * Chains whose BRIDGE_CONTRACT_<CHAIN> is unset are skipped (logged): the
@@ -46,7 +55,7 @@ import { BRIDGE_CHAINS, type BridgeChainKey } from "./chains";
 import { bridgeContractFor } from "./contracts";
 import { BridgeRegisterError, registerBridge } from "./bridge-store";
 import { decodeEvmBridged, decodeStellarBridged, type EvmLogLike } from "./read-source-event";
-import { scheduleDrive } from "./schedule";
+import { scheduleDriveOnRegister } from "./schedule";
 
 export const EVM_CHUNK_BLOCKS = 2000;
 export const FIRST_RUN_LOOKBACK = 2000;
@@ -54,6 +63,28 @@ export const MAX_CHUNKS_PER_CHAIN = 3;
 export const STELLAR_PAGE_LIMIT = 100;
 export const MAX_STELLAR_PAGES = 3;
 export const MAX_ADVANCES_PER_RUN = 25;
+
+type EvmChainKey = Exclude<BridgeChainKey, "stellar" | "solana">;
+
+/**
+ * Blocks behind the head the EVM sweep stops at, per chain. Sized to the
+ * chain's realistic reorg depth / RPC-node lag: Ethereum ~2.4 min (12 × 12 s),
+ * Base/OP 1 min (30 × 2 s), Arbitrum 1 min (240 × 0.25 s), Polygon ~4.3 min
+ * (128 × 2 s, historically deep reorgs), Avalanche 5 blocks (fast finality).
+ */
+export const CONFIRMATIONS: Record<EvmChainKey, number> = {
+  ethereum: 12,
+  base: 30,
+  optimism: 30,
+  arbitrum: 240,
+  polygon: 128,
+  avalanche: 5,
+};
+
+/** Blocks below the cursor re-scanned every run (second guard against a lagging node / reorg). */
+export const OVERLAP_BLOCKS = 50;
+
+const ADVANCE_OFFSET_KEY = "bridge:sweep-advance-offset";
 
 const CURSOR_KEY = (chain: BridgeChainKey) => `bridge:sweep-cursor:${chain}`;
 
@@ -101,6 +132,8 @@ export interface SweepDeps {
   getTransfer(id: string): Promise<CctpTransferRecord | null>;
   register(chain: BridgeChainKey, txHash: string): Promise<void>;
   listPending(): Promise<string[]>;
+  /** Monotonic per-run counter (Redis INCR) that rotates the advance pass's start. */
+  nextAdvanceRun(): Promise<number>;
   advance(id: string): Promise<CctpStatus>;
   log(msg: string): void;
 }
@@ -170,9 +203,10 @@ export const defaultSweepDeps: SweepDeps = {
   },
   getTransfer: getCctpTransfer,
   register: async (chain, txHash) => {
-    await registerBridge(chain, txHash, (id) => scheduleDrive(id));
+    await registerBridge(chain, txHash, (id) => scheduleDriveOnRegister(id));
   },
   listPending: listPendingTransfers,
+  nextAdvanceRun: async () => Number(await redis().incr(ADVANCE_OFFSET_KEY)),
   advance: advanceCctpTransfer,
   log: (m) => console.log(m),
 };
@@ -213,20 +247,25 @@ async function handleEvent(
 async function sweepEvm(d: SweepDeps, chain: BridgeChainKey, contract: string): Promise<number> {
   const one = BigInt(1);
   const chunk = BigInt(EVM_CHUNK_BLOCKS);
+  const zero = BigInt(0);
+  const max = (a: bigint, b: bigint) => (a > b ? a : b);
   const latest = await d.evmLatestBlock(chain);
+  const head = latest - BigInt(CONFIRMATIONS[chain as EvmChainKey]);
+  if (head < zero) return 0;
   const cursor = await d.getCursor(chain);
   let from: bigint;
   if (cursor !== null) {
-    from = BigInt(cursor) + one;
+    const c = BigInt(cursor);
+    if (head <= c) return 0; // nothing newly confirmed
+    from = max(c - BigInt(OVERLAP_BLOCKS), zero) + one;
   } else {
-    const start = latest - BigInt(FIRST_RUN_LOOKBACK);
-    from = start > BigInt(0) ? start : BigInt(0);
+    from = max(head - BigInt(FIRST_RUN_LOOKBACK), zero);
   }
   const seen = new Set<string>();
   let created = 0;
-  for (let i = 0; i < MAX_CHUNKS_PER_CHAIN && from <= latest; i++) {
+  for (let i = 0; i < MAX_CHUNKS_PER_CHAIN && from <= head; i++) {
     const end = from + chunk - one;
-    const to = end < latest ? end : latest;
+    const to = end < head ? end : head;
     const logs = await d.evmGetLogs(chain, contract, from, to);
     for (const log of logs) {
       if (!decodeEvmBridged([log], contract)) continue; // other events from our contract
@@ -319,10 +358,24 @@ export async function sweepBridgedEvents(
   const perChain = await Promise.all(deps.chains.map((c) => sweepChain(deps, c)));
   const created = perChain.reduce((a, b) => a + b, 0);
 
+  // Rotate the start so no bridge starves behind MAX_ADVANCES_PER_RUN: run k
+  // starts MAX_ADVANCES_PER_RUN ids further into the sorted list than run
+  // k−1. Each window spans at least that many ids, so windows leave no gaps.
+  const pending = [...(await deps.listPending())].sort();
+  let start = 0;
+  if (pending.length > 0) {
+    try {
+      const run = await deps.nextAdvanceRun();
+      start = Number.isFinite(run) ? (((run * MAX_ADVANCES_PER_RUN) % pending.length) + pending.length) % pending.length : 0;
+    } catch (e) {
+      deps.log(`[bridge/sweep] advance offset unavailable, starting at 0: ${errMsg(e)}`);
+    }
+  }
   let advanced = 0;
   let tried = 0;
-  for (const id of await deps.listPending()) {
+  for (let k = 0; k < pending.length; k++) {
     if (tried >= MAX_ADVANCES_PER_RUN) break;
+    const id = pending[(start + k) % pending.length];
     let r: CctpTransferRecord | null;
     try {
       r = await deps.getTransfer(id);
