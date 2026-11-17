@@ -363,7 +363,7 @@ Each contract implements the same logic (spec §5). The function is `bridge(quot
 **Interfaces:**
 - Produces: `bridgeContractFor(chain: BridgeChainKey): string`, read from env `BRIDGE_CONTRACT_<CHAIN>` (e.g. `BRIDGE_CONTRACT_BASE`). It throws a clear error if unset. Also `FEE_WALLET_<CHAIN>` env.
 
-- [ ] **Step 1:** Deploy all 8 contracts to testnets (Sepolia, Base Sepolia, Arbitrum Sepolia, OP Sepolia, Fuji, Amoy, Stellar testnet, Solana devnet). Use owner, signer, fee wallet and relayer keys generated for testnet, and record them in a gitignored `.env.bridge-testnet` file. Record the addresses in `deploy-testnets.md`.
+- [ ] **Step 1:** Deploy to the testnets in scope (owner decision 2026-11-17, faucets were impractical): **Base Sepolia, Arbitrum Sepolia, Stellar testnet, Solana devnet**. Ethereum Sepolia, OP Sepolia, Fuji and Amoy run the identical EVM contract and are deployed later (before launch, or straight to mainnet after the audit). Use owner, signer, fee wallet and relayer keys generated for testnet, and record them in a gitignored `.env.bridge-testnet` file. Record the addresses in `deploy-testnets.md`.
 - [ ] **Step 2:** Failing test: `bridgeContractFor` throws when unset and returns the env value when set.
 - [ ] **Step 3:** Implement. **Step 4:** PASS.
 - [ ] **Step 5:** Commit: `chore(bridge): testnet deployments and contract config`.
