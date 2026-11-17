@@ -26,28 +26,43 @@ commit `45746f2c803198bc6cd586475eb3c925f12bb488`:
   plus a denylist check on both entry points.
 - `contracts/token-messenger-minter-v2/src/deposit.rs`: `transfer_from(messenger,
   caller, messenger, local_amount)` then `burn`. The pull goes through an
-  **allowance**. 7-decimal dust (`amount % 10`) is not burned and stays with the
-  caller.
+  **allowance**. Circle burns only multiples of 10 (7 → 6 decimals), so this
+  contract rejects any burn amount that isn't one (`BurnAmountHasDust`).
 
 ## Auth model
 
-The user signs one auth entry for `bridge(user, quote, signature)`. Its tree
-holds these sub-invocations:
+The signature is
+`bridge(user, quote, signature, approve_expiration_ledger: u32)`. The user
+signs one auth entry for it, and its tree holds these sub-invocations:
 
 | sub-invocation | why |
 | --- | --- |
 | `usdc.transfer(user, fee_wallet, settu_fee + network_fee)` | USDC fee (skipped if 0) |
 | `xlm.transfer(user, fee_wallet, native_fee)` | native fee (skipped if 0) |
-| `usdc.approve(user, messenger, burn, current_ledger)` | the allowance Circle's `transfer_from` needs |
+| `usdc.approve(user, messenger, burn, approve_expiration_ledger)` | the allowance Circle's `transfer_from` needs |
 | `messenger.deposit_for_burn[_with_hook](user, burn, …)` | Circle's `caller.require_auth()` |
 
 RPC simulation records this tree automatically. **No separate approve
 transaction is needed**, so the bridge doesn't use the offramp's
-`checkStellarUsdcAllowance` / `buildApproveUsdcTx`. The approval is exactly
-the burn amount and expires at the current ledger. It **replaces** any
-existing user → messenger allowance, for example one left by the offramp
-flow. That flow re-checks the allowance and re-approves when it's too low, so
-this is harmless.
+`checkStellarUsdcAllowance` / `buildApproveUsdcTx`.
+
+**`approve_expiration_ledger`** is chosen by the client when it builds the
+transaction. A sensible value is the latest ledger plus 100. It is **not**
+part of the signed quote, but it is a `bridge` argument, so it is covered by
+the user's auth. It has to be a fixed argument: the approve's arguments are
+part of the signed auth tree, so an expiry derived on-chain from "the current
+ledger" would differ between simulation and execution and break every real
+transaction. The contract requires
+`current ≤ approve_expiration_ledger ≤ current + 1,000`, or it returns
+`BadApproveExpiry`.
+
+> **Known behaviour for integrators:** the approve **replaces** any existing
+> user → TokenMessengerMinter USDC allowance, because SEP-41 `approve` sets the
+> allowance rather than adding to it. After a bridge, that allowance is **0**:
+> Circle consumes all of it, since the burn amount must be dust-free. The
+> offramp flow already re-checks the allowance and re-approves when it's too
+> low. Any other integration that relies on a standing allowance to Circle's
+> messenger must do the same.
 
 ## Quote message
 
@@ -81,7 +96,9 @@ is rejected.
 8. `network_fee <= max_network_fee`.
 9. `native_fee <= max_native_fee`.
 10. The fees are less than `amount`.
-11. The ed25519 signature is valid against `signer`.
+11. The burn amount (`amount − fees`) is a multiple of 10 (`BurnAmountHasDust`).
+12. `current ≤ approve_expiration_ledger ≤ current + 1,000` (`BadApproveExpiry`).
+13. The ed25519 signature is valid against `signer`.
 
 A bad signature makes the host trap with a crypto error, not a Settu error
 code.
@@ -106,18 +123,54 @@ are `set_signer`, `set_fee_wallet`, `set_max_fee_bps` (≤ 10,000; starts at
 `transfer_ownership` is two-step: the nominee must call `accept_ownership`.
 There's no way to renounce ownership.
 
+Each owner function emits an audit event, matching the EVM contract:
+
+| Event | Topics | Data |
+| --- | --- | --- |
+| Signer changed | `signer_updated` | `(previous, current)` |
+| Fee wallet changed | `fee_wallet_updated` | `(previous, current)` |
+| Max fee bps changed | `max_fee_bps_updated` | `(previous, current)` |
+| Max network fee changed | `max_network_fee_updated` | `(previous, current)` |
+| Max native fee changed | `max_native_fee_updated` | `(previous, current)` |
+| Paused | `paused` | `owner` |
+| Unpaused | `unpaused` | `owner` |
+| Ownership transfer started | `ownership_transfer_started`, `previous`, `pending` | none |
+| Ownership transferred | `ownership_transferred`, `previous`, `current` | none |
+
 ## Build and test
 
 ```sh
-cargo test               # 47 tests: mock Circle messenger, real SACs, golden vector
+cargo test               # 54 tests: mock Circle messenger, real SACs, golden vector
 stellar contract build   # → target/wasm32v1-none/release/settu_bridge.wasm
 ```
 
 The tests use the real built-in SACs for USDC and native XLM, with classic
 G-accounts and trustlines. A mock messenger mirrors Circle's
 `require_auth` → `transfer_from` → `burn` flow, including dust normalisation.
-One test signs a real `SorobanAuthorizationEntry` with the user's account key,
-with no auth mocking, to prove that one signed tree is enough.
+The mock also mirrors these checks from Circle, with Circle's error codes:
+`amount > 0`, a non-zero mint recipient, `max_fee ≥ 0`, a missing decimal
+config (7120), `BurnAmountTooSmall`, canonical `max_fee < amount` (7104), and a
+configurable minimum fee (`InsufficientMaxFee`, 7105, using Circle's formula).
+Tests show that each of these reverts the whole bridge, leaving the nonce
+unused and no fees moved.
+
+Real `SorobanAuthorizationEntry`s are signed with the user's account key, with
+no auth mocking. They show that one signed tree is enough, and that a tree
+signed at ledger N still executes at N+1 and N+50.
+
+### Testnet gate: what the mock can't reproduce
+
+Verify these against Circle's real TokenMessengerMinter on testnet before
+mainnet:
+
+- the **denylist** (`require_not_denylisted(caller)`)
+- the messenger's own **pause** (`#[when_not_paused]`)
+- remote token-messenger registration for the destination domain
+  (`NoTokenMessengerForDomain`)
+- the per-message burn limit (`enforce_within_burn_limit`)
+- the real minimum fee value Circle sets
+- the MessageTransmitter `send_message` and its finality rules
+- that RPC simulation records exactly the auth tree above
 
 ## Deploy
 

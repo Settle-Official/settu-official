@@ -24,13 +24,24 @@
 //!   with the caller).
 //!
 //! ## Auth model
-//! The user signs one auth entry for `bridge(user, quote, signature)`. Its tree
-//! covers every nested `user.require_auth()`: the USDC fee `transfer`, the XLM
-//! fee `transfer`, the USDC `approve(user -> messenger, burn, this ledger)`
-//! and Circle's `deposit_for_burn[_with_hook]`. Circle's `transfer_from` needs
-//! the messenger's own auth only (it is the invoker), so no separate approve
-//! transaction is needed. The approval is exactly the burn amount and expires
-//! at the current ledger, so nothing usable lingers.
+//! The user signs one auth entry for `bridge(user, quote, signature,
+//! approve_expiration_ledger)`. Its tree covers every nested
+//! `user.require_auth()`: the USDC fee `transfer`, the XLM fee `transfer`, the
+//! USDC `approve(user -> messenger, burn, approve_expiration_ledger)` and
+//! Circle's `deposit_for_burn[_with_hook]`. Circle's `transfer_from` needs the
+//! messenger's own auth only (it is the invoker), so no separate approve
+//! transaction is needed.
+//!
+//! `approve_expiration_ledger` is a user-chosen argument (NOT part of the
+//! signed quote) because it appears verbatim in the signed auth tree: it must
+//! be fixed when the wallet signs, not derived from the ledger the transaction
+//! happens to land in. The contract requires
+//! `current <= approve_expiration_ledger <= current + MAX_APPROVE_LEDGERS`.
+//!
+//! KNOWN BEHAVIOUR: the approve REPLACES any existing user -> messenger USDC
+//! allowance (SEP-41 `approve` sets, it does not add). After a bridge the
+//! user's allowance to Circle's TokenMessengerMinter is 0 (Circle consumes the
+//! whole approval, since the burn amount is required to be dust-free).
 //!
 //! ## Quote message (must match `encodeQuoteBytes` in src/lib/bridge/quote.ts)
 //! Big-endian: "SETTU_BRIDGE_V1" (15 ASCII) | contractId 32 | sourceDomain u32 |
@@ -98,6 +109,12 @@ pub const MAX_QUOTE_LIFETIME_SECS: u64 = 3_600;
 /// minimum persistent TTL give more.
 pub const NONCE_TTL_LEDGERS: u32 = 17_280;
 
+/// Upper bound on how far ahead the user's approve may expire (~83 min at 5 s).
+pub const MAX_APPROVE_LEDGERS: u32 = 1_000;
+
+/// 7 local decimals vs 6 canonical: Circle only burns multiples of 10.
+pub const CCTP_DUST_DIVISOR: i128 = 10;
+
 pub const INSTANCE_TTL_THRESHOLD: u32 = 17_280 * 7; // ~7 days
 pub const INSTANCE_TTL_EXTEND_TO: u32 = 17_280 * 30; // ~30 days
 
@@ -126,6 +143,12 @@ pub enum Error {
     InvalidBps = 9113,
     InvalidLimit = 9114,
     NoPendingOwner = 9115,
+    /// `approve_expiration_ledger` is before the current ledger or more than
+    /// MAX_APPROVE_LEDGERS after it.
+    BadApproveExpiry = 9116,
+    /// `amount - settu_fee - network_fee` is not a multiple of 10 (Stellar
+    /// USDC has 7 decimals, CCTP 6), so Circle would leave dust behind.
+    BurnAmountHasDust = 9117,
 }
 
 /// The signed quote. `user` is the raw ed25519 key of the user's G-address.
@@ -182,6 +205,72 @@ pub struct Bridged {
     pub min_finality: u32,
 }
 
+/// Owner-setter audit trail (mirrors the EVM contract's events).
+#[contractevent(data_format = "vec")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SignerUpdated {
+    pub previous: BytesN<32>,
+    pub current: BytesN<32>,
+}
+
+#[contractevent(data_format = "vec")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FeeWalletUpdated {
+    pub previous: Address,
+    pub current: Address,
+}
+
+#[contractevent(data_format = "vec")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MaxFeeBpsUpdated {
+    pub previous: u32,
+    pub current: u32,
+}
+
+#[contractevent(data_format = "vec")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MaxNetworkFeeUpdated {
+    pub previous: i128,
+    pub current: i128,
+}
+
+#[contractevent(data_format = "vec")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MaxNativeFeeUpdated {
+    pub previous: i128,
+    pub current: i128,
+}
+
+#[contractevent(topics = ["paused"], data_format = "single-value")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PausedEvent {
+    pub owner: Address,
+}
+
+#[contractevent(topics = ["unpaused"], data_format = "single-value")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UnpausedEvent {
+    pub owner: Address,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OwnershipTransferStarted {
+    #[topic]
+    pub previous: Address,
+    #[topic]
+    pub pending: Address,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OwnershipTransferred {
+    #[topic]
+    pub previous: Address,
+    #[topic]
+    pub current: Address,
+}
+
 fn u64_of(env: &Env, v: i128) -> u64 {
     if v < 0 || v > u64::MAX as i128 {
         panic_with_error!(env, Error::InvalidAmount);
@@ -226,10 +315,11 @@ fn bump_instance(env: &Env) {
         .extend_ttl(INSTANCE_TTL_THRESHOLD, INSTANCE_TTL_EXTEND_TO);
 }
 
-fn require_owner(env: &Env) {
+fn require_owner(env: &Env) -> Address {
     let owner: Address = get(env, &DataKey::Owner);
     owner.require_auth();
     bump_instance(env);
+    owner
 }
 
 fn check_limit(v: i128) -> Result<(), Error> {
@@ -286,11 +376,17 @@ impl SettuBridge {
     /// Pays the quoted fees from `user` and burns `amount - settu_fee -
     /// network_fee` through CCTP. `user` must authorise this call; that one
     /// auth tree covers all nested token and Circle calls.
+    ///
+    /// `approve_expiration_ledger`: expiry of the USDC approval to Circle's
+    /// messenger. Chosen by the client when building the transaction (e.g.
+    /// latest ledger + 100) and covered by the user's auth; must be within
+    /// `[current, current + MAX_APPROVE_LEDGERS]` when the tx executes.
     pub fn bridge(
         env: Env,
         user: Address,
         quote: QuoteArgs,
         signature: BytesN<64>,
+        approve_expiration_ledger: u32,
     ) -> Result<(), Error> {
         user.require_auth();
         let q = quote;
@@ -348,6 +444,16 @@ impl SettuBridge {
         if usdc_fee >= q.amount {
             return Err(Error::NothingToBurn);
         }
+        let burn = q.amount - usdc_fee;
+        if burn % CCTP_DUST_DIVISOR != 0 {
+            return Err(Error::BurnAmountHasDust);
+        }
+        let seq = env.ledger().sequence();
+        if approve_expiration_ledger < seq
+            || approve_expiration_ledger > seq.saturating_add(MAX_APPROVE_LEDGERS)
+        {
+            return Err(Error::BadApproveExpiry);
+        }
         // 6. Signature (host traps on failure).
         let signer: BytesN<32> = get(&env, &DataKey::Signer);
         let msg = quote_message(&env, &contract_id_bytes(&env), &q);
@@ -373,10 +479,12 @@ impl SettuBridge {
         }
 
         // 8. Burn the rest: approve Circle's messenger for exactly the burn
-        // amount (expiring this ledger), then deposit with the user as caller.
-        let burn = q.amount - usdc_fee;
+        // amount, then deposit with the user as caller. Circle pulls it with
+        // transfer_from (see module docs).
+        // KNOWN BEHAVIOUR: this REPLACES any existing user -> messenger
+        // allowance; afterwards it is 0 (Circle consumes the dust-free burn).
         let messenger: Address = get(&env, &DataKey::TokenMessenger);
-        usdc.approve(&user, &messenger, &burn, &env.ledger().sequence());
+        usdc.approve(&user, &messenger, &burn, &approve_expiration_ledger);
         let zero = BytesN::from_array(&env, &[0u8; 32]);
         let tmm = TokenMessengerClient::new(&env, &messenger);
         if q.hook_data.is_empty() {
@@ -412,13 +520,17 @@ impl SettuBridge {
 
     pub fn set_signer(env: Env, signer: BytesN<32>) -> Result<(), Error> {
         require_owner(&env);
+        let previous: BytesN<32> = get(&env, &DataKey::Signer);
         set(&env, &DataKey::Signer, &signer);
+        SignerUpdated { previous, current: signer }.publish(&env);
         Ok(())
     }
 
     pub fn set_fee_wallet(env: Env, fee_wallet: Address) -> Result<(), Error> {
         require_owner(&env);
+        let previous: Address = get(&env, &DataKey::FeeWallet);
         set(&env, &DataKey::FeeWallet, &fee_wallet);
+        FeeWalletUpdated { previous, current: fee_wallet }.publish(&env);
         Ok(())
     }
 
@@ -427,40 +539,49 @@ impl SettuBridge {
         if i128::from(bps) > BPS_DENOMINATOR {
             return Err(Error::InvalidBps);
         }
+        let previous: u32 = get(&env, &DataKey::MaxFeeBps);
         set(&env, &DataKey::MaxFeeBps, &bps);
+        MaxFeeBpsUpdated { previous, current: bps }.publish(&env);
         Ok(())
     }
 
     pub fn set_max_network_fee(env: Env, v: i128) -> Result<(), Error> {
         require_owner(&env);
         check_limit(v)?;
+        let previous: i128 = get(&env, &DataKey::MaxNetworkFee);
         set(&env, &DataKey::MaxNetworkFee, &v);
+        MaxNetworkFeeUpdated { previous, current: v }.publish(&env);
         Ok(())
     }
 
     pub fn set_max_native_fee(env: Env, v: i128) -> Result<(), Error> {
         require_owner(&env);
         check_limit(v)?;
+        let previous: i128 = get(&env, &DataKey::MaxNativeFee);
         set(&env, &DataKey::MaxNativeFee, &v);
+        MaxNativeFeeUpdated { previous, current: v }.publish(&env);
         Ok(())
     }
 
     pub fn pause(env: Env) -> Result<(), Error> {
-        require_owner(&env);
+        let owner = require_owner(&env);
         set(&env, &DataKey::Paused, &true);
+        PausedEvent { owner }.publish(&env);
         Ok(())
     }
 
     pub fn unpause(env: Env) -> Result<(), Error> {
-        require_owner(&env);
+        let owner = require_owner(&env);
         set(&env, &DataKey::Paused, &false);
+        UnpausedEvent { owner }.publish(&env);
         Ok(())
     }
 
     /// Step 1 of 2: nominate `new_owner`. Re-nominating replaces the pending one.
     pub fn transfer_ownership(env: Env, new_owner: Address) -> Result<(), Error> {
-        require_owner(&env);
+        let previous = require_owner(&env);
         set(&env, &DataKey::PendingOwner, &new_owner);
+        OwnershipTransferStarted { previous, pending: new_owner }.publish(&env);
         Ok(())
     }
 
@@ -472,7 +593,9 @@ impl SettuBridge {
             .get(&DataKey::PendingOwner)
             .ok_or(Error::NoPendingOwner)?;
         pending.require_auth();
+        let previous: Address = get(&env, &DataKey::Owner);
         set(&env, &DataKey::Owner, &pending);
+        OwnershipTransferred { previous, current: pending }.publish(&env);
         env.storage().instance().remove(&DataKey::PendingOwner);
         bump_instance(&env);
         Ok(())

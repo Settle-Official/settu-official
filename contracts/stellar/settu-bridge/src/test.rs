@@ -11,7 +11,7 @@ use soroban_sdk::{
         storage::Persistent as _, Address as _, AuthorizedFunction, AuthorizedInvocation, Events as _, Ledger as _,
         MockAuth, MockAuthInvoke,
     },
-    token, xdr, Address, Bytes, BytesN, Env, Event as _, IntoVal, Symbol, TryFromVal,
+    panic_with_error, token, xdr, Address, Bytes, BytesN, Env, Event as _, IntoVal, Symbol, TryFromVal,
 };
 use std::borrow::ToOwned;
 use std::rc::Rc;
@@ -85,6 +85,16 @@ impl MockTokenMessenger {
         );
     }
 
+    /// Circle's min fee, in 1/10_000_000 units (min_fee_controller). 0 = off.
+    pub fn set_min_fee(e: Env, min_fee: i128) {
+        e.storage().instance().set(&Symbol::new(&e, "min_fee"), &min_fee);
+    }
+
+    /// Simulates a token with no decimal config (TokenDecimalConfigNotSet).
+    pub fn unset_decimals(e: Env) {
+        e.storage().instance().set(&Symbol::new(&e, "no_dec"), &true);
+    }
+
     pub fn calls(e: Env) -> soroban_sdk::Vec<BurnCall> {
         e.storage()
             .instance()
@@ -107,12 +117,38 @@ fn record(
     hook_data: Bytes,
     with_hook: bool,
 ) {
+    // Same order as Circle's contract.rs + deposit_for_burn_impl (deposit.rs).
     caller.require_auth();
-    assert!(amount > 0, "AmountMustBeNonzero");
-    assert!(max_fee >= 0, "MaxFeeMustBeNonNegative");
+    if amount <= 0 {
+        panic_with_error!(e, MockTmmError::AmountMustBeNonzero);
+    }
+    if mint_recipient.to_array() == [0u8; 32] {
+        panic_with_error!(e, MockTmmError::MintRecipientMustBeNonzero);
+    }
+    if max_fee < 0 {
+        panic_with_error!(e, MockTmmError::MaxFeeMustBeNonNegative);
+    }
+    if e.storage().instance().has(&Symbol::new(e, "no_dec")) {
+        panic_with_error!(e, MockTmmError::TokenDecimalConfigNotSet);
+    }
     // 7 local decimals -> 6 canonical: dust (amount % 10) stays with the caller.
     let local = amount - amount % 10;
-    assert!(local > 0, "BurnAmountTooSmall");
+    if local <= 0 {
+        panic_with_error!(e, MockTmmError::BurnAmountTooSmall);
+    }
+    let canonical_burn = local / 10;
+    let canonical_max_fee = max_fee / 10;
+    if canonical_max_fee >= canonical_burn {
+        panic_with_error!(e, MockTmmError::MaxFeeMustBeLessThanAmount);
+    }
+    let min_fee: i128 = e.storage().instance().get(&Symbol::new(e, "min_fee")).unwrap_or(0);
+    if min_fee > 0 {
+        let m = canonical_burn * min_fee / 10_000_000;
+        let min_fee_amount = if m == 0 { 1 } else { m };
+        if canonical_max_fee < min_fee_amount {
+            panic_with_error!(e, MockTmmError::InsufficientMaxFee);
+        }
+    }
     let me = e.current_contract_address();
     let t = token::Client::new(e, &burn_token);
     t.transfer_from(&me, &caller, &me, &local);
@@ -123,6 +159,20 @@ fn record(
         destination_caller, max_fee, min_finality_threshold, hook_data, with_hook,
     });
     e.storage().instance().set(&Symbol::new(e, "calls"), &calls);
+}
+
+/// Circle's TokenMessengerMinterError codes (token-messenger-minter-v2/src/lib.rs).
+#[soroban_sdk::contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub enum MockTmmError {
+    AmountMustBeNonzero = 7102,
+    MintRecipientMustBeNonzero = 7103,
+    MaxFeeMustBeLessThanAmount = 7104,
+    InsufficientMaxFee = 7105,
+    BurnAmountTooSmall = 7118,
+    TokenDecimalConfigNotSet = 7120,
+    MaxFeeMustBeNonNegative = 7124,
 }
 
 // ------------------------------------------------------------------ ledger helpers
@@ -203,6 +253,9 @@ const USER_PK: [u8; 32] = [0x33; 32];
 const FEE_PK: [u8; 32] = [0x55; 32];
 const OTHER_PK: [u8; 32] = [0x66; 32];
 const SIGNER_SEED: [u8; 32] = [0x42; 32];
+const START_SEQ: u32 = 1_000;
+/// Default approve expiry the "wallet" picks: START_SEQ + 100.
+const EXP: u32 = START_SEQ + 100;
 
 struct T {
     env: Env,
@@ -229,7 +282,7 @@ fn setup_at(contract_id: Option<Address>, sk: SigningKey, user_pk: [u8; 32]) -> 
     env.mock_all_auths();
     env.ledger().with_mut(|l| {
         l.timestamp = NOW;
-        l.sequence_number = 1_000;
+        l.sequence_number = START_SEQ;
     });
 
     let usdc_issuer_admin = Address::generate(&env);
@@ -317,14 +370,19 @@ impl T {
 
     fn bridge_ok(&self, q: &QuoteArgs) {
         let sig = self.sign(q);
-        self.bridge.bridge(&self.user, q, &sig);
+        self.bridge.bridge(&self.user, q, &sig, &EXP);
     }
 
     fn try_bridge(&self, q: &QuoteArgs, sig: &BytesN<64>) -> Result<(), BridgeErr> {
-        match self.bridge.try_bridge(&self.user, q, sig) {
+        self.try_bridge_exp(q, sig, EXP)
+    }
+
+    fn try_bridge_exp(&self, q: &QuoteArgs, sig: &BytesN<64>, exp: u32) -> Result<(), BridgeErr> {
+        match self.bridge.try_bridge(&self.user, q, sig, &exp) {
             Ok(Ok(())) => Ok(()),
             Ok(Err(_)) => unreachable!(),
             Err(Ok(e)) => Err(BridgeErr::Contract(e)),
+            Err(Err(soroban_sdk::InvokeError::Contract(c))) if c >= 7100 => Err(BridgeErr::Circle(c)),
             Err(Err(_)) => Err(BridgeErr::Host),
         }
     }
@@ -358,6 +416,9 @@ impl T {
 #[derive(Debug, PartialEq, Eq)]
 enum BridgeErr {
     Contract(Error),
+    /// A nested Circle (mock) TokenMessengerMinter error code.
+    Circle(u32),
+    /// Host trap (signature, auth) or a nested SAC error.
     Host,
 }
 
@@ -480,17 +541,18 @@ fn zero_fees_burns_whole_amount() {
 }
 
 #[test]
-fn dust_below_cctp_precision_stays_with_user() {
+fn revert_burn_amount_with_cctp_dust() {
     let t = setup();
-    let mut q = t.quote();
-    q.settu_fee = 5_000_003; // burn amount ends in ...7: 7 dust units
+    for fee in [5_000_003i128, 5_000_009, 5_000_001] {
+        let mut q = t.quote();
+        q.settu_fee = fee; // burn amount ends in a non-zero digit
+        t.expect_err(&q, Error::BurnAmountHasDust);
+    }
+    // The whole burn reaches Circle: nothing is left as dust.
+    let q = t.quote();
     t.bridge_ok(&q);
-    let burn = q.amount - q.settu_fee - q.network_fee;
     let c = t.messenger.calls().get(0).unwrap();
-    assert_eq!(c.amount, burn);
-    assert_eq!(c.burned, burn - 7);
-    assert_eq!(t.usdc.balance(&t.user), USER_USDC - q.amount + 7);
-    t.zero_balances();
+    assert_eq!(c.burned, c.amount);
 }
 
 #[test]
@@ -579,11 +641,10 @@ fn single_user_auth_tree_covers_all_nested_calls() {
     q.native_fee = 1_000;
     assert_eq!(t.usdc.allowance(&t.user, &t.messenger.address), 0);
     let sig = t.sign(&q);
-    t.bridge.bridge(&t.user, &q, &sig);
+    t.bridge.bridge(&t.user, &q, &sig, &EXP);
 
     let usdc_fee = q.settu_fee + q.network_fee;
     let burn = q.amount - usdc_fee;
-    let seq = t.env.ledger().sequence();
     let zero = BytesN::from_array(&t.env, &[0; 32]);
     let auths = t.env.auths();
     assert_eq!(
@@ -594,7 +655,7 @@ fn single_user_auth_tree_covers_all_nested_calls() {
                 function: AuthorizedFunction::Contract((
                     t.id.clone(),
                     Symbol::new(&t.env, "bridge"),
-                    (t.user.clone(), q.clone(), sig.clone()).into_val(&t.env),
+                    (t.user.clone(), q.clone(), sig.clone(), EXP).into_val(&t.env),
                 )),
                 sub_invocations: std::vec![
                     AuthorizedInvocation {
@@ -617,7 +678,7 @@ fn single_user_auth_tree_covers_all_nested_calls() {
                         function: AuthorizedFunction::Contract((
                             t.usdc_sac.clone(),
                             Symbol::new(&t.env, "approve"),
-                            (t.user.clone(), t.messenger.address.clone(), burn, seq).into_val(&t.env),
+                            (t.user.clone(), t.messenger.address.clone(), burn, EXP).into_val(&t.env),
                         )),
                         sub_invocations: std::vec![],
                     },
@@ -729,7 +790,7 @@ fn real_auth_fixture() -> (T, SigningKey) {
     (t, user_sk)
 }
 
-fn full_tree(t: &T, q: &QuoteArgs, sig: &BytesN<64>) -> xdr::SorobanAuthorizedInvocation {
+fn full_tree(t: &T, q: &QuoteArgs, sig: &BytesN<64>, exp: u32) -> xdr::SorobanAuthorizedInvocation {
     let e = &t.env;
     let usdc_fee = q.settu_fee + q.network_fee;
     let burn = q.amount - usdc_fee;
@@ -738,11 +799,11 @@ fn full_tree(t: &T, q: &QuoteArgs, sig: &BytesN<64>) -> xdr::SorobanAuthorizedIn
         e,
         &t.id,
         "bridge",
-        (t.user.clone(), q.clone(), sig.clone()).into_val(e),
+        (t.user.clone(), q.clone(), sig.clone(), exp).into_val(e),
         std::vec![
             inv(e, &t.usdc_sac, "transfer", (t.user.clone(), t.fee_wallet.clone(), usdc_fee).into_val(e), std::vec![]),
             inv(e, &t.xlm.address, "transfer", (t.user.clone(), t.fee_wallet.clone(), q.native_fee).into_val(e), std::vec![]),
-            inv(e, &t.usdc_sac, "approve", (t.user.clone(), t.messenger.address.clone(), burn, e.ledger().sequence()).into_val(e), std::vec![]),
+            inv(e, &t.usdc_sac, "approve", (t.user.clone(), t.messenger.address.clone(), burn, exp).into_val(e), std::vec![]),
             inv(
                 e,
                 &t.messenger.address,
@@ -762,9 +823,9 @@ fn real_user_signature_over_one_tree_is_sufficient() {
     let mut q = t.quote();
     q.native_fee = 1_000;
     let sig = t.sign(&q);
-    let entry = signed_entry(&t.env, &user_sk, &t.user, 1, full_tree(&t, &q, &sig));
+    let entry = signed_entry(&t.env, &user_sk, &t.user, 1, full_tree(&t, &q, &sig, EXP));
     t.env.set_auths(&[entry]);
-    t.bridge.bridge(&t.user, &q, &sig);
+    t.bridge.bridge(&t.user, &q, &sig, &EXP);
     assert_eq!(t.usdc.balance(&t.user), USER_USDC - q.amount);
     assert_eq!(t.messenger.calls().len(), 1);
     t.zero_balances();
@@ -782,12 +843,12 @@ fn bridge_without_full_user_auth_fails() {
     e.set_auths(&[]);
     assert_eq!(t.try_bridge(&q, &sig), Err(BridgeErr::Host));
 
-    let root_only = inv(e, &t.id, "bridge", (t.user.clone(), q.clone(), sig.clone()).into_val(e), std::vec![]);
+    let root_only = inv(e, &t.id, "bridge", (t.user.clone(), q.clone(), sig.clone(), EXP).into_val(e), std::vec![]);
     e.set_auths(&[signed_entry(e, &user_sk, &t.user, 2, root_only)]);
     assert_eq!(t.try_bridge(&q, &sig), Err(BridgeErr::Host));
 
     let impostor = SigningKey::from_bytes(&[0x22; 32]);
-    e.set_auths(&[signed_entry(e, &impostor, &t.user, 3, full_tree(&t, &q, &sig))]);
+    e.set_auths(&[signed_entry(e, &impostor, &t.user, 3, full_tree(&t, &q, &sig, EXP))]);
     assert_eq!(t.try_bridge(&q, &sig), Err(BridgeErr::Host));
 
     e.mock_all_auths();
@@ -870,7 +931,7 @@ fn revert_reused_nonce() {
     let t = setup();
     let q = t.quote();
     let sig = t.sign(&q);
-    t.bridge.bridge(&t.user, &q, &sig);
+    t.bridge.bridge(&t.user, &q, &sig, &EXP);
     assert_eq!(t.try_bridge(&q, &sig), Err(BridgeErr::Contract(Error::NonceUsed)));
 }
 
@@ -939,7 +1000,7 @@ fn revert_quote_for_user_submitted_by_other_account() {
     let q = t.quote(); // for USER_PK
     let sig = t.sign(&q);
     assert_eq!(
-        t.bridge.try_bridge(&other, &q, &sig),
+        t.bridge.try_bridge(&other, &q, &sig, &EXP),
         Err(Ok(Error::WrongUser))
     );
 }
@@ -950,7 +1011,7 @@ fn revert_contract_address_as_user() {
     let q = t.quote();
     let sig = t.sign(&q);
     let c = Address::generate(&t.env);
-    assert_eq!(t.bridge.try_bridge(&c, &q, &sig), Err(Ok(Error::UserNotAccount)));
+    assert_eq!(t.bridge.try_bridge(&c, &q, &sig, &EXP), Err(Ok(Error::UserNotAccount)));
 }
 
 #[test]
@@ -1025,8 +1086,8 @@ fn revert_tampered_quote_fields() {
     let sig = t.sign(&base);
     let tweaks: [fn(&mut QuoteArgs, &Env); 8] = [
         |q, _| q.dest_domain = 3,
-        |q, _| q.settu_fee -= 1,
-        |q, _| q.network_fee -= 1,
+        |q, _| q.settu_fee -= 10,
+        |q, _| q.network_fee -= 10,
         |q, e| q.mint_recipient = BytesN::from_array(e, &[0xcd; 32]),
         |q, _| q.max_fee += 1,
         |q, _| q.min_finality = 1000,
@@ -1070,7 +1131,7 @@ fn signer_rotation_invalidates_old_key() {
     t.expect_host_err(&q, &old_sig);
     let msg: StdVec<u8> = quote_message(&t.env, &t.contract_id_bytes(), &q).iter().collect();
     let sig = BytesN::from_array(&t.env, &new_sk.sign(&msg).to_bytes());
-    t.bridge.bridge(&t.user, &q, &sig);
+    t.bridge.bridge(&t.user, &q, &sig, &EXP);
 }
 
 #[test]
@@ -1324,7 +1385,7 @@ fn golden_vector_bridges_end_to_end() {
     assert_eq!(user_from_vector, t.user);
 
     let b = SettuBridgeClient::new(&t.env, &id);
-    b.bridge(&t.user, &q, &BytesN::from_array(&t.env, &g.signature));
+    b.bridge(&t.user, &q, &BytesN::from_array(&t.env, &g.signature), &EXP);
 
     let usdc_fee = q.settu_fee + q.network_fee;
     assert_eq!(t.usdc.balance(&t.fee_wallet), usdc_fee);
@@ -1345,4 +1406,169 @@ fn golden_vector_rejected_by_other_contract_id() {
     t.env.ledger().with_mut(|l| l.timestamp = q.deadline - 60);
     assert_eq!(t.bridge.signer().to_array(), g.signer);
     t.expect_host_err(&q, &BytesN::from_array(&t.env, &g.signature));
+}
+
+// ------------------------------------------------------------------ fix round 1
+
+/// Signed at ledger N (auth tree fixed then, incl. the approve expiry), the
+/// transaction lands at N+1 / N+50 and still succeeds.
+#[test]
+fn real_auth_signed_at_n_executes_later() {
+    for delay in [1u32, 50] {
+        let (t, user_sk) = real_auth_fixture();
+        let mut q = t.quote();
+        q.native_fee = 1_000;
+        q.deadline = NOW + 600; // outlives the 50-ledger (~250 s) delay
+        let sig = t.sign(&q);
+        let n = t.env.ledger().sequence();
+        let exp = n + 100; // what a wallet would pick at signing time
+        let entry = signed_entry(&t.env, &user_sk, &t.user, 7, full_tree(&t, &q, &sig, exp));
+        t.env.ledger().with_mut(|l| {
+            l.sequence_number = n + delay;
+            l.timestamp += u64::from(delay) * 5;
+        });
+        t.env.set_auths(&[entry]);
+        t.bridge.bridge(&t.user, &q, &sig, &exp);
+        assert_eq!(t.usdc.balance(&t.user), USER_USDC - q.amount, "delay {delay}");
+        assert_eq!(t.usdc.allowance(&t.user, &t.messenger.address), 0);
+        t.zero_balances();
+    }
+}
+
+#[test]
+fn approve_expiry_bounds() {
+    let t = setup();
+    let q = t.quote();
+    let sig = t.sign(&q);
+    let seq = t.env.ledger().sequence();
+    assert_eq!(t.try_bridge_exp(&q, &sig, seq - 1), Err(BridgeErr::Contract(Error::BadApproveExpiry)));
+    assert_eq!(
+        t.try_bridge_exp(&q, &sig, seq + MAX_APPROVE_LEDGERS + 1),
+        Err(BridgeErr::Contract(Error::BadApproveExpiry))
+    );
+    assert_eq!(t.try_bridge_exp(&q, &sig, 0), Err(BridgeErr::Contract(Error::BadApproveExpiry)));
+    assert_eq!(t.try_bridge_exp(&q, &sig, u32::MAX), Err(BridgeErr::Contract(Error::BadApproveExpiry)));
+    t.assert_untouched(&q);
+    // Both edges are accepted.
+    t.bridge.bridge(&t.user, &q, &sig, &(seq + MAX_APPROVE_LEDGERS));
+    let mut q2 = t.quote();
+    q2.nonce = BytesN::from_array(&t.env, &[0x02; 32]);
+    let sig2 = t.sign(&q2);
+    t.bridge.bridge(&t.user, &q2, &sig2, &seq);
+}
+
+/// An expiry the user signed can't be swapped by a relayer: it's in the tree.
+#[test]
+fn approve_expiry_is_covered_by_user_auth() {
+    let (t, user_sk) = real_auth_fixture();
+    let q = t.quote();
+    let sig = t.sign(&q);
+    let entry = signed_entry(&t.env, &user_sk, &t.user, 8, full_tree(&t, &q, &sig, EXP));
+    t.env.set_auths(&[entry]);
+    assert_eq!(t.try_bridge_exp(&q, &sig, EXP + 1), Err(BridgeErr::Host));
+    t.env.mock_all_auths();
+    t.assert_untouched(&q);
+}
+
+#[test]
+fn circle_revert_max_fee_not_below_amount_rolls_back() {
+    let t = setup();
+    let mut q = t.quote();
+    q.max_fee = q.amount - q.settu_fee - q.network_fee; // canonical max_fee == canonical burn
+    let sig = t.sign(&q);
+    assert_eq!(t.try_bridge(&q, &sig), Err(BridgeErr::Circle(7104)));
+    t.assert_untouched(&q);
+    assert_eq!(t.usdc.balance(&t.fee_wallet), 0);
+}
+
+#[test]
+fn circle_revert_insufficient_max_fee_rolls_back() {
+    let t = setup();
+    t.messenger.set_min_fee(&10_000); // 0.1% (Fast-transfer style minimum)
+    let q = t.quote(); // max_fee 1_000 local = 100 canonical, far below 0.1%
+    let sig = t.sign(&q);
+    assert_eq!(t.try_bridge(&q, &sig), Err(BridgeErr::Circle(7105)));
+    t.assert_untouched(&q);
+    assert_eq!(t.usdc.balance(&t.fee_wallet), 0);
+
+    // A quote whose max_fee covers the minimum goes through.
+    let mut q2 = t.quote();
+    let burn_canonical = (q2.amount - q2.settu_fee - q2.network_fee) / 10;
+    q2.max_fee = (burn_canonical * 10_000 / 10_000_000) * 10;
+    t.bridge_ok(&q2);
+}
+
+#[test]
+fn circle_revert_decimal_config_missing_rolls_back() {
+    let t = setup();
+    t.messenger.unset_decimals();
+    let q = t.quote();
+    let sig = t.sign(&q);
+    assert_eq!(t.try_bridge(&q, &sig), Err(BridgeErr::Circle(7120)));
+    t.assert_untouched(&q);
+    assert_eq!(t.usdc.balance(&t.fee_wallet), 0);
+}
+
+fn scval_vec(env: &Env, v: soroban_sdk::Vec<soroban_sdk::Val>) -> xdr::ScVal {
+    xdr::ScVal::try_from_val(env, &v.to_val()).unwrap()
+}
+
+/// Asserts the bridge's only event in the last invocation equals `ev`.
+fn assert_one_event(t: &T, ev: &impl soroban_sdk::Event) {
+    let mine: StdVec<(Address, soroban_sdk::Vec<soroban_sdk::Val>, soroban_sdk::Val)> =
+        t.env.events().all().iter().filter(|(c, _, _)| *c == t.id).collect();
+    assert_eq!(mine.len(), 1);
+    let (_, topics, data) = mine[0].clone();
+    assert_eq!(scval_vec(&t.env, topics), scval_vec(&t.env, ev.topics(&t.env)));
+    assert_eq!(
+        xdr::ScVal::try_from_val(&t.env, &data).unwrap(),
+        xdr::ScVal::try_from_val(&t.env, &ev.data(&t.env)).unwrap()
+    );
+}
+
+#[test]
+fn owner_setters_emit_audit_events() {
+    let t = setup();
+    let b = &t.bridge;
+    let e = &t.env;
+    let old_signer = b.signer();
+    let new_signer = BytesN::from_array(e, &[9; 32]);
+    b.set_signer(&new_signer);
+    assert_one_event(&t, &SignerUpdated { previous: old_signer, current: new_signer });
+
+    let w = Address::generate(e);
+    b.set_fee_wallet(&w);
+    assert_one_event(&t, &FeeWalletUpdated { previous: t.fee_wallet.clone(), current: w });
+
+    b.set_max_fee_bps(&250);
+    assert_one_event(&t, &MaxFeeBpsUpdated { previous: 100, current: 250 });
+    b.set_max_network_fee(&123);
+    assert_one_event(&t, &MaxNetworkFeeUpdated { previous: MAX_NETWORK_FEE, current: 123 });
+    b.set_max_native_fee(&456);
+    assert_one_event(&t, &MaxNativeFeeUpdated { previous: MAX_NATIVE_FEE, current: 456 });
+
+    b.pause();
+    assert_one_event(&t, &PausedEvent { owner: t.owner.clone() });
+    b.unpause();
+    assert_one_event(&t, &UnpausedEvent { owner: t.owner.clone() });
+
+    let n = Address::generate(e);
+    b.transfer_ownership(&n);
+    assert_one_event(&t, &OwnershipTransferStarted { previous: t.owner.clone(), pending: n.clone() });
+    b.accept_ownership();
+    assert_one_event(&t, &OwnershipTransferred { previous: t.owner.clone(), current: n });
+
+    // Topic names the admin console / indexer can rely on.
+    let names: StdVec<std::string::String> = [
+        SignerUpdated { previous: BytesN::from_array(e, &[0; 32]), current: BytesN::from_array(e, &[0; 32]) }.topics(e),
+        PausedEvent { owner: t.owner.clone() }.topics(e),
+        OwnershipTransferred { previous: t.owner.clone(), current: t.owner.clone() }.topics(e),
+    ]
+    .into_iter()
+    .map(|tp| match xdr::ScVal::try_from_val(e, &tp.get(0).unwrap()).unwrap() {
+        xdr::ScVal::Symbol(sym) => sym.to_utf8_string().unwrap(),
+        _ => unreachable!(),
+    })
+    .collect();
+    assert_eq!(names, ["signer_updated", "paused", "ownership_transferred"]);
 }
