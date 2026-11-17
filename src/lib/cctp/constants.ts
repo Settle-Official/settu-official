@@ -36,6 +36,22 @@ export const FINALITY_THRESHOLD = {
 export const STELLAR_USDC_DECIMALS = 7;
 export const BASE_USDC_DECIMALS = 6;
 
+/**
+ * MessageTransmitterV2 — one address per network, shared by every EVM chain
+ * the bridge uses (Ethereum, Avalanche, OP, Arbitrum, Base, Polygon). Copied
+ * verbatim from Circle's raw docs on 2026-11-17 (curl, not summarized):
+ *   https://developers.circle.com/cctp/references/contract-addresses.md
+ * The testnet value previously used for Base (0x8745D906…) is Circle's
+ * testnet *TokenMessengerWithFees*, not the transmitter.
+ */
+export const EVM_MESSAGE_TRANSMITTER_V2_BY_NETWORK = {
+  mainnet: "0x81D40F21F12A8F0E3252Bccb954D722d4c464B64",
+  testnet: "0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275",
+} as const satisfies Record<CctpNetwork, `0x${string}`>;
+
+export const EVM_MESSAGE_TRANSMITTER_V2: `0x${string}` =
+  EVM_MESSAGE_TRANSMITTER_V2_BY_NETWORK[CCTP_NETWORK];
+
 export interface CctpAddresses {
   stellarTokenMessengerMinter: string;
   stellarMessageTransmitter: string;
@@ -62,7 +78,7 @@ const MAINNET: CctpAddresses = {
     "https://soroban-rpc.mainnet.stellar.gateway.fm",
   stellarNetworkPassphrase: "Public Global Stellar Network ; September 2015",
   baseTokenMessengerV2: "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d",
-  baseMessageTransmitterV2: "0x81D40F21F12A8F0E3252Bccb954D722d4c464B64",
+  baseMessageTransmitterV2: EVM_MESSAGE_TRANSMITTER_V2_BY_NETWORK.mainnet,
   baseUsdc: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
   irisApiUrl: process.env.CCTP_IRIS_API_URL || "https://iris-api.circle.com",
 };
@@ -80,11 +96,16 @@ const TESTNET: CctpAddresses = {
     "https://soroban-testnet.stellar.org",
   stellarNetworkPassphrase: "Test SDF Network ; September 2015",
   baseTokenMessengerV2: "0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA",
-  baseMessageTransmitterV2: "0x8745D906D67C346E5eb1aEEED38Eb87F34DF0C0A",
+  baseMessageTransmitterV2: EVM_MESSAGE_TRANSMITTER_V2_BY_NETWORK.testnet,
   baseUsdc: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
   irisApiUrl:
     process.env.CCTP_IRIS_API_URL_TESTNET ||
     "https://iris-api-sandbox.circle.com",
+};
+
+export const CCTP_CONFIGS: Record<CctpNetwork, CctpAddresses> = {
+  mainnet: MAINNET,
+  testnet: TESTNET,
 };
 
 export const CCTP_CONFIG: CctpAddresses =

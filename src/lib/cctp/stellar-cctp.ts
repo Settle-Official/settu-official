@@ -7,7 +7,11 @@ import {
   STELLAR_USDC_DECIMALS,
 } from "./constants";
 import { evmAddressToScvBytes32, zeroBytes32Scval } from "./address-encoding";
-import { getCctpStellarAccount, assertStellarGasFloor } from "./stellar-hot-wallet";
+import {
+  getCctpStellarAccount,
+  assertStellarGasFloor,
+  type StellarMintSigner,
+} from "./stellar-hot-wallet";
 
 const SEND_TX_TIMEOUT_SEC = 180;
 const AUTH_EXPIRATION_LEDGER_BUMP = 500;
@@ -154,13 +158,21 @@ export async function buildStellarBurnTx(params: {
  * an onramp transfer. Atomic per Circle's docs — mints to the forwarder and
  * pays the real recipient in one Soroban invocation, so there's no
  * partial-mint-but-unforwarded state to handle.
+ *
+ * `signer` picks the paying account: the onramp's hot wallet by default, or
+ * the user bridge's relayer (Stellar-destination bridges). Same Forwarder,
+ * same testnet-aware RPC (CCTP_CONFIG.stellarRpcUrl) either way.
  */
-export async function submitMintAndForward(params: {
-  messageHex: string; // 0x-prefixed
-  attestationHex: string; // 0x-prefixed
-}): Promise<string> {
-  await assertStellarGasFloor();
-  const keypair = getCctpStellarAccount();
+export async function submitMintAndForward(
+  params: {
+    messageHex: string; // 0x-prefixed
+    attestationHex: string; // 0x-prefixed
+  },
+  opts: { signer?: StellarMintSigner } = {},
+): Promise<string> {
+  const signer = opts.signer ?? "onramp";
+  await assertStellarGasFloor(signer);
+  const keypair = getCctpStellarAccount(signer);
   const server = new StellarSdk.rpc.Server(CCTP_CONFIG.stellarRpcUrl);
   const account = await server.getAccount(keypair.publicKey());
 

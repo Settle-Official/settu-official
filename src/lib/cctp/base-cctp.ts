@@ -3,15 +3,31 @@ import {
   createPublicClient,
   http,
   parseEther,
+  formatEther,
   encodeFunctionData,
+  type Chain,
   type Hex,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { base, baseSepolia } from "viem/chains";
+import {
+  arbitrum,
+  arbitrumSepolia,
+  avalanche,
+  avalancheFuji,
+  base,
+  baseSepolia,
+  mainnet,
+  optimism,
+  optimismSepolia,
+  polygon,
+  polygonAmoy,
+  sepolia,
+} from "viem/chains";
 import {
   CCTP_CONFIG,
   CCTP_DOMAIN,
   CCTP_NETWORK,
+  EVM_MESSAGE_TRANSMITTER_V2,
   FINALITY_THRESHOLD,
   BASE_USDC_DECIMALS,
 } from "./constants";
@@ -19,6 +35,9 @@ import {
   contractStrkeyToBytes32Hex,
   buildForwarderHookData,
 } from "./address-encoding";
+import type { EvmChainKey } from "./evm-chains";
+import { BRIDGE_CHAINS } from "../bridge/chains";
+import { reportGasBalance, type GasReading } from "../notify/gas-alert";
 
 export class CctpBaseGasError extends Error {
   constructor(message: string) {
@@ -55,17 +74,161 @@ function getClients() {
   };
 }
 
-async function assertBaseGasFloor(publicClient: ReturnType<typeof getClients>["publicClient"], address: Hex) {
-  const floor = parseEther(process.env.ONRAMP_MIN_GAS_ETH || "0.0005");
+/**
+ * The structural slice of viem's public + wallet clients the mint/burn paths
+ * use, so tests can pass fakes. Real clients are cast in at the factories.
+ */
+export interface EvmClients {
+  account: { address: Hex };
+  publicClient: {
+    getBalance(a: { address: Hex }): Promise<bigint>;
+    readContract(a: {
+      address: Hex;
+      abi: readonly unknown[];
+      functionName: string;
+      args: readonly unknown[];
+    }): Promise<unknown>;
+    getTransactionCount(a: { address: Hex; blockTag: "pending" }): Promise<number>;
+    estimateFeesPerGas(): Promise<{ maxFeePerGas: bigint; maxPriorityFeePerGas: bigint }>;
+    waitForTransactionReceipt(a: { hash: Hex }): Promise<{ status: string }>;
+  };
+  walletClient: {
+    sendTransaction(tx: {
+      to: Hex;
+      data: Hex;
+      nonce: number;
+      maxFeePerGas: bigint;
+      maxPriorityFeePerGas: bigint;
+    }): Promise<Hex>;
+  };
+}
+
+/**
+ * Who signs an EVM mint. "offramp": the existing Base hot wallet
+ * (ONRAMP_HOT_WALLET_PRIVATE_KEY, BASE_RPC_URL) — the live offramp path,
+ * unchanged. "bridge": the user-bridge relayer (BRIDGE_EVM_RELAYER_PRIVATE_KEY,
+ * one key for every EVM chain), RPC from BRIDGE_CHAINS[chain].rpcEnvVar.
+ */
+export type EvmMintSigner = "offramp" | "bridge";
+
+interface GasPolicy {
+  wallet: string;
+  unit: string;
+  floor: string;
+  warn: string;
+  /** Prefix for the refusal message. */
+  label: string;
+}
+
+/** Per-chain bridge relayer defaults, in the chain's native token (all 18 dp). */
+const BRIDGE_GAS_DEFAULTS: Record<EvmChainKey, { floor: string; warn: string }> = {
+  ethereum: { floor: "0.005", warn: "0.02" },
+  base: { floor: "0.0005", warn: "0.003" },
+  arbitrum: { floor: "0.0005", warn: "0.003" },
+  optimism: { floor: "0.0005", warn: "0.003" },
+  avalanche: { floor: "0.05", warn: "0.3" },
+  polygon: { floor: "0.5", warn: "5" },
+};
+
+function gasPolicy(chain: EvmChainKey, signer: EvmMintSigner): GasPolicy {
+  if (signer === "offramp") {
+    return {
+      wallet: "Base relayer",
+      unit: "ETH",
+      floor: process.env.ONRAMP_MIN_GAS_ETH || "0.0005",
+      warn: process.env.ONRAMP_WARN_GAS_ETH || "0.003",
+      label: "Base hot wallet ETH",
+    };
+  }
+  const c = BRIDGE_CHAINS[chain];
+  const env = chain.toUpperCase();
+  return {
+    wallet: `Bridge ${c.label} relayer`,
+    unit: c.nativeSymbol,
+    floor: process.env[`BRIDGE_${env}_MIN_GAS`] || BRIDGE_GAS_DEFAULTS[chain].floor,
+    warn: process.env[`BRIDGE_${env}_WARN_GAS`] || BRIDGE_GAS_DEFAULTS[chain].warn,
+    label: `Bridge ${c.label} relayer ${c.nativeSymbol}`,
+  };
+}
+
+/**
+ * Reports the balance (Telegram alert below warn/floor, throttled) and
+ * refuses to send below the floor. The throw is a CctpBaseGasError for every
+ * EVM chain; advance.ts treats it as "waiting on a top-up", not a failure.
+ */
+async function assertEvmGasFloor(
+  publicClient: Pick<EvmClients["publicClient"], "getBalance">,
+  address: Hex,
+  policy: GasPolicy,
+  report: (r: GasReading) => Promise<void> = reportGasBalance,
+): Promise<void> {
+  const floor = parseEther(policy.floor);
+  const warn = parseEther(policy.warn);
   const balance = await publicClient.getBalance({ address });
+  await report({
+    wallet: policy.wallet,
+    address,
+    unit: policy.unit,
+    balance: Number(formatEther(balance)),
+    floor: Number(formatEther(floor)),
+    warn: Number(formatEther(warn)),
+  });
   if (balance < floor) {
     throw new CctpBaseGasError(
-      `Base hot wallet ETH balance ${balance} below floor ${floor}; refusing to submit`,
+      `${policy.label} balance ${balance} below floor ${floor}; refusing to submit`,
     );
   }
 }
 
-type BaseClients = ReturnType<typeof getClients>;
+async function assertBaseGasFloor(publicClient: ReturnType<typeof getClients>["publicClient"], address: Hex) {
+  await assertEvmGasFloor(publicClient, address, gasPolicy("base", "offramp"));
+}
+
+const VIEM_CHAINS: Record<"mainnet" | "testnet", Record<EvmChainKey, Chain>> = {
+  mainnet: { ethereum: mainnet, base, arbitrum, optimism, avalanche, polygon },
+  testnet: {
+    ethereum: sepolia,
+    base: baseSepolia,
+    arbitrum: arbitrumSepolia,
+    optimism: optimismSepolia,
+    avalanche: avalancheFuji,
+    polygon: polygonAmoy,
+  },
+};
+
+function bridgeEvmClients(chain: EvmChainKey): EvmClients {
+  const pk = process.env.BRIDGE_EVM_RELAYER_PRIVATE_KEY;
+  if (!pk) throw new Error("BRIDGE_EVM_RELAYER_PRIVATE_KEY not configured");
+  const rpcVar = BRIDGE_CHAINS[chain].rpcEnvVar;
+  const rpcUrl = process.env[rpcVar];
+  if (!rpcUrl) throw new Error(`${rpcVar} not configured`);
+  const account = privateKeyToAccount((pk.startsWith("0x") ? pk : `0x${pk}`) as Hex);
+  const viemChain = VIEM_CHAINS[CCTP_NETWORK][chain];
+  const transport = http(rpcUrl);
+  return {
+    account,
+    publicClient: createPublicClient({ chain: viemChain, transport }),
+    walletClient: createWalletClient({ account, chain: viemChain, transport }),
+  } as unknown as EvmClients;
+}
+
+function defaultEvmClients(chain: EvmChainKey, signer: EvmMintSigner): EvmClients {
+  if (signer === "offramp") {
+    if (chain !== "base") throw new Error("the offramp hot wallet only mints on Base");
+    return getClients() as unknown as EvmClients;
+  }
+  return bridgeEvmClients(chain);
+}
+
+export interface EvmMintDeps {
+  clients(chain: EvmChainKey, signer: EvmMintSigner): EvmClients;
+  reportGasBalance(r: GasReading): Promise<void>;
+}
+
+const defaultEvmMintDeps: EvmMintDeps = {
+  clients: defaultEvmClients,
+  reportGasBalance,
+};
 
 export interface FeeQuote {
   maxFeePerGas: bigint;
@@ -117,7 +280,7 @@ export function bumpFees(fees: FeeQuote): FeeQuote {
  * replaces the stuck transaction instead.
  */
 async function sendWithFeeBump(
-  { account, publicClient, walletClient }: BaseClients,
+  { account, publicClient, walletClient }: EvmClients,
   tx: { to: Hex; data: Hex },
 ): Promise<Hex> {
   let nonce = await publicClient.getTransactionCount({
@@ -301,7 +464,7 @@ export async function submitBaseBurnWithHook(params: {
     args: [account.address, CCTP_CONFIG.baseTokenMessengerV2],
   });
   if (allowance < amount) {
-    const approveTx = await sendWithFeeBump(clients, {
+    const approveTx = await sendWithFeeBump(clients as unknown as EvmClients, {
       to: CCTP_CONFIG.baseUsdc,
       data: encodeFunctionData({
         abi: ERC20_APPROVE_ABI,
@@ -313,7 +476,7 @@ export async function submitBaseBurnWithHook(params: {
     await waitForAllowance(publicClient, account.address, amount);
   }
 
-  const burnTx = await sendWithFeeBump(clients, {
+  const burnTx = await sendWithFeeBump(clients as unknown as EvmClients, {
     to: CCTP_CONFIG.baseTokenMessengerV2,
     data: encodeFunctionData({
       abi: DEPOSIT_FOR_BURN_WITH_HOOK_ABI,
@@ -335,46 +498,72 @@ export async function submitBaseBurnWithHook(params: {
 }
 
 /**
- * Offramp mint: submits `receiveMessage` on Base's MessageTransmitterV2, gas
- * paid by our Base hot wallet. Permissionless — mints straight to whatever
- * mintRecipient was encoded at burn time (Paycrest's settlementAddress), not
- * to our wallet.
+ * Destination mint on any of the six EVM chains: `receiveMessage` on that
+ * chain's MessageTransmitterV2. Permissionless — the USDC goes to the
+ * mintRecipient encoded at burn time, never to the signer.
+ *
+ * Returns null when the message was already received (usedNonces set), so
+ * the caller can mark the transfer done instead of retrying into reverts.
+ * Throws CctpBaseGasError (after reporting the balance) below the gas floor.
+ * A bridge mint whose receipt reverted throws, so it is retried.
  */
-export async function submitBaseMint(params: {
-  messageHex: string;
-  attestationHex: string;
-}): Promise<string | null> {
-  const clients = getClients();
+export async function submitEvmMint(
+  chain: EvmChainKey,
+  params: { messageHex: string; attestationHex: string },
+  opts: { signer?: EvmMintSigner; deps?: Partial<EvmMintDeps> } = {},
+): Promise<string | null> {
+  const signer = opts.signer ?? "bridge";
+  const deps = { ...defaultEvmMintDeps, ...opts.deps };
+  const clients = deps.clients(chain, signer);
   const { account, publicClient } = clients;
+  const transmitter =
+    signer === "offramp" ? CCTP_CONFIG.baseMessageTransmitterV2 : EVM_MESSAGE_TRANSMITTER_V2;
 
   // Already minted (by an earlier attempt that we lost track of, or by hand)?
   // Then retrying can only revert, and a run of reverts freezes the transfer
   // as failed even though the money arrived. Null tells the caller "done".
-  if (await isMessageAlreadyMinted(publicClient, params.messageHex)) return null;
+  if (await isMessageAlreadyMinted(publicClient, transmitter, params.messageHex)) return null;
 
-  await assertBaseGasFloor(publicClient, account.address);
+  await assertEvmGasFloor(publicClient, account.address, gasPolicy(chain, signer), deps.reportGasBalance);
 
   const tx = await sendWithFeeBump(clients, {
-    to: CCTP_CONFIG.baseMessageTransmitterV2,
+    to: transmitter,
     data: encodeFunctionData({
       abi: RECEIVE_MESSAGE_ABI,
       functionName: "receiveMessage",
       args: [params.messageHex as Hex, params.attestationHex as Hex],
     }),
   });
-  await publicClient.waitForTransactionReceipt({ hash: tx });
+  const receipt = await publicClient.waitForTransactionReceipt({ hash: tx });
+  if (signer === "bridge" && receipt.status === "reverted") {
+    throw new Error(`receiveMessage reverted on ${chain}: ${tx}`);
+  }
   return tx;
 }
 
-async function isMessageAlreadyMinted(
-  publicClient: BaseClients["publicClient"],
+/**
+ * Offramp mint: submits `receiveMessage` on Base's MessageTransmitterV2, gas
+ * paid by our Base hot wallet. Permissionless — mints straight to whatever
+ * mintRecipient was encoded at burn time (Paycrest's settlementAddress), not
+ * to our wallet. A thin wrapper so the offramp is unchanged.
+ */
+export async function submitBaseMint(
+  params: { messageHex: string; attestationHex: string },
+  deps?: Partial<EvmMintDeps>,
+): Promise<string | null> {
+  return submitEvmMint("base", params, { signer: "offramp", deps });
+}
+
+export async function isMessageAlreadyMinted(
+  publicClient: Pick<EvmClients["publicClient"], "readContract">,
+  transmitter: Hex,
   messageHex: string,
 ): Promise<boolean> {
   const used = await publicClient.readContract({
-    address: CCTP_CONFIG.baseMessageTransmitterV2,
+    address: transmitter,
     abi: USED_NONCES_ABI,
     functionName: "usedNonces",
     args: [cctpMessageNonce(messageHex)],
   });
-  return used !== BigInt(0);
+  return BigInt(used as bigint) !== BigInt(0);
 }

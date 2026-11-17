@@ -51,3 +51,130 @@ test("cctpMessageNonce reads bytes 12-44 of a v2 message", () => {
   );
   assert.throws(() => cctpMessageNonce("0x00000001"));
 });
+
+// ------------------------------------------------------------ submitEvmMint
+
+import { decodeFunctionData, type Hex } from "viem";
+import { submitEvmMint, submitBaseMint, CctpBaseGasError, type EvmClients } from "./base-cctp";
+import { CCTP_CONFIG, EVM_MESSAGE_TRANSMITTER_V2 } from "./constants";
+import type { GasReading } from "../notify/gas-alert";
+
+const RECEIVE_ABI = [
+  {
+    type: "function",
+    name: "receiveMessage",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "message", type: "bytes" },
+      { name: "attestation", type: "bytes" },
+    ],
+    outputs: [{ name: "", type: "bool" }],
+  },
+] as const;
+
+const MSG = ("0x000000010000000600000003" + "ab".repeat(32) + "00".repeat(40)) as Hex;
+
+function fakeClients(o: { used?: bigint; balance?: bigint; status?: string } = {}) {
+  const sent: { to: Hex; data: Hex }[] = [];
+  const reads: { address: string; args: unknown[] }[] = [];
+  const clients = {
+    account: { address: "0x" + "9".repeat(40) },
+    publicClient: {
+      readContract: async (a: { address: string; args: unknown[] }) => {
+        reads.push(a);
+        return o.used ?? BigInt(0);
+      },
+      getBalance: async () => o.balance ?? BigInt(10) ** BigInt(18),
+      getTransactionCount: async () => 7,
+      estimateFeesPerGas: async () => ({ maxFeePerGas: BigInt(10), maxPriorityFeePerGas: BigInt(1) }),
+      waitForTransactionReceipt: async () => ({ status: o.status ?? "success" }),
+    },
+    walletClient: {
+      sendTransaction: async (tx: { to: Hex; data: Hex }) => {
+        sent.push(tx);
+        return "0xminted";
+      },
+    },
+  } as unknown as EvmClients;
+  return { clients, sent, reads };
+}
+
+test("submitEvmMint sends receiveMessage to the chain's MessageTransmitterV2 from the bridge relayer", async () => {
+  const f = fakeClients();
+  const seen: string[] = [];
+  const reports: GasReading[] = [];
+  const tx = await submitEvmMint(
+    "polygon",
+    { messageHex: MSG, attestationHex: "0x1234" },
+    {
+      signer: "bridge",
+      deps: {
+        clients: (chain, signer) => (seen.push(`${chain}:${signer}`), f.clients),
+        reportGasBalance: async (r) => void reports.push(r),
+      },
+    },
+  );
+  assert.equal(tx, "0xminted");
+  assert.deepEqual(seen, ["polygon:bridge"]);
+  assert.equal(f.sent.length, 1);
+  assert.equal(f.sent[0].to, EVM_MESSAGE_TRANSMITTER_V2);
+  assert.equal(f.reads[0].address, EVM_MESSAGE_TRANSMITTER_V2);
+  const decoded = decodeFunctionData({ abi: RECEIVE_ABI, data: f.sent[0].data });
+  assert.deepEqual(decoded.args, [MSG, "0x1234"]);
+  assert.equal(reports.length, 1);
+  assert.equal(reports[0].unit, "POL");
+  assert.match(reports[0].wallet, /Polygon/);
+});
+
+test("submitEvmMint returns null without sending when usedNonces is set", async () => {
+  const f = fakeClients({ used: BigInt(1) });
+  const tx = await submitEvmMint("arbitrum", { messageHex: MSG, attestationHex: "0x12" }, {
+    signer: "bridge",
+    deps: { clients: () => f.clients, reportGasBalance: async () => {} },
+  });
+  assert.equal(tx, null);
+  assert.equal(f.sent.length, 0);
+});
+
+test("submitEvmMint below the gas floor reports and throws CctpBaseGasError without sending", async () => {
+  const f = fakeClients({ balance: BigInt(1) });
+  const reports: GasReading[] = [];
+  await assert.rejects(
+    submitEvmMint("ethereum", { messageHex: MSG, attestationHex: "0x12" }, {
+      signer: "bridge",
+      deps: { clients: () => f.clients, reportGasBalance: async (r) => void reports.push(r) },
+    }),
+    CctpBaseGasError,
+  );
+  assert.equal(f.sent.length, 0);
+  assert.equal(reports.length, 1);
+  assert.equal(reports[0].unit, "ETH");
+});
+
+test("a reverted bridge mint throws (so it is retried), never reports success", async () => {
+  const f = fakeClients({ status: "reverted" });
+  await assert.rejects(
+    submitEvmMint("optimism", { messageHex: MSG, attestationHex: "0x12" }, {
+      signer: "bridge",
+      deps: { clients: () => f.clients, reportGasBalance: async () => {} },
+    }),
+    /reverted/,
+  );
+});
+
+test("submitBaseMint (offramp) stays on Base with the offramp hot wallet and Base's transmitter", async () => {
+  const f = fakeClients();
+  const seen: string[] = [];
+  const reports: GasReading[] = [];
+  const tx = await submitBaseMint(
+    { messageHex: MSG, attestationHex: "0x12" },
+    {
+      clients: (chain, signer) => (seen.push(`${chain}:${signer}`), f.clients),
+      reportGasBalance: async (r) => void reports.push(r),
+    },
+  );
+  assert.equal(tx, "0xminted");
+  assert.deepEqual(seen, ["base:offramp"]);
+  assert.equal(f.sent[0].to, CCTP_CONFIG.baseMessageTransmitterV2);
+  assert.equal(reports[0].wallet, "Base relayer");
+});
