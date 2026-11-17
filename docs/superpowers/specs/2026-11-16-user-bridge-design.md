@@ -31,7 +31,10 @@ Every section below is checked against these three points.
 - **A full, plain breakdown in USDC** before they confirm, and the same breakdown afterwards.
 - **The amount shown is guaranteed.** The user receives exactly that amount, or slightly more on Fast, and never less (§7).
 - **Completion doesn't depend on the user's tab.** Every bridge is driven to delivery on the server (§9).
-- **The platform fee is set in one place**, the admin console, and applies on all chains immediately (§6). It starts at **0.5%**.
+- **The platform fee is set in the admin console** and applies on all chains immediately (§6). There is one setting per speed: **0.3% on Standard, 0.6% on Fast** (team review, 2026-11-17). On Fast, Circle's Fast fee is paid out of Settu's 0.6%, so the user sees no separate Fast-fee line.
+- **The user chooses how to pay the network fee** (team review, 2026-11-17, owner decision):
+  - **From my USDC:** the default. The network fee is deducted in USDC.
+  - **In {native token}:** the user pays it in the source chain's own token (ETH, SOL, XLM, AVAX, POL) inside the same bridge transaction. It's still one signature, Settu still delivers, and the full USDC amount (minus the Settu fee) arrives.
 
 **Non-goals for this branch**
 - Mainnet launch. Contracts go to **testnets** and are exercised there. Mainnet deployment waits for a security audit (§12).
@@ -111,9 +114,15 @@ Follow the mockup, which uses the app's existing pieces:
 - **Swap button** between the cards: it swaps chains, wallets and the address. Picking the chain the other card already uses also swaps them. From and To can never be the same chain.
 - **To card:** a chain dropdown, a Connect wallet pill, **or** "or paste a {chain} address" with a warning: "Check this address carefully. Bridged USDC can't be recalled or redirected. If this isn't your {chain} address, the funds are lost for good."
 - **Transfer speed:** Fast or Standard, with an estimated time on each. It uses the same control as the offramp's USDC/NGN switch. If Fast costs nothing extra on a route, both options still show, with "no extra fee" on Fast.
+- **Network fee:** a two-option switch styled like the speed control, "From my USDC" or "In {native symbol}". "In {native}" is only enabled when the connected source wallet holds enough of that token for its own gas plus the fee. Otherwise it's disabled, with "Not enough {native}".
 - **Receive card:**
   - The headline reads "You'll receive on {chain}" with the amount in gold. On Fast it's prefixed "at least".
-  - Show fee reveals every line in USDC: You send, Settu fee (0.5%), Fast transfer fee (Fast only), Network fee on {chain}, Estimated time.
+  - Show fee reveals every line:
+    - You send
+    - Settu fee (0.3% or 0.6%, in USDC)
+    - Network fee on {chain}, either "{x} USDC" or "{y} {native} (paid separately)"
+    - Estimated time
+  - **There is no Fast-fee line.**
 - **Button:** "Bridge {amount} USDC". It's disabled until amount, wallet, address and quote are all valid, with a reason shown.
 
 **Wallets on mobile:** connect as the offramp does today. That includes the WalletConnect relay proxy, connecting directly inside a wallet's own browser, and the 1.1.1.1 advice.
@@ -138,14 +147,21 @@ EVM sources add "Approve USDC" first, the first time only, unless a permit is us
 ## 5. On-chain: Settu bridge contracts (option C)
 
 One contract per chain family. Each one, in a single user-signed call:
-1. verifies a **Settu-signed quote** (§6);
-2. moves the **fee** (Settu fee plus network fee, in USDC) from the user to Settu's fee wallet;
-3. calls Circle's CCTP burn with `amount − fee` and the quote's `destinationDomain`, `mintRecipient`, `maxFee` and finality;
+1. verifies a **Settu-signed quote** (§6). The quote carries three fees:
+   - `settuFee` (USDC): Settu's share, already net of Circle's Fast fee on Fast
+   - `networkFee` (USDC): non-zero only when the user pays the network fee in USDC
+   - `nativeFee` (source native token): non-zero only when they pay in the gas token
+2. moves `settuFee + networkFee` USDC from the user to Settu's fee wallet. If `nativeFee` > 0, the same call moves exactly that amount of native token from the user to the fee wallet (EVM: `msg.value` must equal it; Stellar: the native XLM asset contract; Solana: a system transfer);
+3. calls Circle's CCTP burn with `amount − settuFee − networkFee` and the quote's `destinationDomain`, `mintRecipient`, `maxFee` and finality;
 4. emits an event with the quote nonce, user, amounts, destination and recipient, which the server indexes (§9).
 
 **Common rules**
 - The contract holds **no balance** after a call.
-- It stores only three things: the quote-signer public key, the fee wallet, and the **maximum fee cap** (start at 1%).
+- It stores only these: the quote-signer public key, the fee wallet, and three limits. Each limit is owner-set:
+  - **`maxFeeBps`**, the cap on `settuFee` as a share of the amount. It starts at 1%.
+  - **`maxNetworkFee`**, an absolute USDC limit on `networkFee`.
+  - **`maxNativeFee`**, an absolute native-token limit on `nativeFee`.
+  - The network fee is kept out of the percentage cap on purpose. On a small bridge from an expensive chain, gas alone can be more than 1% of the amount, and those bridges must still work. The two absolute limits still stop a stolen signing key from overcharging.
 - An **owner** account controls the contract. It's separate from the server and held by the business owner. Only the owner can change the signer, the fee wallet or the cap, and can pause the contract.
 - **The cap is changeable by Settu from the admin console (owner's decision), but only with the owner wallet signing.** It is never changed with a server-held key.
   - **Why the owner wallet:** the cap exists so that a stolen quote-signing key can't overcharge users. A server-side key that could also raise the cap would defeat that.
@@ -160,7 +176,7 @@ One contract per chain family. Each one, in a single user-signed call:
   - not be expired (about 2 minutes),
   - have a nonce that hasn't been used (stored on-chain),
   - be for this exact user, amount and chain,
-  - charge a fee no higher than the cap.
+  - have `settuFee × 10,000 ≤ maxFeeBps × amount`, `networkFee ≤ maxNetworkFee` and `nativeFee ≤ maxNativeFee`.
 - **`destinationCaller` is zero**, so anyone can submit the mint. Settu normally does it, but the user can always claim it themselves (§9).
 - Keep the contracts small, with no upgradeable proxy unless the auditor recommends one. A redeploy plus a config switch is the upgrade path.
 
@@ -186,23 +202,28 @@ One contract per chain family. Each one, in a single user-signed call:
 ## 6. Quotes and the admin fee setting
 
 **Admin console**
-- A new setting **"Bridge fee (%)"** applies to every route, starting at **0.5%**.
-- It's stored server-side (Redis key, with an audit entry recording who, when, old value and new value).
-- It's validated to be no higher than the lowest on-chain cap.
+- Two settings apply to every route: **"Bridge fee, Standard (%)"**, starting at **0.3%**, and **"Bridge fee, Fast (%)"**, starting at **0.6%**.
+- They're stored server-side (Redis, with an audit entry recording who, when, which speed, old value and new value).
+- Each is validated to be no higher than the lowest on-chain cap.
 - A change applies to the next quote. No contract transactions are needed.
+- **The owner-signed limits panel** (§5) covers `maxFeeBps`, `maxNetworkFee` and `maxNativeFee` per chain.
 
 **The `POST /api/bridge/quote` endpoint**
 - **Takes:** source chain, destination chain, amount, Fast or Standard, user's source address, recipient.
 - **Returns:** the signed quote, plus the breakdown the UI shows, plus `expiresAt`.
 
 **How the quote is computed**
-- **Settu fee:** amount × fee setting.
-- **Fast fee:** from Iris, for this source and destination. That value is the `maxFee` passed to CCTP.
+- **Settu fee shown:** amount × that speed's fee setting, rounded up.
+- **Fast fee:** from Iris, for this source and destination. That value is the `maxFee` passed to CCTP. It comes out of the Settu fee shown, and the remainder is the quote's `settuFee`.
+  - **Standard:** `settuFee` = the full Settu fee shown, and `maxFee` = 0.
+  - **Fast:** `settuFee` = Settu fee shown − `maxFee`.
+  - **If `maxFee` is bigger than the Settu fee shown, there's no Fast quote.** Fall back to offering Standard only, and log it.
+- **Network fee mode:** the request says `usdc` or `native`. In USDC mode the estimate below becomes `networkFee`. In native mode it's priced in the source chain's native token and becomes `nativeFee`.
 - **Network fee:** the destination mint gas, converted to USDC, plus a safety margin (the builder picks it and documents it). The conversion is `gasPrice × gasUsed` in the native token, then native/USD.
   - For Solana, add the ATA rent if the recipient has no USDC account yet.
   - For Stellar, add the forwarder mint fee in XLM.
 - **The native/USD price source** is the builder's choice. It must be reliable and fail closed: if the price is missing, there's no quote.
-- **Guaranteed receive amount:** amount − Settu fee − network fee − maxFee.
+- **Guaranteed receive amount:** amount − Settu fee shown − `networkFee` (which is 0 in native mode). That equals `amount − settuFee − networkFee − maxFee`.
 
 **Fail closed.** If any input is missing (price, Iris fee, gas estimate), there's no quote. The UI says "Couldn't get a price right now — try again in a moment".
 
@@ -307,8 +328,9 @@ These are the owner's decisions:
 - **All 8 chains** as source and destination.
 - **Fast/Standard** toggle.
 - **The user pays** the costs.
-- **0.5% platform fee** to start, changeable from the admin console with **one setting for all chains**.
-- **Fast fee** shown separately.
+- **Platform fee 0.3% on Standard and 0.6% on Fast**, changeable from the admin console. Each speed is one setting for all chains (team review, 2026-11-17; this replaces the original 0.5%).
+- **No separate Fast-fee line.** Circle's Fast fee is paid out of Settu's 0.6% (team review).
+- **The user chooses to pay the network fee from their USDC or in the source chain's gas token**, in the same transaction (team review, owner decision).
 - **Settu claims on the destination** and the gas is charged in USDC.
 - **Option C:** Settu's own contract on each chain, with the fee taken in the same transaction as the bridge.
 - **Allbridge-style From/To cards**, each with its own chain picker and wallet connect.
@@ -322,6 +344,7 @@ These are the owner's decisions:
 
 These are my calls in the design, which the owner can override:
 - Signed quotes, with an on-chain fee cap (1%), rather than storing the fee on-chain.
+- The 1% cap applies to Settu's fee only. The network fee has its own absolute limits, in USDC and in the native token, so small bridges from expensive chains aren't refused.
 - `destinationCaller` zero, plus **Claim it yourself**.
 - "At least" wording for Fast.
 - Settu creates a missing Solana USDC account and charges its rent in the network fee.

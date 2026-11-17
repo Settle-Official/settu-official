@@ -44,8 +44,13 @@
 - USDC decimals: 6 on EVM and Solana, 7 on Stellar. Amounts leaving Stellar must be multiples of 10 Stellar units.
 
 **Fees and quotes**
-- Platform fee defaults to **50 bps (0.5%)**. It's one setting for every route and must be ≤ the lowest on-chain cap.
-- On-chain fee cap defaults to **100 bps (1%)**. Only the owner wallet can change it, never a server key.
+- Platform fee by speed: **Standard 30 bps (0.3%)**, **Fast 60 bps (0.6%)** (team review 2026-11-17). It's one setting per speed for every route, and each must be ≤ the lowest on-chain cap.
+- On Fast, Circle's Fast fee (`maxFee`) is paid out of the 0.6%. **The UI shows no Fast-fee line.**
+- The network fee is paid either **from USDC** (`networkFee`, the default) or **in the source chain's native token in the same transaction** (`nativeFee`). The user chooses.
+- On-chain limits (owner wallet only, never a server key):
+  - `maxFeeBps` (starts at 100 bps, 1%), which caps **`settuFee` only**
+  - `maxNetworkFee` (absolute USDC)
+  - `maxNativeFee` (absolute native units)
 - Quote lifetime: **120 s**. Each nonce is single-use, enforced on-chain.
 - Contracts store only the signer key, the fee wallet, the cap, the used nonces and the paused flag. They hold no USDC after a call. `destinationCaller` is always zero.
 
@@ -61,6 +66,8 @@
 | Stepper steps | "Confirm transaction in wallet", "Sending from {source}", "Verifying the transfer", "Delivering on {destination}", "Arrived in your wallet" (EVM without permit adds "Approve USDC" first) |
 | Paste warning | "Check this address carefully. Bridged USDC can't be recalled or redirected. If this isn't your {chain} address, the funds are lost for good." |
 | Receive headline | "You'll receive on {chain}", prefixed "at least" for Fast |
+| Fee lines | "You send", "Settu fee (0.3%)" / "Settu fee (0.6%)", "Network fee on {chain}" showing "{x} USDC" or "{y} {native} (paid separately)", "Estimated time". **No Fast-fee line.** |
+| Network fee switch | "From my USDC" / "In {native symbol}"; disabled with "Not enough {native}" when the source wallet can't cover gas plus `nativeFee` |
 | No-quote message | "Couldn't get a price right now — try again in a moment" |
 | Fallback to Standard | "Taking the standard route — still on its way" |
 | Stellar secret key pasted | "That's a secret key — never paste it anywhere" |
@@ -193,13 +200,17 @@ These are inputs the spec implies but which are easy to get wrong. The test that
 - Test: `src/lib/bridge/quote.test.ts`
 
 **Interfaces:**
-- Produces: `interface BridgeQuote { version: 1; sourceDomain: number; destDomain: number; user: string; amount: bigint; totalFee: bigint; mintRecipient: `0x${string}`; hookData: `0x${string}`; maxFee: bigint; minFinality: 1000 | 2000; deadline: number; nonce: `0x${string}` }`.
+- Produces: `interface BridgeQuote { version: 1; sourceDomain: number; destDomain: number; user: string; amount: bigint; settuFee: bigint; networkFee: bigint; nativeFee: bigint; mintRecipient: `0x${string}`; hookData: `0x${string}`; maxFee: bigint; minFinality: 1000 | 2000; deadline: number; nonce: `0x${string}` }`.
+  - `settuFee` is USDC, net of `maxFee` on Fast.
+  - `networkFee` is USDC, non-zero only in USDC mode.
+  - `nativeFee` is in the source chain's native units (wei, stroops or lamports), non-zero only in native mode.
+  - EIP-712 type, exactly: `Quote(uint8 version,uint32 sourceDomain,uint32 destDomain,address user,uint256 amount,uint256 settuFee,uint256 networkFee,uint256 nativeFee,bytes32 mintRecipient,bytes hookData,uint256 maxFee,uint32 minFinality,uint64 deadline,bytes32 nonce)` (Ruling E, amended).
   - `mintRecipient` is bytes32: for Stellar destinations it's the forwarder, and for Solana it's the recipient's USDC ATA.
   - `hookData` is `0x` unless the destination is Stellar, where it's `buildForwarderHookData(user G)`.
   - `deadline` is in unix seconds. `nonce` is 32 random bytes.
 - `user` is the source-chain address in that family's native form:
   - **EVM:** EIP-712 domain `{ name: "SettuBridge", version: "1", chainId, verifyingContract }`, with type `Quote` holding the fields above (`user` as `address`, `bytes32` for the hashes, `bytes` for `hookData`). `signEvmQuote(quote, chainId, verifyingContract, privateKey): Promise<Hex>` and `recoverEvmQuoteSigner(...)`.
-  - **Stellar and Solana:** `encodeQuoteBytes(quote, family: "stellar" | "solana", contractId: string): Uint8Array`. This is a fixed big-endian layout: `"SETTU_BRIDGE_V1"` ‖ contractId bytes (32) ‖ srcDomain u32 ‖ destDomain u32 ‖ user (32 bytes: Stellar ed25519 public key, Solana pubkey) ‖ amount u64 ‖ totalFee u64 ‖ mintRecipient 32 ‖ maxFee u64 ‖ minFinality u32 ‖ deadline u64 ‖ nonce 32 ‖ hookData length u32 ‖ hookData. `signEd25519Quote(bytes, secret): Uint8Array(64)` and `verifyEd25519Quote(bytes, sig, pubkey): boolean`.
+  - **Stellar and Solana:** `encodeQuoteBytes(quote, family: "stellar" | "solana", contractId: string): Uint8Array`. This is a fixed big-endian layout: `"SETTU_BRIDGE_V1"` ‖ contractId bytes (32) ‖ srcDomain u32 ‖ destDomain u32 ‖ user (32 bytes: Stellar ed25519 public key, Solana pubkey) ‖ amount u64 ‖ settuFee u64 ‖ networkFee u64 ‖ nativeFee u64 ‖ mintRecipient 32 ‖ maxFee u64 ‖ minFinality u32 ‖ deadline u64 ‖ nonce 32 ‖ hookData length u32 ‖ hookData. `signEd25519Quote(bytes, secret): Uint8Array(64)` and `verifyEd25519Quote(bytes, sig, pubkey): boolean`.
 - Keys come from env `BRIDGE_QUOTE_SIGNER_EVM_KEY` (hex) and `BRIDGE_QUOTE_SIGNER_ED25519_SECRET`. These are new keys, distinct from the relayer and the owner.
 
 - [ ] **Step 1: Failing tests:**
@@ -208,6 +219,44 @@ These are inputs the spec implies but which are easy to get wrong. The test that
   - **Golden vectors:** a test helper writes `contracts/test-vectors/quotes.json` with three cases (EVM, Stellar, Solana), each holding quote fields, encoded bytes or digest, signature and signer. A test asserts the file matches what's generated now, so the file can't drift silently.
 - [ ] **Step 2:** FAIL. **Step 3:** Implement (viem `signTypedData` / `recoverTypedDataAddress`; Node `crypto` ed25519 or `tweetnacl`). **Step 4:** PASS.
 - [ ] **Step 5:** Commit: `feat(bridge): quote encoding, signing, golden vectors`.
+
+### Task 4a: Fee by speed and the network-fee choice (amends Tasks 3 and 4)
+
+This was added after the team review on 2026-11-17. Tasks 3 and 4 were already built, so this task changes their code.
+
+**Files:**
+- Modify: `src/lib/bridge/fee-settings.ts`, `src/lib/bridge/fee-settings.test.ts`
+- Modify: `src/lib/bridge/quote-math.ts`, `src/lib/bridge/quote-math.test.ts`
+
+**Interfaces:**
+- **Fee settings:**
+  - `DEFAULT_BRIDGE_FEE_BPS = { standard: 30, fast: 60 } as const` replaces the single 50.
+  - `getBridgeFeeBps(speed: Speed): Promise<number>` reads Redis key `bridge:fee-bps:<speed>`. It falls back to the default **when the stored value isn't an integer in [0, 10000]** (this fixes the Task 3 deferred minor).
+  - `setBridgeFeeBps(speed: Speed, bps, actor, lowestCapBps)`. Audit entries gain `speed`.
+  - `validateFeeBps` also rejects a non-finite or negative `lowestCapBps`.
+- **`computeBreakdown` input:** `{ source; dest; amount; speed; feeBps; fastFeeBps; networkFeeMode: "usdc" | "native"; networkFeeAtomic: bigint /* USDC, used in usdc mode */; nativeFeeAtomic: bigint /* source native units, used in native mode */ }`.
+- **`Breakdown`:** `{ sendAtomic; settuFeeShownAtomic; settuFeeAtomic; fastFeeMaxAtomic; networkFeeAtomic; nativeFeeAtomic; burnAtomic; receiveAtomic; receiveIsMinimum; adjustedAmount? }`, computed as:
+  - `settuFeeShownAtomic` = ceil(`sendAtomic × feeBps / 10000`). This is the "Settu fee (0.3%/0.6%)" line.
+  - `fastFeeMaxAtomic` = `computeAtomicFee(fastFeeBps, sendAtomic)` on Fast, else 0. It's computed on `sendAtomic`, an upper bound on the burned amount, so `maxFee` is never below Circle's minimum.
+  - `settuFeeAtomic` = `settuFeeShownAtomic − fastFeeMaxAtomic`. This is what the contract sends to Settu.
+  - `networkFeeAtomic` is the input in usdc mode and 0 in native mode. `nativeFeeAtomic` is the input in native mode and 0 in usdc mode.
+  - `burnAtomic` = `send − settuFee − networkFee`.
+  - `receiveAtomic` = `send − settuFeeShown − networkFee`, which equals `burn − fastFeeMax`.
+- **Errors:**
+  - `{ error, code: "fast_unavailable" }` when `fastFeeMaxAtomic > settuFeeShownAtomic`
+  - "too small" when `receiveAtomic ≤ 0`
+  - reject a negative `networkFeeAtomic` or `nativeFeeAtomic` (fixes the Task 4 deferred minor)
+  - set `adjustedAmount` only when the dropped Stellar digit is non-zero (fixes the Task 4 deferred minor)
+
+- [ ] **Step 1: Failing tests:**
+  - Standard, 100 USDC, 30 bps, usdc mode, network 630000 → shown 300000, settu 300000, fastMax 0, burn 99_070_000, receive 99_070_000, `receiveIsMinimum` false.
+  - Fast, 100 USDC, 60 bps, fastFee 1.3 bps, usdc mode, network 630000 → shown 600000, fastMax 13000 (`computeAtomicFee(1.3, 100_000_000)`), settu 587000, burn 98_783_000, receive 98_770_000, `receiveIsMinimum` true.
+  - Native mode, same Fast inputs with `nativeFeeAtomic` 210000000000000 → networkFee 0, nativeFee passed through, receive 99_400_000.
+  - `fastFeeBps` so large that fastMax > shown → `code === "fast_unavailable"`.
+  - Stellar `"10.1234560"` → no `adjustedAmount`. `"10.1234567"` → `adjustedAmount` `"10.123456"`.
+  - A stored fee of `"abc"` → `getBridgeFeeBps` returns the default (inject the reader for the test).
+- [ ] **Step 2:** FAIL. **Step 3:** Implement. **Step 4:** PASS (full suite).
+- [ ] **Step 5:** Commit: `feat(bridge): fee by speed and network-fee choice`.
 
 ---
 
@@ -218,16 +267,25 @@ Each contract implements the same logic (spec §5). The function is `bridge(quot
 2. Check `now ≤ deadline`.
 3. Check the nonce is unused, then mark it used.
 4. Check the quote's `user` equals the caller/authoriser, and its `amount` and `sourceDomain` equal this chain's.
-5. Check `totalFee * 10_000 ≤ maxFeeBps * amount`.
+5. Check the three limits:
+   - `settuFee * 10_000 ≤ maxFeeBps * amount`
+   - `networkFee ≤ maxNetworkFee`
+   - `nativeFee ≤ maxNativeFee`
 6. Verify the signature against `signer`.
-7. Move `totalFee` USDC from the user to `feeWallet`.
-8. Burn `amount − totalFee` through CCTP with the quote's destination, recipient, `maxFee`, finality and `hookData` (`WithHook` when `hookData` is non-empty).
-9. Emit `Bridged(nonce, user, amount, totalFee, destDomain, mintRecipient, minFinality)`.
+7. Move `settuFee + networkFee` USDC from the user to `feeWallet`. If `nativeFee > 0`, also move exactly `nativeFee` of the native token from the user to `feeWallet`:
+   - **EVM:** `msg.value == nativeFee` is required (and `msg.value == 0` when it's zero). Forward the value with a checked call.
+   - **Stellar:** transfer through the native XLM Stellar Asset Contract.
+   - **Solana:** a system-program transfer.
+8. Burn `amount − settuFee − networkFee` through CCTP with the quote's destination, recipient, `maxFee`, finality and `hookData` (`WithHook` when `hookData` is non-empty).
+9. Emit `Bridged(nonce, user, amount, settuFee, networkFee, nativeFee, destDomain, mintRecipient, minFinality)`.
 
-**Owner-only:** `setSigner`, `setFeeWallet`, `setMaxFeeBps`, `pause`, `unpause`, `transferOwnership`. Initial `maxFeeBps` = 100.
+**Owner-only:** `setSigner`, `setFeeWallet`, `setMaxFeeBps`, `setMaxNetworkFee`, `setMaxNativeFee`, `pause`, `unpause`, `transferOwnership`. Initial values: `maxFeeBps` = 100. `maxNetworkFee` and `maxNativeFee` are constructor/initialize arguments, chosen at deploy for each chain.
 
 **Every contract's tests must include:**
-- correct fee and burn amounts, with a zero contract balance after
+- correct fee and burn amounts, with a zero contract balance after, in both USDC mode and native mode (the native amount reaches `feeWallet` exactly)
+- a native amount that doesn't match `nativeFee` → revert
+- `networkFee` over `maxNetworkFee` → revert
+- `nativeFee` over `maxNativeFee` → revert
 - expired quote → revert
 - reused nonce → revert
 - fee over the cap → revert
@@ -246,8 +304,9 @@ Each contract implements the same logic (spec §5). The function is `bridge(quot
 **Interfaces:**
 - Consumes: the EIP-712 schema and golden vector from Task 5.
 - Produces: `function bridge(Quote calldata q, bytes calldata sig, Permit calldata p) external`, where `struct Permit { uint256 value; uint256 deadline; uint8 v; bytes32 r; bytes32 s; bool use; }`. When `use` is true, call `IERC20Permit.permit` first. A permit that fails because the allowance already exists must not revert (try/catch).
-- `event Bridged(bytes32 indexed nonce, address indexed user, uint256 amount, uint256 totalFee, uint32 destDomain, bytes32 mintRecipient, uint32 minFinality)`.
-- Constructor: `(address usdc, address tokenMessenger, uint32 localDomain, address signer, address feeWallet, address owner)`.
+- `function bridge(...) external payable`.
+- `event Bridged(bytes32 indexed nonce, address indexed user, uint256 amount, uint256 settuFee, uint256 networkFee, uint256 nativeFee, uint32 destDomain, bytes32 mintRecipient, uint32 minFinality)`.
+- Constructor: `(address usdc, address tokenMessenger, uint32 localDomain, address signer, address feeWallet, address owner, uint256 maxNetworkFee, uint256 maxNativeFee)`.
 - OpenZeppelin `EIP712`, `SafeERC20`, `ReentrancyGuard`, `Ownable2Step`, `Pausable`. No proxy.
 
 - [ ] **Step 1:** Write the Foundry tests listed above, using a mock TokenMessengerV2 that records its `depositForBurn` / `depositForBurnWithHook` arguments.
@@ -265,7 +324,8 @@ Each contract implements the same logic (spec §5). The function is `bridge(quot
 - Produces:
   - `fn bridge(env, user: Address, quote: QuoteArgs, signature: BytesN<64>)`. `user.require_auth()` must cover the nested USDC transfer and Circle's `deposit_for_burn` / `deposit_for_burn_with_hook` on `stellarTokenMessengerMinter`.
   - `__constructor(admin, usdc, token_messenger, local_domain, signer: BytesN<32>, fee_wallet)`.
-  - Events: topic `("bridged", nonce)`, data `(user, amount, total_fee, dest_domain, mint_recipient, min_finality)`.
+  - Events: topic `("bridged", nonce)`, data `(user, amount, settu_fee, network_fee, native_fee, dest_domain, mint_recipient, min_finality)`.
+  - The constructor also takes `native_token` (the native XLM SAC address), `max_network_fee` and `max_native_fee`.
 - The quote message is `encodeQuoteBytes(…, "stellar", <this contract id>)` from Task 5. Verify it with `env.crypto().ed25519_verify`.
 - Read the existing allowance flow in `src/lib/cctp/stellar-cctp.ts` (`checkStellarUsdcAllowance` / `buildApproveUsdcTx`). With nested auth, Circle's messenger pulls from `user` directly. Confirm this in a test with a mock messenger that calls `token.transfer_from` or `burn` the same way the real one does. Read Circle's Stellar CCTP contract source or interface to match it exactly.
 
@@ -283,7 +343,7 @@ Each contract implements the same logic (spec §5). The function is `bridge(quot
 **Interfaces:**
 - Produces: instruction `bridge(quote: QuoteArgs)`. It verifies that the **immediately preceding instruction** is an Ed25519SigVerify instruction over `encodeQuoteBytes(…, "solana", program_id)` with the stored signer pubkey (read through the instructions sysvar). Then it does an SPL transfer of `total_fee` from the user's USDC ATA to the fee wallet's ATA, and a CPI to Circle's TokenMessengerMinterV2 `deposit_for_burn` / `deposit_for_burn_with_hook` with the user as signer.
 - Accounts mirror `buildSolanaDepositForBurnInstruction` in `src/lib/solana/deposit-for-burn.ts` (vendored IDL `src/lib/solana/idl/token_messenger_minter_v2.json`), plus `config` (PDA), `nonce_record` (PDA seeded by the nonce, `init`: a reused nonce fails), and `fee_token_account`.
-- Instructions: `initialize(signer, fee_wallet, max_fee_bps)`, `set_signer`, `set_fee_wallet`, `set_max_fee_bps`, `set_paused`.
+- Instructions: `initialize(signer, fee_wallet, max_fee_bps, max_network_fee, max_native_fee)`, `set_signer`, `set_fee_wallet`, `set_max_fee_bps`, `set_max_network_fee`, `set_max_native_fee`, `set_paused`. A `native_fee` in lamports moves user → fee wallet through a system-program CPI.
 - Event `Bridged`.
 
 - [ ] **Step 1:** Write Anchor tests (bankrun or a local validator with a Circle program mock, or the cloned devnet programs) for the list above. Include: a missing ed25519 instruction → error, an ed25519 instruction for different bytes → error.
@@ -319,13 +379,16 @@ Each contract implements the same logic (spec §5). The function is `bridge(quot
 - Test: `src/lib/bridge/network-fee.test.ts`
 
 **Interfaces:**
-- Produces: `estimateNetworkFeeAtomic(dest: BridgeChainKey, opts: { needsSolanaAta: boolean }, deps?: NetworkFeeDeps): Promise<bigint>` (6-decimal USDC), where `NetworkFeeDeps = { gasCostNative(dest): Promise<bigint /* wei | lamports | stroops */>; nativeUsdPrice(dest): Promise<number> }`. The defaults use the chain RPCs and the chosen price source.
+- Produces: `estimateNetworkFee(dest: BridgeChainKey, source: BridgeChainKey, opts: { needsSolanaAta: boolean }, deps?: NetworkFeeDeps): Promise<{ usdcAtomic: bigint /* 6-dec */; nativeAtomic: bigint /* SOURCE chain native units */ }>`, where `NetworkFeeDeps = { gasCostNative(dest): Promise<bigint /* wei | lamports | stroops */>; nativeUsdPrice(chain: BridgeChainKey): Promise<number> }`.
+  - `usdcAtomic` is the destination gas cost in USD, with the margin applied, in 6-decimal USDC.
+  - `nativeAtomic` is that same USD value converted into the source chain's native token: wei for EVM (18 decimals), stroops for Stellar (7), lamports for Solana (9), rounded up.
+  - The defaults use the chain RPCs and the chosen price source.
 - Per-family gas units come from measured testnet mints (Task 14): EVM `receiveMessage`, Stellar `mint_and_forward`, Solana `receive_message`, plus ATA rent (2,039,280 lamports) when `needsSolanaAta`.
 - Margin: `NETWORK_FEE_MARGIN = 1.25` (builder's call per spec §12; documented in code).
 - **Fails closed:** a missing or zero price, or an RPC error → throw `NetworkFeeUnavailableError`.
 
 - [ ] **Step 1: Failing tests with injected deps:**
-  - EVM: 0.0001 ETH at $3,000 → 375000 (0.30 × 1.25).
+  - EVM dest: 0.0001 ETH at $3,000 → `usdcAtomic` 375000 (0.30 × 1.25). With source solana at $150 → `nativeAtomic` 2500000 lamports (0.375 / 150 = 0.0025 SOL).
   - Solana with ATA: rent is included.
   - Price 0 → throws `NetworkFeeUnavailableError`.
   - Price rejects → throws.
@@ -342,6 +405,10 @@ Each contract implements the same logic (spec §5). The function is `bridge(quot
 
 **Interfaces:**
 - Consumes: Tasks 1–5, 9, 10.
+- The request also carries `networkFeeMode: "usdc" | "native"`.
+  - In native mode, check the user's source native balance covers `nativeFee` plus an estimate of their own source-gas. If it doesn't, return `{ error, code: "insufficient_native" }`, and the UI shows "Not enough {native}".
+  - The speed's fee comes from `getBridgeFeeBps(speed)` (Task 4a).
+  - A `fast_unavailable` breakdown → HTTP 409 with that code, so the UI can switch to Standard.
 - Produces:
   - `checkDestinationLive(chain, address, deps?): Promise<{ ok: true; solanaAta?: string; needsSolanaAta?: boolean } | { ok: false; code: "no_account" | "no_trustline" | "token_account"; message: string }>`
   - `buildQuote(req: QuoteRequest, deps?): Promise<QuoteResponse>`, where `QuoteRequest = { source; dest; amount: string; speed: Speed; user: string; recipient: string }` and `QuoteResponse = { quote: BridgeQuote (bigint→string serialised); signature: string; breakdown: Breakdown (serialised); expiresAt: number; contract: string } | { error: string; code: string }`
@@ -370,13 +437,13 @@ Each contract implements the same logic (spec §5). The function is `bridge(quot
 **Interfaces:**
 - Consumes: `QuoteResponse` (Task 11) and `bridgeContractFor` (Task 9).
 - Produces: `buildSourceTx(q: QuoteResponse, userAddress: string, opts: { permit?: PermitSig }): Promise<SourceTx>`:
-  - **EVM:** `{ family: "evm"; chainId; to; data; needsApproval: boolean }`. `needsApproval` is true when the allowance is below the amount and there's no permit.
+  - **EVM:** `{ family: "evm"; chainId; to; data; value: string /* wei, = nativeFee */; needsApproval: boolean }`. `needsApproval` is true when the allowance is below the amount and there's no permit.
   - **Stellar:** `{ family: "stellar"; xdr }`, an unsigned, simulated, assembled invoke of `bridge`.
   - **Solana:** `{ family: "solana"; txBase64 }`, an unsigned v0 tx of [Ed25519 verify ix, `bridge` ix] plus the MessageSent event keypair partially signed by the server, as `solana-build-tx` does today.
 - Also produces `permitTypedData(chain, owner, amount, deadline)`, for the client to sign an EIP-2612 permit (USDC `name`/`version` read on-chain).
 
 - [ ] **Step 1: Failing tests:**
-  - EVM calldata decodes, through the contract ABI, back to the same quote and signature.
+  - EVM calldata decodes, through the contract ABI, back to the same quote and signature, and `value` equals `nativeFee` (0 in usdc mode).
   - The Stellar XDR contains one `invokeHostFunction` calling `bridge` on the bridge contract.
   - The Solana tx's first instruction is the Ed25519 program with exactly the `encodeQuoteBytes` message.
 - [ ] **Step 2:** FAIL. **Step 3:** Implement. **Step 4:** PASS.
@@ -478,13 +545,13 @@ Each contract implements the same logic (spec §5). The function is `bridge(quot
 
 **Files:**
 - Create routes, all guarded by `isAuthorisedAdmin(request)` from `src/lib/admin/auth.ts`:
-  - `src/app/api/admin/bridge/fee/route.ts`: GET returns `{ feeBps, audit, lowestCapBps }`; PUT `{ feeBps }` calls `setBridgeFeeBps`
-  - `src/app/api/admin/bridge/caps/route.ts`: GET reads `maxFeeBps` from all 8 contracts
+  - `src/app/api/admin/bridge/fee/route.ts`: GET returns `{ standardBps, fastBps, audit, lowestCapBps }`; PUT `{ speed, feeBps }` calls `setBridgeFeeBps`
+  - `src/app/api/admin/bridge/caps/route.ts`: GET reads `maxFeeBps`, `maxNetworkFee` and `maxNativeFee` from all 8 contracts
   - `src/app/api/admin/bridge/list/route.ts`: recent bridges with their status views
   - `src/app/api/admin/bridge/revive/route.ts`: wraps `reviveStuckTransfer`, then `scheduleDrive`
   - `src/app/api/admin/bridge/relayers/route.ts`: native balances for the 8 relayers
 - Create: `src/components/admin/BridgeAdminPanel.tsx`, mounted in `src/components/admin/AdminRecoveryConsole.tsx` as a "Bridge" section.
-- Create: `src/lib/bridge/owner-txs.ts`: `buildSetMaxFeeTx(chain, bps, ownerAddress): SourceTx-like`. It's unsigned, for the **owner wallet connected in the browser**, never a server key.
+- Create: `src/lib/bridge/owner-txs.ts`: `buildSetLimitTx(chain, limit: "maxFeeBps" | "maxNetworkFee" | "maxNativeFee", value: bigint, ownerAddress): SourceTx-like`. It's unsigned, for the **owner wallet connected in the browser**, never a server key.
 - Test: `src/lib/bridge/owner-txs.test.ts`, plus route tests for the auth guard
 
 **Interfaces:**
@@ -498,7 +565,7 @@ Each contract implements the same logic (spec §5). The function is `bridge(quot
 - [ ] **Step 1: Failing tests:**
   - Each route without admin auth → 401.
   - PUT fee 150 with lowest cap 100 → 400.
-  - `buildSetMaxFeeTx("base", 80, owner)` encodes `setMaxFeeBps(80)` to the Base contract.
+  - `buildSetLimitTx("base", "maxFeeBps", 80n, owner)` encodes `setMaxFeeBps(80)` to the Base contract, and `"maxNativeFee"` encodes `setMaxNativeFee`.
   - A cap lower than the fee is refused.
 - [ ] **Step 2:** FAIL. **Step 3:** Implement. **Step 4:** PASS. Check the panel manually against the existing console's style.
 - [ ] **Step 5:** Commit: `feat(bridge): admin fee, cap, bridges and relayers`.
@@ -521,7 +588,7 @@ Each contract implements the same logic (spec §5). The function is `bridge(quot
 **Files:**
 - Create: `src/components/bridge/BridgePanel.tsx` (state and orchestration)
 - Create: `src/components/bridge/BridgeLegCard.tsx` (the From/To card)
-- Create: `src/components/bridge/SpeedToggle.tsx`
+- Create: `src/components/bridge/SpeedToggle.tsx` (also used for the network-fee switch, with two labelled options)
 - Create: `src/components/bridge/BridgeReceiveCard.tsx`
 - Create: `src/components/bridge/useBridgeQuote.ts`
 - Create: `src/lib/bridge/form-state.ts` (pure reducer)
@@ -530,7 +597,7 @@ Each contract implements the same logic (spec §5). The function is `bridge(quot
 **Interfaces:**
 - Consumes: `BRIDGE_CHAIN_OPTIONS`, `validateDestinationAddress`, `POST /api/bridge/quote`, and the existing wallet hooks (`useStellarWallet`, `useEvmWallet`, the Solana AppKit hook) chosen by `BRIDGE_CHAINS[key].family`.
 - Produces:
-  - `bridgeFormReducer(state, action)` with actions `setSource`, `setDest`, `swap`, `setAmount`, `setSpeed`, `setPastedAddress`, `useConnectedDest`, `quoteLoaded`, `quoteFailed`, `confirmFirstTime`
+  - `bridgeFormReducer(state, action)` with actions `setSource`, `setDest`, `swap`, `setAmount`, `setSpeed`, `setNetworkFeeMode`, `setPastedAddress`, `useConnectedDest`, `quoteLoaded`, `quoteFailed`, `confirmFirstTime`
   - `disableReason(state): string | null`: the button's reason text, e.g. "Enter an amount", "Connect your Solana wallet", "Check the destination address", "Confirm you've checked this address", "Getting your price…"
 - First-time addresses are stored in `localStorage` key `settu:bridge-known:<userAddress>`, wrapped in try/catch. If storage is unavailable, treat the address as first-time.
 
@@ -539,7 +606,9 @@ Each contract implements the same logic (spec §5). The function is `bridge(quot
   - `setDest` to the current source → swaps.
   - A pasted address that fails validation → `disableReason === "Check the destination address"`, with the validation message exposed.
   - A first-time valid address → reason "Confirm you've checked this address" until `confirmFirstTime`.
-  - An amount change clears the quote.
+  - An amount change clears the quote. So does a network-fee-mode change.
+  - A `quoteFailed` with code `insufficient_native` sets `disableReason` to "Not enough {native}" and keeps the mode selectable.
+  - `fast_unavailable` switches speed to standard, with the notice "Fast isn't available for this route right now".
 - [ ] **Step 2:** FAIL. **Step 3:** Implement the reducer, then build the components to the mockup, using `AppSelect`, `fieldBox`/`fieldLabel` classes, the glass pill, the `.seg`-style toggle (same classes as FormCard's USDC/NGN switch) and the receive card with Show/Hide fee. Fetch quotes debounced at 400 ms after input, and re-fetch 15 s before `expiresAt`. **Step 4:** PASS.
 - [ ] **Step 5:** Check it on desktop and phone width (≤ 720 px) in the dev server. Commit: `feat(bridge): bridge form`.
 
@@ -588,7 +657,7 @@ Each contract implements the same logic (spec §5). The function is `bridge(quot
 - Create: `scripts/bridge/e2e.ts`. It runs a bridge with server-held testnet user keys, then asserts `receivedAtomic ≥ receiveMinAtomic` and that the status reaches `completed`.
 - Create: `docs/superpowers/plans/2026-11-16-user-bridge-e2e-results.md`, with one row per run: route, speed, sent, shown, received, source tx, dest tx, time.
 
-- [ ] **Step 1:** Run on both Fast and Standard: EVM→EVM (Base Sepolia → Arbitrum Sepolia), EVM→Solana, Solana→EVM, EVM→Stellar, Stellar→EVM, Solana→Stellar, Stellar→Solana.
+- [ ] **Step 1:** Run on both Fast and Standard, and in both network-fee modes (USDC and native) for at least one route per family: EVM→EVM (Base Sepolia → Arbitrum Sepolia), EVM→Solana, Solana→EVM, EVM→Stellar, Stellar→EVM, Solana→Stellar, Stellar→Solana.
 - [ ] **Step 2:** In the browser (preview deploy of the branch, with testnet env vars on Preview), run one bridge and close the tab right after signing. It must still complete (Task 15).
 - [ ] **Step 3:** Perform one self-claim (temporarily disable the drive with an env flag `BRIDGE_DRIVE_DISABLED=1` on the preview).
 - [ ] **Step 4:** For every run, delivered ≥ shown. Record the results.
