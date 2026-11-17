@@ -17,8 +17,14 @@ export const CCTP_NETWORK: CctpNetwork =
 
 // Domain identifiers are protocol-wide constants, same on mainnet and testnet.
 export const CCTP_DOMAIN = {
-  stellar: 27,
+  ethereum: 0,
+  avalanche: 1,
+  optimism: 2,
+  arbitrum: 3,
+  solana: 5,
   base: 6,
+  polygon: 7,
+  stellar: 27,
 } as const;
 
 // Fast Transfer vs Standard Transfer, per MessageTransmitterV2#sendMessage docs.
