@@ -30,9 +30,36 @@ export const STATUS_RANK: Record<CctpStatus, number> = {
   failed: 4, // terminal, same rank as completed — either ends progression
 };
 
+/**
+ * Extra data for user-bridge records (direction "bridge"). Atomic amounts are
+ * decimal strings in 6-decimal USDC units (records are JSON in Redis).
+ */
+export interface BridgeMeta {
+  source: string;
+  dest: string;
+  /** Source-chain address that sent the transaction (from the on-chain event). */
+  user: string;
+  /** Destination recipient: the 0x address for EVM dests, else the mintRecipient bytes32 hex. */
+  recipient: string;
+  speed: "fast" | "standard";
+  quoteNonce: string;
+  sendAtomic: string;
+  settuFeeAtomic: string;
+  networkFeeAtomic: string;
+  /** Circle fast-fee cap (maxFee); not emitted on-chain, "0" until the attested message is read. */
+  fastFeeMaxAtomic: string;
+  receiveMinAtomic: string;
+  /** True while receiveMinAtomic is just the burn amount (Fast, maxFee unknown). */
+  receiveMinIsBurn?: boolean;
+  receivedAtomic?: string;
+  attestedAt?: number;
+  fellBackToStandard?: boolean;
+}
+
 export interface CctpTransferRecord {
   id: string;
-  direction: "offramp" | "onramp";
+  direction: "offramp" | "onramp" | "bridge";
+  bridge?: BridgeMeta;
   sourceDomain: number;
   destDomain: number;
   burnTxHash: string;
