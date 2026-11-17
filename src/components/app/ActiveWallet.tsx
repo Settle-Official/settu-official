@@ -25,6 +25,7 @@ export interface ActiveWalletView {
 interface ActiveWalletValue {
   readonly evm: ReturnType<typeof useEvmWallet>;
   readonly solana: ReturnType<typeof useSolanaWallet>;
+  readonly stellar: ReturnType<typeof useStellarWallet>;
   /** The offramp's source chain: the wallet the user last chose to pay from. */
   readonly sourceChain: OfframpSourceChainKey;
   readonly setSourceChain: (next: OfframpSourceChainKey) => void;
@@ -88,8 +89,8 @@ export function ActiveWalletProvider({ children }: { readonly children: ReactNod
   }, [stellar, evm, solana, sourceChain]);
 
   const value = useMemo<ActiveWalletValue>(
-    () => ({ evm, solana, sourceChain, setSourceChain, active }),
-    [evm, solana, sourceChain, active],
+    () => ({ evm, solana, stellar, sourceChain, setSourceChain, active }),
+    [evm, solana, stellar, sourceChain, active],
   );
 
   return (
