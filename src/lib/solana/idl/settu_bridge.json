@@ -1,0 +1,1226 @@
+{
+  "address": "3CGxb2E9ASpizQtoL8wykokiZ8BH19MXMWmgy17KQmD1",
+  "metadata": {
+    "name": "settu_bridge",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Settu bridge: Settu-signed quote + fees + Circle CCTP V2 burn in one Solana transaction"
+  },
+  "instructions": [
+    {
+      "name": "accept_ownership",
+      "docs": [
+        "Step 2 of 2: the nominee accepts."
+      ],
+      "discriminator": [
+        172,
+        23,
+        43,
+        13,
+        238,
+        213,
+        85,
+        150
+      ],
+      "accounts": [
+        {
+          "name": "pending_owner",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "bridge",
+      "docs": [
+        "Pays the quoted fees and burns the rest of `quote.amount` through CCTP.",
+        "Must be immediately preceded by an Ed25519SigVerify instruction over",
+        "`quote_message(program_id, quote)` with the stored signer key."
+      ],
+      "discriminator": [
+        174,
+        41,
+        120,
+        146,
+        98,
+        218,
+        169,
+        25
+      ],
+      "accounts": [
+        {
+          "name": "user",
+          "docs": [
+            "Signs the transaction; pays the nonce record and CCTP event rent."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "nonce_record",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  110,
+                  111,
+                  110,
+                  99,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "quote.nonce"
+              }
+            ]
+          }
+        },
+        {
+          "name": "burn_token_account",
+          "docs": [
+            "The user's USDC token account: pays the fees and is burned from."
+          ],
+          "writable": true
+        },
+        {
+          "name": "fee_wallet",
+          "writable": true
+        },
+        {
+          "name": "fee_token_account",
+          "docs": [
+            "The fee wallet's USDC associated token account."
+          ],
+          "writable": true
+        },
+        {
+          "name": "usdc_mint",
+          "docs": [
+            "USDC (CCTP `burn_token_mint`)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "instructions",
+          "address": "Sysvar1nstructions1111111111111111111111111"
+        },
+        {
+          "name": "sender_authority_pda"
+        },
+        {
+          "name": "denylist_account"
+        },
+        {
+          "name": "message_transmitter",
+          "writable": true
+        },
+        {
+          "name": "token_messenger"
+        },
+        {
+          "name": "remote_token_messenger"
+        },
+        {
+          "name": "token_minter"
+        },
+        {
+          "name": "local_token",
+          "writable": true
+        },
+        {
+          "name": "message_sent_event_data",
+          "docs": [
+            "Fresh keypair; Circle creates the MessageSent account here."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "message_transmitter_program",
+          "address": "CCTPV2Sm4AdWt5296sk4P66VBZ7bEhcARwFaaS9YPbeC"
+        },
+        {
+          "name": "token_messenger_minter_program",
+          "address": "CCTPV2vPZJS2u2BBsUoscuikbYjnpFmbFsvVuJdgUMQe"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        }
+      ],
+      "args": [
+        {
+          "name": "quote",
+          "type": {
+            "defined": {
+              "name": "QuoteArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "initialize",
+      "docs": [
+        "One-time setup. Only the program's upgrade authority may call it (so a",
+        "freshly deployed program can't be claimed by a front-runner); that",
+        "signer becomes the owner. Use `transfer_ownership` to hand it to the",
+        "business owner's wallet."
+      ],
+      "discriminator": [
+        175,
+        175,
+        109,
+        31,
+        13,
+        152,
+        155,
+        237
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "program",
+          "address": "3CGxb2E9ASpizQtoL8wykokiZ8BH19MXMWmgy17KQmD1"
+        },
+        {
+          "name": "program_data"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "signer",
+          "type": "pubkey"
+        },
+        {
+          "name": "fee_wallet",
+          "type": "pubkey"
+        },
+        {
+          "name": "max_fee_bps",
+          "type": "u16"
+        },
+        {
+          "name": "max_network_fee",
+          "type": "u64"
+        },
+        {
+          "name": "max_native_fee",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "set_fee_wallet",
+      "docs": [
+        "The new fee wallet must already have a USDC ATA, or bridges fail."
+      ],
+      "discriminator": [
+        108,
+        242,
+        79,
+        79,
+        203,
+        119,
+        109,
+        211
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "fee_wallet",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "set_max_fee_bps",
+      "discriminator": [
+        3,
+        68,
+        60,
+        223,
+        245,
+        17,
+        30,
+        133
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "max_fee_bps",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "set_max_native_fee",
+      "discriminator": [
+        30,
+        116,
+        160,
+        254,
+        57,
+        155,
+        208,
+        12
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "max_native_fee",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "set_max_network_fee",
+      "discriminator": [
+        168,
+        149,
+        122,
+        248,
+        206,
+        116,
+        67,
+        233
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "max_network_fee",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "set_paused",
+      "discriminator": [
+        91,
+        60,
+        125,
+        192,
+        176,
+        225,
+        166,
+        218
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "paused",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "set_signer",
+      "discriminator": [
+        127,
+        120,
+        252,
+        184,
+        97,
+        4,
+        88,
+        68
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "signer",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "transfer_ownership",
+      "docs": [
+        "Step 1 of 2: nominate `new_owner` (replaces any pending nominee)."
+      ],
+      "discriminator": [
+        65,
+        177,
+        215,
+        73,
+        53,
+        45,
+        99,
+        47
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "new_owner",
+          "type": "pubkey"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "Config",
+      "discriminator": [
+        155,
+        12,
+        170,
+        224,
+        30,
+        250,
+        204,
+        130
+      ]
+    },
+    {
+      "name": "NonceRecord",
+      "discriminator": [
+        108,
+        73,
+        223,
+        163,
+        215,
+        18,
+        237,
+        161
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "Bridged",
+      "discriminator": [
+        250,
+        106,
+        162,
+        85,
+        133,
+        184,
+        176,
+        118
+      ]
+    },
+    {
+      "name": "FeeWalletUpdated",
+      "discriminator": [
+        239,
+        21,
+        163,
+        102,
+        93,
+        63,
+        3,
+        248
+      ]
+    },
+    {
+      "name": "MaxFeeBpsUpdated",
+      "discriminator": [
+        241,
+        74,
+        232,
+        5,
+        151,
+        166,
+        248,
+        196
+      ]
+    },
+    {
+      "name": "MaxNativeFeeUpdated",
+      "discriminator": [
+        229,
+        252,
+        117,
+        242,
+        240,
+        201,
+        133,
+        59
+      ]
+    },
+    {
+      "name": "MaxNetworkFeeUpdated",
+      "discriminator": [
+        174,
+        140,
+        69,
+        89,
+        30,
+        90,
+        29,
+        150
+      ]
+    },
+    {
+      "name": "OwnershipTransferStarted",
+      "discriminator": [
+        183,
+        253,
+        239,
+        246,
+        140,
+        179,
+        133,
+        105
+      ]
+    },
+    {
+      "name": "OwnershipTransferred",
+      "discriminator": [
+        172,
+        61,
+        205,
+        183,
+        250,
+        50,
+        38,
+        98
+      ]
+    },
+    {
+      "name": "PausedSet",
+      "discriminator": [
+        171,
+        125,
+        127,
+        156,
+        233,
+        81,
+        68,
+        66
+      ]
+    },
+    {
+      "name": "SignerUpdated",
+      "discriminator": [
+        12,
+        51,
+        212,
+        120,
+        131,
+        199,
+        163,
+        38
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "Paused",
+      "msg": "Bridge is paused"
+    },
+    {
+      "code": 6001,
+      "name": "QuoteExpired",
+      "msg": "Quote expired"
+    },
+    {
+      "code": 6002,
+      "name": "WrongUser",
+      "msg": "Quote is for a different user"
+    },
+    {
+      "code": 6003,
+      "name": "WrongSourceDomain",
+      "msg": "Quote is for a different source domain"
+    },
+    {
+      "code": 6004,
+      "name": "InvalidAmount",
+      "msg": "Invalid amount"
+    },
+    {
+      "code": 6005,
+      "name": "FeeAboveCap",
+      "msg": "Settu fee above the max_fee_bps cap"
+    },
+    {
+      "code": 6006,
+      "name": "NetworkFeeAboveMax",
+      "msg": "Network fee above max_network_fee"
+    },
+    {
+      "code": 6007,
+      "name": "NativeFeeAboveMax",
+      "msg": "Native fee above max_native_fee"
+    },
+    {
+      "code": 6008,
+      "name": "NothingToBurn",
+      "msg": "Fees consume the whole amount"
+    },
+    {
+      "code": 6009,
+      "name": "MissingEd25519Instruction",
+      "msg": "No Ed25519SigVerify instruction immediately before bridge"
+    },
+    {
+      "code": 6010,
+      "name": "MalformedEd25519Instruction",
+      "msg": "Ed25519SigVerify instruction is not a single self-contained signature"
+    },
+    {
+      "code": 6011,
+      "name": "Ed25519SignerMismatch",
+      "msg": "Ed25519SigVerify public key is not the quote signer"
+    },
+    {
+      "code": 6012,
+      "name": "Ed25519MessageMismatch",
+      "msg": "Ed25519SigVerify message is not this quote"
+    },
+    {
+      "code": 6013,
+      "name": "InvalidBps",
+      "msg": "Basis points above 10000"
+    },
+    {
+      "code": 6014,
+      "name": "ZeroAddress",
+      "msg": "Zero address"
+    },
+    {
+      "code": 6015,
+      "name": "NotOwner",
+      "msg": "Not the owner"
+    },
+    {
+      "code": 6016,
+      "name": "NotPendingOwner",
+      "msg": "Not the pending owner"
+    },
+    {
+      "code": 6017,
+      "name": "NotUpgradeAuthority",
+      "msg": "Signer is not the program upgrade authority"
+    },
+    {
+      "code": 6018,
+      "name": "WrongFeeWallet",
+      "msg": "Not the configured fee wallet"
+    },
+    {
+      "code": 6019,
+      "name": "WrongFeeTokenAccount",
+      "msg": "Not the fee wallet's USDC associated token account"
+    },
+    {
+      "code": 6020,
+      "name": "WrongMint",
+      "msg": "Not the configured USDC mint"
+    },
+    {
+      "code": 6021,
+      "name": "WrongCctpProgram",
+      "msg": "Not Circle's CCTP V2 program"
+    }
+  ],
+  "types": [
+    {
+      "name": "Bridged",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "nonce",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "settu_fee",
+            "type": "u64"
+          },
+          {
+            "name": "network_fee",
+            "type": "u64"
+          },
+          {
+            "name": "native_fee",
+            "type": "u64"
+          },
+          {
+            "name": "dest_domain",
+            "type": "u32"
+          },
+          {
+            "name": "mint_recipient",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "min_finality",
+            "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Config",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "pending_owner",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "signer",
+            "docs": [
+              "ed25519 public key of the Settu quote signer."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "fee_wallet",
+            "docs": [
+              "Receives USDC fees (at its USDC ATA) and the native fee (lamports)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "usdc_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "max_fee_bps",
+            "type": "u16"
+          },
+          {
+            "name": "max_network_fee",
+            "docs": [
+              "USDC atomic (6 decimals)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "max_native_fee",
+            "docs": [
+              "Lamports."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "paused",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "FeeWalletUpdated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "previous",
+            "type": "pubkey"
+          },
+          {
+            "name": "current",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MaxFeeBpsUpdated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "previous",
+            "type": "u16"
+          },
+          {
+            "name": "current",
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MaxNativeFeeUpdated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "previous",
+            "type": "u64"
+          },
+          {
+            "name": "current",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MaxNetworkFeeUpdated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "previous",
+            "type": "u64"
+          },
+          {
+            "name": "current",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "NonceRecord",
+      "docs": [
+        "Existence = nonce used. Never closed."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": []
+      }
+    },
+    {
+      "name": "OwnershipTransferStarted",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "previous",
+            "type": "pubkey"
+          },
+          {
+            "name": "pending",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "OwnershipTransferred",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "previous",
+            "type": "pubkey"
+          },
+          {
+            "name": "current",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PausedSet",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "paused",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "QuoteArgs",
+      "docs": [
+        "The signed quote, passed as the `bridge` instruction argument."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "source_domain",
+            "type": "u32"
+          },
+          {
+            "name": "dest_domain",
+            "type": "u32"
+          },
+          {
+            "name": "user",
+            "docs": [
+              "The Solana wallet that must sign the bridge transaction."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "settu_fee",
+            "type": "u64"
+          },
+          {
+            "name": "network_fee",
+            "type": "u64"
+          },
+          {
+            "name": "native_fee",
+            "type": "u64"
+          },
+          {
+            "name": "mint_recipient",
+            "docs": [
+              "CCTP `mint_recipient` (bytes32) on the destination chain."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "max_fee",
+            "type": "u64"
+          },
+          {
+            "name": "min_finality",
+            "type": "u32"
+          },
+          {
+            "name": "deadline",
+            "docs": [
+              "Unix seconds."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "nonce",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "hook_data",
+            "docs": [
+              "Empty unless the destination is Stellar (then the forwarder hook)."
+            ],
+            "type": "bytes"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SignerUpdated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "previous",
+            "type": "pubkey"
+          },
+          {
+            "name": "current",
+            "type": "pubkey"
+          }
+        ]
+      }
+    }
+  ]
+}

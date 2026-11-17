@@ -6,6 +6,9 @@ import type { CctpStatus, CctpTransferRecord } from "../cctp/cctp-store";
 import { BridgeRegisterError, registerBridge } from "./bridge-store";
 import type { BridgeChainKey } from "./chains";
 import { readBridgedEvent } from "./read-source-event";
+import { BN } from "@coral-xyz/anchor";
+import { PublicKey } from "@solana/web3.js";
+import { SETTU_BRIDGE_IDL_JSON, settuBridgeCoder } from "../solana/settu-bridge";
 import {
   CONFIRMATIONS,
   MAX_ADVANCES_PER_RUN,
@@ -13,6 +16,8 @@ import {
   EVM_CHUNK_BLOCKS,
   FIRST_RUN_LOOKBACK,
   MAX_CHUNKS_PER_CHAIN,
+  MAX_SOLANA_SIGNATURES_PER_RUN,
+  SOLANA_PAGE_LIMIT,
   sweepBridgedEvents,
   type EvmSweepLog,
   type StellarRpcEvent,
@@ -23,6 +28,31 @@ const BRIDGE = "0x1111111111111111111111111111111111111111";
 // registerBridge -> readBridgedEvent checks the log came from bridgeContractFor("base").
 process.env.BRIDGE_CONTRACT_BASE = BRIDGE;
 const USER = "0x2222222222222222222222222222222222222222";
+const SOL_PROGRAM = "3CGxb2E9ASpizQtoL8wykokiZ8BH19MXMWmgy17KQmD1";
+process.env.BRIDGE_CONTRACT_SOLANA = SOL_PROGRAM;
+
+/** Logs of a Solana bridge tx whose Bridged event is encoded with the IDL coder. */
+function solanaBridgedLogs(): string[] {
+  const disc = (SETTU_BRIDGE_IDL_JSON.events as unknown as { name: string; discriminator: number[] }[]).find(
+    (e) => e.name === "Bridged",
+  )!.discriminator;
+  const body = settuBridgeCoder.types.encode("Bridged", {
+    nonce: Array(32).fill(0xab),
+    user: new PublicKey("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"),
+    amount: new BN(1_000_000),
+    settu_fee: new BN(5_000),
+    network_fee: new BN(100),
+    native_fee: new BN(0),
+    dest_domain: 6,
+    mint_recipient: [...Array(12).fill(0), ...Array(20).fill(0x33)],
+    min_finality: 2000,
+  });
+  return [
+    `Program ${SOL_PROGRAM} invoke [1]`,
+    `Program data: ${Buffer.concat([Buffer.from(disc), body]).toString("base64")}`,
+    `Program ${SOL_PROGRAM} success`,
+  ];
+}
 const NONCE = ("0x" + "ab".repeat(32)) as Hex;
 const MR = ("0x" + "00".repeat(12) + "33".repeat(20)) as Hex;
 const TX = "0x" + "CD".repeat(32); // upper-case on purpose: ids are lower-cased
@@ -80,6 +110,7 @@ function sweepDeps(w: World, over: Partial<SweepDeps> = {}): SweepDeps {
       readBridgedEvent(chain, hash, {
         evmLogs: async () => [evmLog(hash)],
         stellarEvents: async () => null,
+        solanaLogs: async () => solanaBridgedLogs(),
       }),
     getQuote: async () => null,
     get: async (id: string) => w.store.get(id) ?? null,
@@ -109,6 +140,7 @@ function sweepDeps(w: World, over: Partial<SweepDeps> = {}): SweepDeps {
     },
     stellarLatestLedger: async () => 5_000,
     stellarGetEvents: async () => ({ events: [], latestLedger: 5_000 }),
+    solanaSignatures: async () => [],
     getTransfer: async (id) => w.store.get(id) ?? null,
     register: async (chain, hash) => {
       w.calls.push(`register:${hash}`);
@@ -332,19 +364,153 @@ test("chain with no contract configured is skipped and logged, not an error", as
   assert.ok(w.logs.some((l) => /optimism/.test(l) && /skip/i.test(l)));
 });
 
-test("Solana is skipped with a clear log line (Task 8)", async () => {
-  const w = world();
-  let touched = false;
+// ---------------------------------------------------------------- Solana
+
+/** Distinct base58 signatures; sig(n) for n in 0..57 (order = time order in the tests). */
+const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+const sig = (n: number) => `${"5".repeat(85)}${B58[Math.floor(n / 58) % 58]}${B58[n % 58]}`;
+
+/**
+ * A fake Solana chain: `history` is every signature for the program, oldest
+ * first. getSignaturesForAddress semantics: newest first, strictly older than
+ * `before`, strictly newer than `until`, at most `limit`.
+ */
+function solanaWorld(w: World, history: { signature: string; err?: unknown }[]) {
+  const pages: { before?: string; until?: string; limit: number }[] = [];
+  const solanaSignatures: SweepDeps["solanaSignatures"] = async (program, opts) => {
+    assert.equal(program, SOL_PROGRAM);
+    assert.ok(opts.limit <= 1000);
+    pages.push({ ...opts });
+    const newestFirst = [...history].reverse();
+    let start = 0;
+    if (opts.before) start = newestFirst.findIndex((h) => h.signature === opts.before) + 1;
+    let end = newestFirst.length;
+    if (opts.until) {
+      const u = newestFirst.findIndex((h) => h.signature === opts.until);
+      if (u >= 0) end = u;
+    }
+    return newestFirst.slice(start, end).slice(0, opts.limit).map((h) => ({ signature: h.signature, err: h.err ?? null }));
+  };
+  return { pages, solanaSignatures };
+}
+
+function solanaSweepDeps(w: World, history: { signature: string; err?: unknown }[], over: Partial<SweepDeps> = {}) {
+  const sw = solanaWorld(w, history);
   const d = sweepDeps(w, {
     chains: ["solana"],
-    contractFor: () => {
-      touched = true;
-      return "x";
+    contractFor: (c) => (c === "solana" ? SOL_PROGRAM : null),
+    solanaSignatures: sw.solanaSignatures,
+    ...over,
+  });
+  return { d, pages: sw.pages };
+}
+
+test("Solana: an unknown signature is registered once across two runs; cursor moves only after processing", async () => {
+  const w = world();
+  const history = [{ signature: sig(1) }];
+  const { d, pages } = solanaSweepDeps(w, history, {
+    setCursor: async (c, v) => {
+      // By the time the cursor moves, the signature has been registered.
+      assert.ok(w.store.has(sig(1)), "cursor set before the signature was processed");
+      w.calls.push(`cursor:${c}:${v}`);
+      w.cursors.set(c, v);
+    },
+  });
+  const r1 = await sweepBridgedEvents(d);
+  assert.equal(r1.created, 1);
+  const rec = w.store.get(sig(1))!;
+  assert.equal(rec.id, sig(1), "case-sensitive id kept");
+  assert.equal(rec.bridge!.source, "solana");
+  assert.equal(rec.sourceDomain, 5);
+  assert.equal(w.cursors.get("solana"), sig(1));
+  assert.equal(pages[0].until, undefined, "first run: latest page only");
+
+  const r2 = await sweepBridgedEvents(d);
+  assert.equal(r2.created, 0);
+  assert.equal(pages[1].until, sig(1));
+  assert.equal(w.calls.filter((c) => c.startsWith("create:")).length, 1);
+  assert.equal(w.calls.filter((c) => c.startsWith("register:")).length, 1);
+});
+
+test("Solana: processes oldest-first, pages through `until` newest-first, cursor = newest processed", async () => {
+  const w = world();
+  const history = Array.from({ length: 2500 }, (_, i) => ({ signature: sig(i) }));
+  w.cursors.set("solana", sig(9)); // processed up to sig(9)
+  const order: string[] = [];
+  const { d, pages } = solanaSweepDeps(w, history, {
+    getTransfer: async () => ({ direction: "bridge" }) as CctpTransferRecord, // all known: cheap
+    register: async () => assert.fail("known signatures are not re-registered"),
+  });
+  const getTransfer = d.getTransfer;
+  d.getTransfer = async (id) => {
+    order.push(id);
+    return getTransfer(id);
+  };
+  d.listPending = async () => [];
+  await sweepBridgedEvents(d);
+  assert.deepEqual(pages.map((p) => p.until), [sig(9), sig(9), sig(9)]);
+  assert.equal(pages[0].before, undefined);
+  assert.equal(pages[1].before, sig(1500));
+  assert.equal(order.length, Math.min(2490, MAX_SOLANA_SIGNATURES_PER_RUN));
+  assert.equal(order[0], sig(10), "oldest first");
+  const newest = order[order.length - 1];
+  assert.equal(w.cursors.get("solana"), newest);
+  assert.equal(newest, sig(9 + MAX_SOLANA_SIGNATURES_PER_RUN));
+});
+
+test("Solana: first run (no cursor) takes only the latest page", async () => {
+  const w = world();
+  const history = Array.from({ length: 1500 }, (_, i) => ({ signature: sig(i) }));
+  const { d, pages } = solanaSweepDeps(w, history, {
+    getTransfer: async () => ({ direction: "bridge" }) as CctpTransferRecord,
+  });
+  d.listPending = async () => [];
+  await sweepBridgedEvents(d);
+  assert.equal(pages.length, 1);
+  assert.equal(pages[0].limit, SOLANA_PAGE_LIMIT);
+  assert.equal(SOLANA_PAGE_LIMIT, 1000);
+  // Oldest of the latest page is sig(500).
+  assert.equal(w.cursors.get("solana"), sig(499 + MAX_SOLANA_SIGNATURES_PER_RUN));
+});
+
+test("Solana: failed txs are skipped without a registration; cursor still passes them", async () => {
+  const w = world();
+  w.cursors.set("solana", sig(0));
+  const history = [{ signature: sig(0) }, { signature: sig(1), err: { InstructionError: [1, "x"] } }];
+  const { d } = solanaSweepDeps(w, history);
+  const r = await sweepBridgedEvents(d);
+  assert.equal(r.created, 0);
+  assert.equal(w.calls.filter((c) => c.startsWith("register:")).length, 0);
+  assert.equal(w.cursors.get("solana"), sig(1));
+});
+
+test("Solana: a retryable failure keeps the cursor at the last processed signature", async () => {
+  const w = world();
+  w.cursors.set("solana", sig(0));
+  const history = [0, 1, 2, 3].map((n) => ({ signature: sig(n) }));
+  const { d } = solanaSweepDeps(w, history, {
+    register: async (chain, hash) => {
+      w.calls.push(`register:${hash}`);
+      if (hash === sig(2)) throw new BridgeRegisterError("rpc", 503, "unavailable");
     },
   });
   await sweepBridgedEvents(d);
-  assert.equal(touched, false);
-  assert.ok(w.logs.some((l) => /solana/i.test(l) && /Task 8/.test(l)));
+  assert.equal(w.cursors.get("solana"), sig(1));
+  assert.deepEqual(w.calls.filter((c) => c.startsWith("register:")), [`register:${sig(1)}`, `register:${sig(2)}`]);
+  assert.ok(w.logs.some((l) => /solana: stopped this run/.test(l)));
+});
+
+test("Solana: signature listing failure leaves the cursor untouched", async () => {
+  const w = world();
+  w.cursors.set("solana", sig(0));
+  const { d } = solanaSweepDeps(w, [], {
+    solanaSignatures: async () => {
+      throw new Error("429");
+    },
+  });
+  await sweepBridgedEvents(d);
+  assert.equal(w.cursors.get("solana"), sig(0));
+  assert.ok(!w.calls.some((c) => c.startsWith("cursor:")));
 });
 
 test("advance pass: only non-final bridge records; offramp/final ones untouched; errors don't stop the pass", async () => {

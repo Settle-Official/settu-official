@@ -76,7 +76,18 @@ function normaliseHash(chain: BridgeChainKey, txHash: string): string | null {
   const family = BRIDGE_CHAINS[chain].family;
   if (family === "evm") return /^0x[0-9a-fA-F]{64}$/.test(txHash) ? txHash.toLowerCase() : null;
   if (family === "stellar") return /^[0-9a-fA-F]{64}$/.test(txHash) ? txHash.toLowerCase() : null;
-  return null;
+  // Solana: a base58 64-byte signature. Case-sensitive, so kept as-is.
+  return isSolanaSignature(txHash) ? txHash : null;
+}
+
+const BASE58_SIG = /^[1-9A-HJ-NP-Za-km-z]{64,88}$/;
+function isSolanaSignature(s: string): boolean {
+  return BASE58_SIG.test(s);
+}
+
+/** Record ids: hex hashes are lower-cased; base58 Solana signatures are case-sensitive. */
+export function normaliseBridgeId(id: string): string {
+  return /^(0x)?[0-9a-fA-F]{64}$/.test(id) ? id.toLowerCase() : id;
 }
 
 /** What the event alone proves about the recipient. */
@@ -101,9 +112,6 @@ export async function registerBridge(
   deps: BridgeStoreDeps = defaultDeps,
 ): Promise<CctpTransferRecord> {
   if (!(chain in BRIDGE_CHAINS)) throw new BridgeRegisterError("Unknown chain.");
-  if (BRIDGE_CHAINS[chain].family === "solana") {
-    throw new BridgeRegisterError("Solana source is not supported yet.");
-  }
   const id = normaliseHash(chain, txHash);
   if (!id) throw new BridgeRegisterError("Invalid transaction hash.");
 
@@ -220,7 +228,7 @@ export async function getBridgeStatus(
   id: string,
   deps: Pick<BridgeStoreDeps, "get" | "now"> = defaultDeps,
 ): Promise<BridgeStatusView | null> {
-  const r = await deps.get(id.toLowerCase());
+  const r = await deps.get(normaliseBridgeId(id));
   if (!r || r.direction !== "bridge" || !r.bridge) return null;
   return toStatusView(r, deps.now());
 }

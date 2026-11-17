@@ -22,8 +22,23 @@ import {
   permitTypedData,
   STELLAR_APPROVE_LEDGER_OFFSET,
   type BuildSourceTxDeps,
+  type SolanaRpcLike,
   type StellarRpcLike,
 } from "./build-source-tx";
+import {
+  AddressLookupTableAccount,
+  Ed25519Program,
+  PublicKey,
+  VersionedTransaction,
+} from "@solana/web3.js";
+import { deserializeQuote } from "./build-quote";
+import { ed25519PublicKeyFromSeed, encodeQuoteBytes, verifyEd25519Quote } from "./quote";
+import {
+  bridgeAccounts,
+  SETTU_BRIDGE_IDL_JSON,
+  settuBridgeCoder,
+  settuBridgeLookupTableAddresses,
+} from "../solana/settu-bridge";
 import { TEST_ONLY_ED25519_SEED, TEST_ONLY_EVM_PRIVATE_KEY } from "./quote-vectors.test-helper";
 import { BRIDGE_CHAINS, type BridgeChainKey } from "./chains";
 import { CCTP_CONFIG } from "../cctp/constants";
@@ -63,6 +78,8 @@ function quoteDeps(over: Partial<BuildQuoteDeps> = {}): Partial<BuildQuoteDeps> 
     bridgeContractFor: (c) => contracts[c],
     evmSignerKey: () => TEST_ONLY_EVM_PRIVATE_KEY,
     ed25519SignerSecret: () => TEST_ONLY_ED25519_SEED,
+    // Never the real Redis (it would time out against no server).
+    saveQuoteRecord: async () => {},
     ...over,
   };
 }
@@ -330,14 +347,202 @@ test("rejects malformed quote responses", async () => {
   await rejects(buildSourceTx(q, 42 as unknown as string, {}, deps()), "invalid_request");
 });
 
-test("Solana source is not supported yet", async () => {
-  const q = await makeQuote({ source: "solana", dest: "base", user: SOL_USER });
-  await assert.rejects(buildSourceTx(q, SOL_USER, {}, deps()), (e: unknown) => {
-    assert.ok(e instanceof BuildTxError);
-    assert.equal(e.code, "unsupported_source");
-    assert.match(e.message, /solana source not supported yet/i);
-    return true;
+// ---------------------------------------------------------------- Solana
+
+const SOL_FEE_WALLET = "7Np41oeYqPefeNQEHSv1UDhYrehxin3NStELsSKCT4K2";
+const ALT_KEY = new PublicKey(Buffer.alloc(32, 0xa1));
+const BLOCKHASH = new PublicKey(Buffer.alloc(32, 0xb7)).toBase58();
+const SOL_SIGNER_PUB = ed25519PublicKeyFromSeed(TEST_ONLY_ED25519_SEED);
+
+function fakeAlt(): AddressLookupTableAccount {
+  return new AddressLookupTableAccount({
+    key: ALT_KEY,
+    state: {
+      deactivationSlot: BigInt("18446744073709551615"),
+      lastExtendedSlot: 0,
+      lastExtendedSlotStartIndex: 0,
+      addresses: settuBridgeLookupTableAddresses(SOLANA_PROGRAM, SOL_FEE_WALLET).map((a) => new PublicKey(a)),
+    },
   });
+}
+
+function solanaDeps(over: Partial<BuildSourceTxDeps> = {}) {
+  const calls = { alt: [] as string[] };
+  const rpc: SolanaRpcLike = {
+    getLatestBlockhash: async () => ({ blockhash: BLOCKHASH, lastValidBlockHeight: 1_000 }),
+    getAddressLookupTable: async (k: PublicKey) => {
+      calls.alt.push(k.toBase58());
+      return { context: { slot: 1 }, value: k.equals(ALT_KEY) ? fakeAlt() : null };
+    },
+  };
+  return {
+    calls,
+    deps: deps({
+      solanaRpc: () => rpc,
+      solanaLookupTableAddress: () => ALT_KEY.toBase58(),
+      feeWalletFor: () => SOL_FEE_WALLET,
+      ed25519SignerPublicKey: () => SOL_SIGNER_PUB,
+      ...over,
+    }),
+  };
+}
+
+const solanaQuote = (dest: BridgeChainKey = "stellar") =>
+  makeQuote({
+    source: "solana",
+    dest,
+    user: SOL_USER,
+    recipient: dest === "stellar" ? G_RECIPIENT : EVM_RECIPIENT,
+  });
+
+async function buildSolana(q: QuoteSuccess, over: Partial<BuildSourceTxDeps> = {}) {
+  const r = await buildSourceTx(q, SOL_USER, {}, solanaDeps(over).deps);
+  assert.equal(r.family, "solana");
+  if (r.family !== "solana") throw new Error("unreachable");
+  const raw = Buffer.from(r.txBase64, "base64");
+  return { raw, tx: VersionedTransaction.deserialize(raw) };
+}
+
+const hexOf = (b: Uint8Array) => `0x${Buffer.from(b).toString("hex")}`;
+
+test("Solana: v0 tx with exactly [ed25519, bridge]; ed25519 carries the exact quote bytes, signer key and signature", async () => {
+  const q = await solanaQuote();
+  const { tx } = await buildSolana(q);
+  assert.equal(tx.version, 0);
+  const msg = tx.message;
+  assert.equal(msg.recentBlockhash, BLOCKHASH);
+  assert.equal(msg.addressTableLookups.length, 1);
+  assert.ok(msg.addressTableLookups[0].accountKey.equals(ALT_KEY));
+  const keys = msg.getAccountKeys({ addressLookupTableAccounts: [fakeAlt()] });
+  const ixs = msg.compiledInstructions;
+  assert.equal(ixs.length, 2);
+  assert.ok(keys.get(ixs[0].programIdIndex)!.equals(Ed25519Program.programId));
+  assert.equal(keys.get(ixs[1].programIdIndex)!.toBase58(), SOLANA_PROGRAM);
+
+  const expected = Ed25519Program.createInstructionWithPublicKey({
+    publicKey: SOL_SIGNER_PUB,
+    message: encodeQuoteBytes(deserializeQuote(q.quote), "solana", SOLANA_PROGRAM),
+    signature: Buffer.from(q.signature.slice(2), "hex"),
+  });
+  assert.deepEqual(Buffer.from(ixs[0].data), expected.data);
+  assert.equal(ixs[0].accountKeyIndexes.length, 0);
+  // Fee payer is the user.
+  assert.equal(keys.get(0)!.toBase58(), SOL_USER);
+});
+
+test("Solana: bridge ix data decodes (IDL coder) back to the quote; accounts match the IDL order", async () => {
+  const q = await solanaQuote();
+  const { tx } = await buildSolana(q);
+  const keys = tx.message.getAccountKeys({ addressLookupTableAccounts: [fakeAlt()] });
+  const ix = tx.message.compiledInstructions[1];
+  const decoded = settuBridgeCoder.instruction.decode(Buffer.from(ix.data));
+  assert.ok(decoded);
+  assert.equal(decoded.name, "bridge");
+  const d = (decoded.data as { quote: Record<string, unknown> }).quote;
+  const s = (v: unknown) => (v as { toString(): string }).toString();
+  assert.equal(d.source_domain, 5);
+  assert.equal(d.dest_domain, q.quote.destDomain);
+  assert.equal((d.user as PublicKey).toBase58(), SOL_USER);
+  assert.equal(s(d.amount), q.quote.amount);
+  assert.equal(s(d.settu_fee), q.quote.settuFee);
+  assert.equal(s(d.network_fee), q.quote.networkFee);
+  assert.equal(s(d.native_fee), q.quote.nativeFee);
+  assert.equal(hexOf(Uint8Array.from(d.mint_recipient as number[])), q.quote.mintRecipient);
+  assert.equal(s(d.max_fee), q.quote.maxFee);
+  assert.equal(d.min_finality, q.quote.minFinality);
+  assert.equal(Number(s(d.deadline)), q.quote.deadline);
+  assert.equal(hexOf(Uint8Array.from(d.nonce as number[])), q.quote.nonce);
+  assert.equal(hexOf(d.hook_data as Uint8Array), q.quote.hookData);
+  assert.ok(q.quote.hookData.length > 2, "stellar dest carries hook data");
+
+  const want = bridgeAccounts({
+    programId: SOLANA_PROGRAM,
+    user: SOL_USER,
+    feeWallet: SOL_FEE_WALLET,
+    nonce: q.quote.nonce,
+    destDomain: q.quote.destDomain,
+    eventAccount: keys.get(1)!.toBase58(),
+  });
+  const idlBridge = (SETTU_BRIDGE_IDL_JSON.instructions as unknown as { name: string; accounts: { name: string; writable?: boolean; signer?: boolean }[] }[]).find((i) => i.name === "bridge")!;
+  assert.equal(ix.accountKeyIndexes.length, idlBridge.accounts.length);
+  idlBridge.accounts.forEach((a, i) => {
+    const idx = ix.accountKeyIndexes[i];
+    assert.ok(keys.get(idx)!.equals(want[a.name]), `account ${a.name}`);
+    assert.equal(tx.message.isAccountWritable(idx), a.writable === true, `${a.name} writable`);
+    assert.equal(tx.message.isAccountSigner(idx), a.signer === true, `${a.name} signer`);
+  });
+  // PDAs as in programs/settu_bridge/src/lib.rs.
+  const [nonceRecord] = PublicKey.findProgramAddressSync(
+    [Buffer.from("nonce"), Buffer.from(q.quote.nonce.slice(2), "hex")],
+    new PublicKey(SOLANA_PROGRAM),
+  );
+  assert.ok(want.nonce_record.equals(nonceRecord));
+  const [config] = PublicKey.findProgramAddressSync([Buffer.from("config")], new PublicKey(SOLANA_PROGRAM));
+  assert.ok(want.config.equals(config));
+});
+
+test("Solana: event keypair partial-signs; the user's signature slot is left empty", async () => {
+  const q = await solanaQuote();
+  const { tx } = await buildSolana(q);
+  assert.equal(tx.message.header.numRequiredSignatures, 2);
+  assert.ok(tx.signatures[0].every((b) => b === 0), "user slot unsigned");
+  const event = tx.message.staticAccountKeys[1];
+  assert.ok(!event.toBase58().startsWith(SOL_USER));
+  assert.ok(
+    verifyEd25519Quote(tx.message.serialize(), tx.signatures[1], event.toBytes()),
+    "event keypair signed the message",
+  );
+  // A fresh event account every build.
+  const again = await buildSolana(q);
+  assert.ok(!again.tx.message.staticAccountKeys[1].equals(event));
+});
+
+test("Solana: serialised size fits 1232 bytes with Stellar hook data", async () => {
+  const q = await solanaQuote("stellar");
+  const { raw } = await buildSolana(q);
+  console.log(`[test] Solana bridge tx (stellar dest, ${(q.quote.hookData.length - 2) / 2}-byte hook): ${raw.length} bytes`);
+  assert.ok(raw.length <= 1232, `${raw.length} bytes`);
+  const evm = await buildSolana(await solanaQuote("base"));
+  assert.ok(evm.raw.length < raw.length);
+});
+
+test("Solana: unset BRIDGE_SOLANA_ALT is a clear error", async () => {
+  const q = await solanaQuote();
+  const prev = process.env.BRIDGE_SOLANA_ALT;
+  delete process.env.BRIDGE_SOLANA_ALT;
+  try {
+    await assert.rejects(
+      buildSourceTx(q, SOL_USER, {}, solanaDeps({ solanaLookupTableAddress: undefined }).deps),
+      /BRIDGE_SOLANA_ALT is not set/,
+    );
+  } finally {
+    if (prev !== undefined) process.env.BRIDGE_SOLANA_ALT = prev;
+  }
+});
+
+test("Solana: lookup table not found on chain is an error", async () => {
+  const q = await solanaQuote();
+  const other = new PublicKey(Buffer.alloc(32, 0x42)).toBase58();
+  await assert.rejects(
+    buildSourceTx(q, SOL_USER, {}, solanaDeps({ solanaLookupTableAddress: () => other }).deps),
+    /lookup table/i,
+  );
+});
+
+test("Solana: wrong user, contract mismatch, expired, and a signature that doesn't verify are rejected", async () => {
+  const q = await solanaQuote();
+  const d = solanaDeps().deps;
+  await rejects(buildSourceTx(q, "4Nd1mBQtrMJVYVfKf2PJy9NZUZdTAsp7D4xWLs4gDB4T", {}, d), "wrong_user");
+  await rejects(buildSourceTx(q, SOL_USER, {}, solanaDeps({ now: () => q.expiresAt }).deps), "quote_expired");
+  await rejects(buildSourceTx({ ...q, contract: "11111111111111111111111111111111" }, SOL_USER, {}, d), "contract_mismatch");
+  await rejects(
+    buildSourceTx({ ...q, quote: { ...q.quote, settuFee: String(BigInt(q.quote.settuFee) - BigInt(1)) } }, SOL_USER, {}, d),
+    "invalid_quote",
+  );
+  await rejects(
+    buildSourceTx(q, SOL_USER, {}, solanaDeps({ ed25519SignerPublicKey: () => new Uint8Array(32).fill(9) }).deps),
+    "invalid_quote",
+  );
 });
 
 // ---------------------------------------------------------------- Stellar

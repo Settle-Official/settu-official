@@ -2,7 +2,18 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { encodeAbiParameters, encodeEventTopics, parseAbiItem, type Hex } from "viem";
 import { Address, nativeToScVal, xdr, StrKey } from "@stellar/stellar-sdk";
-import { InvalidEventError, readBridgedEvent, decodeStellarBridged, stellarContractEvents } from "./read-source-event";
+import { BN } from "@coral-xyz/anchor";
+import { PublicKey } from "@solana/web3.js";
+import {
+  InvalidEventError,
+  TxNotIndexedError,
+  readBridgedEvent,
+  decodeSolanaBridged,
+  decodeStellarBridged,
+  solanaTxLogs,
+  stellarContractEvents,
+} from "./read-source-event";
+import { SETTU_BRIDGE_IDL_JSON, settuBridgeCoder } from "../solana/settu-bridge";
 
 const BRIDGE = "0x1111111111111111111111111111111111111111";
 const USER = "0x2222222222222222222222222222222222222222";
@@ -32,6 +43,7 @@ test("EVM: reads our event, case-insensitive address match", async () => {
   const ev = await readBridgedEvent("base", HASH, {
     evmLogs: async () => [evmLog(BRIDGE.toLowerCase())],
     stellarEvents: async () => null,
+    solanaLogs: async () => null,
   });
   assert.ok(ev);
   assert.equal(ev.amount, BigInt(1_000_000));
@@ -49,21 +61,132 @@ test("EVM: event from another contract is rejected", async () => {
   const ev = await readBridgedEvent("base", HASH, {
     evmLogs: async () => [evmLog("0x9999999999999999999999999999999999999999")],
     stellarEvents: async () => null,
+    solanaLogs: async () => null,
   });
   assert.equal(ev, null);
 });
 
 test("EVM: missing tx / no logs -> null", async () => {
   process.env.BRIDGE_CONTRACT_BASE = BRIDGE;
-  const d = { evmLogs: async () => null, stellarEvents: async () => null };
+  const d = { evmLogs: async () => null, stellarEvents: async () => null, solanaLogs: async () => null };
   assert.equal(await readBridgedEvent("base", HASH, d), null);
 });
 
-test("Solana source: clear not-supported error", async () => {
+// ---------------------------------------------------------------- Solana
+
+const SOL_PROGRAM = "3CGxb2E9ASpizQtoL8wykokiZ8BH19MXMWmgy17KQmD1";
+const OTHER_PROGRAM = "CCTPV2vPZJS2u2BBsUoscuikbYjnpFmbFsvVuJdgUMQe";
+const SOL_USER = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
+const SIG = "5".repeat(87);
+const noEvm = { evmLogs: async () => null, stellarEvents: async () => null };
+
+/** `Program data:` payload of a Bridged event, encoded with the IDL coder. */
+function bridgedData(amount = 5_000_000): string {
+  const disc = (SETTU_BRIDGE_IDL_JSON.events as unknown as { name: string; discriminator: number[] }[]).find(
+    (e) => e.name === "Bridged",
+  )!.discriminator;
+  const body = settuBridgeCoder.types.encode("Bridged", {
+    nonce: [...Buffer.from(NONCE.slice(2), "hex")],
+    user: new PublicKey(SOL_USER),
+    amount: new BN(amount),
+    settu_fee: new BN(25_000),
+    network_fee: new BN(630_000),
+    native_fee: new BN(7_000),
+    dest_domain: 27,
+    mint_recipient: [...Buffer.from(MR.slice(2), "hex")],
+    min_finality: 2000,
+  });
+  return Buffer.concat([Buffer.from(disc), body]).toString("base64");
+}
+
+/** Logs of a bridge tx; `emitter` is the program whose frame the event is logged in. */
+function solLogs(emitter = SOL_PROGRAM, data = bridgedData()): string[] {
+  return [
+    "Program Ed25519SigVerify111111111111111111111111111 invoke [1]",
+    "Program Ed25519SigVerify111111111111111111111111111 success",
+    `Program ${SOL_PROGRAM} invoke [1]`,
+    "Program log: Instruction: Bridge",
+    `Program ${OTHER_PROGRAM} invoke [2]`,
+    ...(emitter === OTHER_PROGRAM ? [`Program data: ${data}`] : []),
+    `Program ${OTHER_PROGRAM} consumed 50000 of 150000 compute units`,
+    `Program ${OTHER_PROGRAM} success`,
+    ...(emitter === SOL_PROGRAM ? [`Program data: ${data}`] : []),
+    `Program ${SOL_PROGRAM} consumed 90000 of 200000 compute units`,
+    `Program ${SOL_PROGRAM} success`,
+  ];
+}
+
+test("Solana: decodes our Bridged event from the program's own log frame (6-decimal units)", async () => {
+  process.env.BRIDGE_CONTRACT_SOLANA = SOL_PROGRAM;
+  let asked = "";
+  const ev = await readBridgedEvent("solana", SIG, {
+    ...noEvm,
+    solanaLogs: async (sig) => {
+      asked = sig;
+      return solLogs();
+    },
+  });
+  assert.equal(asked, SIG);
+  assert.ok(ev);
+  assert.equal(ev.nonce, NONCE);
+  assert.equal(ev.user, SOL_USER);
+  assert.equal(ev.amount, BigInt(5_000_000));
+  assert.equal(ev.settuFee, BigInt(25_000));
+  assert.equal(ev.networkFee, BigInt(630_000));
+  assert.equal(ev.nativeFee, BigInt(7_000));
+  assert.equal(ev.destDomain, 27);
+  assert.equal(ev.mintRecipient, MR);
+  assert.equal(ev.minFinality, 2000);
+});
+
+test("Solana: a Bridged-shaped log from another program is rejected", () => {
+  assert.equal(decodeSolanaBridged(solLogs(OTHER_PROGRAM), SOL_PROGRAM), null);
+  // Our program never invoked at all.
+  const foreign = [
+    `Program ${OTHER_PROGRAM} invoke [1]`,
+    `Program data: ${bridgedData()}`,
+    `Program ${OTHER_PROGRAM} success`,
+  ];
+  assert.equal(decodeSolanaBridged(foreign, SOL_PROGRAM), null);
+  // A log line can't fake an invoke frame (msg! output is "Program log: …").
+  const spoof = [
+    `Program ${OTHER_PROGRAM} invoke [1]`,
+    `Program log: Program ${SOL_PROGRAM} invoke [2]`,
+    `Program data: ${bridgedData()}`,
+    `Program ${OTHER_PROGRAM} success`,
+  ];
+  assert.equal(decodeSolanaBridged(spoof, SOL_PROGRAM), null);
+});
+
+test("Solana: other events from our program are ignored; failed tx -> null; not found -> TxNotIndexedError", async () => {
+  process.env.BRIDGE_CONTRACT_SOLANA = SOL_PROGRAM;
+  const notBridged = solLogs(SOL_PROGRAM, Buffer.alloc(40, 1).toString("base64"));
+  assert.equal(decodeSolanaBridged(notBridged, SOL_PROGRAM), null);
+  assert.equal(await readBridgedEvent("solana", SIG, { ...noEvm, solanaLogs: async () => null }), null);
   await assert.rejects(
-    readBridgedEvent("solana", "x", { evmLogs: async () => null, stellarEvents: async () => null }),
-    /solana source not supported yet/,
+    readBridgedEvent("solana", SIG, {
+      ...noEvm,
+      solanaLogs: async () => {
+        throw new TxNotIndexedError();
+      },
+    }),
+    (e: unknown) => e instanceof TxNotIndexedError,
   );
+});
+
+test("Solana: default reader requires success and uses maxSupportedTransactionVersion 0", async () => {
+  const seen: unknown[] = [];
+  const conn = (tx: unknown) => ({
+    getTransaction: async (sig: string, opts: unknown) => {
+      seen.push([sig, opts]);
+      return tx as never;
+    },
+  });
+  await assert.rejects(solanaTxLogs(conn(null), SIG), (e: unknown) => e instanceof TxNotIndexedError);
+  assert.equal(await solanaTxLogs(conn({ meta: { err: { InstructionError: [1, "x"] }, logMessages: solLogs() } }), SIG), null);
+  assert.equal(await solanaTxLogs(conn({ meta: null }), SIG), null);
+  assert.deepEqual(await solanaTxLogs(conn({ meta: { err: null, logMessages: ["a"] } }), SIG), ["a"]);
+  assert.deepEqual(seen[0], [SIG, { maxSupportedTransactionVersion: 0, commitment: "confirmed" }]);
 });
 
 const CID = StrKey.encodeContract(Buffer.alloc(32, 7));

@@ -13,8 +13,9 @@ const UNAVAILABLE = "Couldn't prepare the transaction right now — try again in
  * signed quote. Body: { quote: QuoteResponse, userAddress, permit? }.
  *
  * 200 SourceTx: { family: "evm", chainId, to, data, value, needsApproval } | { family: "stellar", xdr }
+ *     | { family: "solana", txBase64 } (v0, event keypair already signed; the wallet signs + sends)
  * 400 { error, code }: invalid_request / invalid_quote / quote_expired /
- *     contract_mismatch / wrong_user / invalid_permit / simulation_failed / unsupported_source
+ *     contract_mismatch / wrong_user / invalid_permit / simulation_failed
  * 503 { error, code: "unavailable" }: config or RPC failure.
  */
 export async function POST(request: NextRequest) {

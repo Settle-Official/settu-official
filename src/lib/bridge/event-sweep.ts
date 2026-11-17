@@ -19,7 +19,13 @@
  *    support's job. confirmedHead <= cursor -> nothing to do this run.
  *  - Stellar: Soroban `getEvents` filtered by our contract id. The cursor is
  *    the RPC's pagination cursor. First run: startLedger = latest - 2,000.
- *  - Solana: out of scope here (Task 8) — skipped with a log line.
+ *  - Solana: `getSignaturesForAddress(programId)` at commitment `finalized`,
+ *    newest-first pages of SOLANA_PAGE_LIMIT (1,000), `until` the cursor.
+ *    The cursor is the newest signature processed. Signatures are processed
+ *    oldest-first, so a run that stops early (budget or failure) leaves the
+ *    cursor at a contiguous point and the next run picks up the rest. First
+ *    run (no cursor): only the latest page. Failed txs (err != null) are
+ *    passed over without a registration. Ids are the signature, case kept.
  *
  * The cursor only moves after every event in that chunk/page was processed.
  * A retryable failure (RPC, not-indexed, Redis) stops that chain for this run
@@ -32,6 +38,11 @@
  *  - EVM: at most MAX_CHUNKS_PER_CHAIN chunks (6,000 blocks) per chain per run;
  *    chains run in parallel, each chunk sequentially.
  *  - Stellar: at most MAX_STELLAR_PAGES pages of STELLAR_PAGE_LIMIT events.
+ *  - Solana: at most MAX_SOLANA_PAGES signature pages fetched and
+ *    MAX_SOLANA_SIGNATURES_PER_RUN signatures processed. If the cursor isn't
+ *    reached within the pages (a backlog over 3,000 signatures), the window
+ *    fetched is processed as if it were a first run and the older gap is
+ *    logged and left to the register route / support, as on EVM's first run.
  *  - Advance pass: at most MAX_ADVANCES_PER_RUN bridge records, the start
  *    rotated each run (Redis counter `bridge:sweep-advance-offset`).
  * A chain behind by more than that catches up over several runs.
@@ -54,8 +65,10 @@ import { advanceCctpTransfer } from "../cctp/advance";
 import { sorobanRpc } from "../stellar/soroban-rpc";
 import { BRIDGE_CHAINS, type BridgeChainKey } from "./chains";
 import { bridgeContractFor } from "./contracts";
-import { BridgeRegisterError, registerBridge } from "./bridge-store";
+import { BridgeRegisterError, normaliseBridgeId, registerBridge } from "./bridge-store";
 import { decodeEvmBridged, decodeStellarBridged, type EvmLogLike } from "./read-source-event";
+import { Connection, PublicKey } from "@solana/web3.js";
+import { requireSolanaRpcUrl } from "../solana/config";
 import { scheduleDriveOnRegister } from "./schedule";
 
 export const EVM_CHUNK_BLOCKS = 2000;
@@ -64,6 +77,9 @@ export const MAX_CHUNKS_PER_CHAIN = 3;
 export const STELLAR_PAGE_LIMIT = 100;
 export const MAX_STELLAR_PAGES = 3;
 export const MAX_ADVANCES_PER_RUN = 25;
+export const SOLANA_PAGE_LIMIT = 1000;
+export const MAX_SOLANA_PAGES = 3;
+export const MAX_SOLANA_SIGNATURES_PER_RUN = 50;
 
 type EvmChainKey = Exclude<BridgeChainKey, "stellar" | "solana">;
 
@@ -120,6 +136,21 @@ export interface StellarEventsPage {
   cursor?: string;
 }
 
+/** One entry of `getSignaturesForAddress` (newest first). */
+export interface SolanaSignatureInfo {
+  signature: string;
+  /** null for a successful tx. */
+  err: unknown;
+}
+
+export interface SolanaSignaturesRequest {
+  limit: number;
+  /** Strictly older than this signature. */
+  before?: string;
+  /** Strictly newer than this signature. */
+  until?: string;
+}
+
 export interface SweepDeps {
   chains: BridgeChainKey[];
   /** Our contract on `chain`, or null when it isn't configured. */
@@ -130,6 +161,8 @@ export interface SweepDeps {
   evmGetLogs(chain: BridgeChainKey, address: string, fromBlock: bigint, toBlock: bigint): Promise<EvmSweepLog[]>;
   stellarLatestLedger(): Promise<number>;
   stellarGetEvents(req: StellarEventsRequest): Promise<StellarEventsPage>;
+  /** Finalized signatures for `programId`, newest first. */
+  solanaSignatures(programId: string, req: SolanaSignaturesRequest): Promise<SolanaSignatureInfo[]>;
   getTransfer(id: string): Promise<CctpTransferRecord | null>;
   register(chain: BridgeChainKey, txHash: string): Promise<void>;
   listPending(): Promise<string[]>;
@@ -204,6 +237,15 @@ export const defaultSweepDeps: SweepDeps = {
       ...(typeof r?.cursor === "string" && r.cursor ? { cursor: r.cursor } : {}),
     };
   },
+  async solanaSignatures(programId, req) {
+    const conn = new Connection(requireSolanaRpcUrl(), "finalized");
+    const r = await conn.getSignaturesForAddress(
+      new PublicKey(programId),
+      { limit: req.limit, ...(req.before ? { before: req.before } : {}), ...(req.until ? { until: req.until } : {}) },
+      "finalized",
+    );
+    return r.map((x) => ({ signature: x.signature, err: x.err }));
+  },
   getTransfer: getCctpTransfer,
   register: async (chain, txHash) => {
     await registerBridge(chain, txHash, (id) => scheduleDriveOnRegister(id));
@@ -217,8 +259,8 @@ export const defaultSweepDeps: SweepDeps = {
 
 const isFinal = (s: CctpStatus) => s === "completed" || s === "failed";
 
-/** Ids are the lower-cased source tx hash (see bridge-store normaliseHash). */
-const idFor = (txHash: string) => txHash.toLowerCase();
+/** Ids are the lower-cased hex hash, or the case-kept Solana signature (bridge-store normaliseHash). */
+const idFor = (txHash: string) => normaliseBridgeId(txHash);
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : "unknown");
 
@@ -337,19 +379,62 @@ async function sweepStellar(d: SweepDeps, contract: string): Promise<number> {
   return created;
 }
 
+async function sweepSolana(d: SweepDeps, program: string): Promise<number> {
+  const chain: BridgeChainKey = "solana";
+  const cursor = await d.getCursor(chain);
+
+  // Newest first, back to the cursor (or just the latest page on a first run).
+  const fetched: SolanaSignatureInfo[] = [];
+  let reachedCursor = cursor === null;
+  for (let i = 0; i < (cursor === null ? 1 : MAX_SOLANA_PAGES); i++) {
+    const before = fetched[fetched.length - 1]?.signature;
+    const page = await d.solanaSignatures(program, {
+      limit: SOLANA_PAGE_LIMIT,
+      ...(before ? { before } : {}),
+      ...(cursor !== null ? { until: cursor } : {}),
+    });
+    fetched.push(...page);
+    if (page.length < SOLANA_PAGE_LIMIT) {
+      reachedCursor = true;
+      break;
+    }
+  }
+  if (!reachedCursor) {
+    d.log(
+      `[bridge/sweep] solana: more than ${MAX_SOLANA_PAGES * SOLANA_PAGE_LIMIT} signatures since the cursor; ` +
+        `processing the newest window, older ones are left to the register route`,
+    );
+  }
+
+  const todo = fetched.reverse().slice(0, MAX_SOLANA_SIGNATURES_PER_RUN); // oldest first
+  const seen = new Set<string>();
+  let created = 0;
+  let lastDone: string | null = null;
+  try {
+    for (const s of todo) {
+      if (s.err === null || s.err === undefined) {
+        if (await handleEvent(d, chain, s.signature, seen)) created++;
+      }
+      lastDone = s.signature;
+    }
+  } finally {
+    // Only signatures fully processed move the cursor (contiguous, oldest first).
+    if (lastDone !== null) await d.setCursor(chain, lastDone);
+  }
+  return created;
+}
+
 async function sweepChain(d: SweepDeps, chain: BridgeChainKey): Promise<number> {
   const family = BRIDGE_CHAINS[chain].family;
-  if (family === "solana") {
-    d.log("[bridge/sweep] solana: skipped — Solana source sweep lands with Task 8");
-    return 0;
-  }
   try {
     const contract = d.contractFor(chain);
     if (!contract) {
       d.log(`[bridge/sweep] ${chain}: skipped — BRIDGE_CONTRACT_${chain.toUpperCase()} not configured`);
       return 0;
     }
-    return family === "evm" ? await sweepEvm(d, chain, contract) : await sweepStellar(d, contract);
+    if (family === "evm") return await sweepEvm(d, chain, contract);
+    if (family === "stellar") return await sweepStellar(d, contract);
+    return await sweepSolana(d, contract);
   } catch (e) {
     d.log(`[bridge/sweep] ${chain}: stopped this run, cursor kept: ${errMsg(e)}`);
     return 0;

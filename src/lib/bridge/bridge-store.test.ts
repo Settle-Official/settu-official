@@ -51,10 +51,32 @@ test("tx without our event -> 400", async () => {
     e instanceof BridgeRegisterError && e.status === 400);
 });
 
-test("bad hash -> 400; solana -> 400", async () => {
+test("bad hash -> 400 (EVM and Solana)", async () => {
   const d = memDeps(EV, { creates: 0 });
   await assert.rejects(registerBridge("base", "nope", undefined, d), (e: unknown) => e instanceof BridgeRegisterError && e.status === 400);
   await assert.rejects(registerBridge("solana", "abc", undefined, d), (e: unknown) => e instanceof BridgeRegisterError && e.status === 400);
+  await assert.rejects(registerBridge("solana", "0x" + "cd".repeat(32), undefined, d), (e: unknown) => e instanceof BridgeRegisterError && e.status === 400);
+});
+
+test("Solana source registers; the base58 signature id keeps its case", async () => {
+  const sig = "4Ei2Mz3qkzd1ZgmjhDqWzAWwr6AxaJyTf9B2h8EdkSFMy4nZoBxEGRiTJ8YaNbVjrhN3zgZ7Pv6SXCLWZxkHeeGQ";
+  const spy = { creates: 0 };
+  const seen: string[] = [];
+  const d = {
+    ...memDeps({ ...EV, user: "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM" }, spy),
+    readEvent: async (_c: string, h: string) => {
+      seen.push(h);
+      return { ...EV, user: "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM" };
+    },
+  };
+  const r = await registerBridge("solana", sig, undefined, d);
+  assert.equal(r.id, sig);
+  assert.equal(r.burnTxHash, sig);
+  assert.equal(r.sourceDomain, 5);
+  assert.deepEqual(seen, [sig]);
+  await registerBridge("solana", sig, undefined, d);
+  assert.equal(spy.creates, 1);
+  assert.equal((await getBridgeStatus(sig, d))?.id, sig);
 });
 
 test("amounts and parties come from the event", async () => {

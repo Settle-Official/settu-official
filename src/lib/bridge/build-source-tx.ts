@@ -8,8 +8,12 @@
  *
  * - EVM: calldata for SettuBridge.bridge(Quote, sig, Permit), value = nativeFee.
  * - Stellar: simulated + assembled invoke of settu-bridge `bridge`, as XDR.
- * - Solana: not built here; the Solana source builder ships with the Solana
- *   program in Task 8.
+ * - Solana: an unsigned v0 transaction with exactly two instructions,
+ *   [Ed25519SigVerify(signer, quote bytes, signature), settu_bridge `bridge`],
+ *   using the BRIDGE_SOLANA_ALT lookup table to fit 1232 bytes. A fresh
+ *   MessageSent event keypair is generated here and partial-signs; the
+ *   user's wallet adds the fee-payer signature. Nothing else (no compute
+ *   budget, memo or ATA create) may be added: the size budget is spent.
  *
  * The quote body arrives from the client, so it is untrusted input.
  */
@@ -28,10 +32,33 @@ import {
   type Address,
   type Hex,
 } from "viem";
+import {
+  AddressLookupTableAccount,
+  Connection,
+  Ed25519Program,
+  Keypair,
+  PACKET_DATA_SIZE,
+  PublicKey,
+  TransactionMessage,
+  VersionedTransaction,
+} from "@solana/web3.js";
 import { CCTP_CONFIG } from "../cctp/constants";
-import type { QuoteResponse, QuoteSuccess, SerializedBridgeQuote } from "./build-quote";
+import { requireSolanaRpcUrl } from "../solana/config";
+import { buildBridgeIx } from "../solana/settu-bridge";
+import {
+  deserializeQuote,
+  type QuoteResponse,
+  type QuoteSuccess,
+  type SerializedBridgeQuote,
+} from "./build-quote";
 import { BRIDGE_CHAINS, bridgeChainByDomain, type BridgeChainKey } from "./chains";
-import { bridgeContractFor as envBridgeContractFor } from "./contracts";
+import { bridgeContractFor as envBridgeContractFor, feeWalletFor as envFeeWalletFor } from "./contracts";
+import {
+  ed25519PublicKeyFromSeed,
+  encodeQuoteBytes,
+  loadEd25519QuoteSignerSecret,
+  verifyEd25519Quote,
+} from "./quote";
 
 // ---------------------------------------------------------------- types
 
@@ -54,7 +81,9 @@ export type SourceTx =
       value: string;
       needsApproval: boolean;
     }
-  | { family: "stellar"; xdr: string };
+  | { family: "stellar"; xdr: string }
+  /** Base64 v0 VersionedTransaction, partial-signed by the event keypair; the user signs slot 0. */
+  | { family: "solana"; txBase64: string };
 
 export class BuildTxError extends Error {
   readonly code: string;
@@ -74,6 +103,12 @@ export interface StellarRpcLike {
   ): Promise<StellarSdk.rpc.Api.SimulateTransactionResponse>;
 }
 
+/** The subset of @solana/web3.js Connection this module uses (injectable in tests). */
+export interface SolanaRpcLike {
+  getLatestBlockhash(): Promise<{ blockhash: string; lastValidBlockHeight: number }>;
+  getAddressLookupTable(key: PublicKey): Promise<{ value: AddressLookupTableAccount | null }>;
+}
+
 export interface BuildSourceTxDeps {
   /** Unix seconds. */
   now(): number;
@@ -81,6 +116,12 @@ export interface BuildSourceTxDeps {
   /** USDC allowance owner → spender on an EVM chain, in atomic units. */
   evmAllowance(chain: BridgeChainKey, owner: Address, spender: Address): Promise<bigint>;
   stellarServer(): StellarRpcLike;
+  solanaRpc(): SolanaRpcLike;
+  /** BRIDGE_SOLANA_ALT: the bridge's address lookup table (base58). */
+  solanaLookupTableAddress(): string;
+  feeWalletFor(chain: BridgeChainKey): string;
+  /** The ed25519 quote signer's 32-byte public key (the program's config.signer). */
+  ed25519SignerPublicKey(): Uint8Array;
 }
 
 // ---------------------------------------------------------------- EVM ABI
@@ -277,11 +318,6 @@ export async function buildSourceTx(
   const p = parseQuote(input);
   const family = BRIDGE_CHAINS[p.source].family;
 
-  if (family === "solana") {
-    // The Solana source builder ships with the Solana bridge program (Task 8).
-    throw new BuildTxError("unsupported_source", "Solana source not supported yet.");
-  }
-
   if (Math.floor(d.now()) >= p.raw.expiresAt) {
     throw new BuildTxError("quote_expired", "This quote has expired. Get a new quote.");
   }
@@ -296,7 +332,9 @@ export async function buildSourceTx(
     throw new BuildTxError("contract_mismatch", INVALID_QUOTE);
   }
 
-  return family === "evm" ? buildEvm(p, userAddress, opts.permit, expected as Address, d) : buildStellar(p, userAddress, expected, d);
+  if (family === "evm") return buildEvm(p, userAddress, opts.permit, expected as Address, d);
+  if (family === "stellar") return buildStellar(p, userAddress, expected, d);
+  return buildSolana(p, userAddress, expected, d);
 }
 
 async function buildEvm(
@@ -465,6 +503,105 @@ export async function buildAndAssemble(
   return StellarSdk.rpc.assembleTransaction(tx, ok).build().toXDR();
 }
 
+// ---------------------------------------------------------------- Solana
+
+const BASE58_PUBKEY = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+
+function isSolanaPubkey(s: string): boolean {
+  if (!BASE58_PUBKEY.test(s)) return false;
+  try {
+    return new PublicKey(s).toBase58() === s;
+  } catch {
+    return false;
+  }
+}
+
+/** BRIDGE_SOLANA_ALT, validated. */
+export function bridgeSolanaAltFromEnv(): string {
+  const v = process.env.BRIDGE_SOLANA_ALT?.trim();
+  if (!v) throw new Error("BRIDGE_SOLANA_ALT is not set (the Solana bridge address lookup table)");
+  if (!isSolanaPubkey(v)) throw new Error("BRIDGE_SOLANA_ALT must be a base58 Solana public key");
+  return v;
+}
+
+async function buildSolana(
+  p: ParsedQuote,
+  userAddress: string,
+  programId: string,
+  d: BuildSourceTxDeps,
+): Promise<SourceTx> {
+  if (!isSolanaPubkey(p.q.user)) invalidQuote();
+  if (userAddress !== p.q.user) {
+    throw new BuildTxError("wrong_user", "This quote is for a different wallet.");
+  }
+
+  // The program re-checks this on-chain; checking here turns a tampered
+  // quote into a 400 instead of a wallet prompt for a doomed transaction.
+  const quoteBytes = encodeQuoteBytes(deserializeQuote(p.q), "solana", programId);
+  const signature = Buffer.from(p.raw.signature.slice(2), "hex");
+  const signerPub = d.ed25519SignerPublicKey();
+  if (!verifyEd25519Quote(quoteBytes, signature, signerPub)) invalidQuote();
+
+  const altAddress = d.solanaLookupTableAddress();
+  const feeWallet = d.feeWalletFor("solana");
+  const rpc = d.solanaRpc();
+  const [alt, latest] = await Promise.all([
+    rpc.getAddressLookupTable(new PublicKey(altAddress)),
+    rpc.getLatestBlockhash(),
+  ]);
+  if (!alt.value) throw new Error(`Solana bridge address lookup table ${altAddress} not found`);
+
+  const event = Keypair.generate();
+  const instructions = [
+    Ed25519Program.createInstructionWithPublicKey({
+      publicKey: signerPub,
+      message: quoteBytes,
+      signature,
+    }),
+    buildBridgeIx({
+      programId,
+      quote: {
+        sourceDomain: p.q.sourceDomain,
+        destDomain: p.q.destDomain,
+        user: p.q.user,
+        amount: p.amount,
+        settuFee: p.settuFee,
+        networkFee: p.networkFee,
+        nativeFee: p.nativeFee,
+        mintRecipient: p.q.mintRecipient,
+        maxFee: p.maxFee,
+        minFinality: p.q.minFinality,
+        deadline: p.q.deadline,
+        nonce: p.q.nonce,
+        hookData: p.q.hookData,
+      },
+      feeWallet,
+      eventAccount: event.publicKey.toBase58(),
+    }),
+  ];
+
+  const message = new TransactionMessage({
+    payerKey: new PublicKey(p.q.user),
+    recentBlockhash: latest.blockhash,
+    instructions,
+  }).compileToV0Message([alt.value]);
+  const tx = new VersionedTransaction(message);
+  tx.sign([event]);
+
+  let raw: Uint8Array;
+  try {
+    raw = tx.serialize();
+  } catch (e) {
+    throw new Error(
+      `Solana bridge tx does not serialise (${e instanceof Error ? e.message : "unknown"}); is BRIDGE_SOLANA_ALT missing entries?`,
+    );
+  }
+  if (raw.length > PACKET_DATA_SIZE) {
+    throw new Error(`Solana bridge tx is ${raw.length} bytes (> ${PACKET_DATA_SIZE}); is BRIDGE_SOLANA_ALT missing entries?`);
+  }
+  return { family: "solana", txBase64: Buffer.from(raw).toString("base64") };
+}
+
 // ---------------------------------------------------------------- EIP-2612 permit
 
 export type UsdcReadFn = "name" | "version" | "nonces";
@@ -564,6 +701,10 @@ export function defaultBuildSourceTxDeps(): BuildSourceTxDeps {
         args: [owner, spender],
       }),
     stellarServer: () => new StellarSdk.rpc.Server(CCTP_CONFIG.stellarRpcUrl),
+    solanaRpc: () => new Connection(requireSolanaRpcUrl(), "confirmed"),
+    solanaLookupTableAddress: bridgeSolanaAltFromEnv,
+    feeWalletFor: envFeeWalletFor,
+    ed25519SignerPublicKey: () => ed25519PublicKeyFromSeed(loadEd25519QuoteSignerSecret()),
   };
 }
 
