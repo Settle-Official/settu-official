@@ -54,6 +54,8 @@ export interface BridgeMeta {
   receiveMinAtomic: string;
   /** True while receiveMinAtomic is just the burn amount (Fast, maxFee unknown). */
   receiveMinIsBurn?: boolean;
+  /** Native-token fee paid on the source chain (from the on-chain event); absent on older records. */
+  nativeFeeAtomic?: string;
   receivedAtomic?: string;
   attestedAt?: number;
   fellBackToStandard?: boolean;
@@ -208,4 +210,35 @@ export async function removePendingTransfer(id: string): Promise<void> {
 
 export async function listPendingTransfers(): Promise<string[]> {
   return (await redis.smembers(PENDING_KEY)) ?? [];
+}
+
+// ---- bridge explorer index (admin) ----------------------------------------
+
+const BRIDGE_INDEX_KEY = "bridge:index";
+
+/** `ZADD bridge:index <createdAt> <id>`: one command per new bridge record. */
+export async function indexBridgeTransfer(id: string, createdAt: number): Promise<void> {
+  await redis.zadd(BRIDGE_INDEX_KEY, { score: createdAt, member: id });
+}
+
+/**
+ * One page of the index, newest first: ids with score in [min, max]
+ * (`max` may be "(123" for exclusive, "+inf" for none). One ZREVRANGEBYSCORE.
+ */
+export async function rangeBridgeIndex(max: string, min: string, count: number): Promise<string[]> {
+  return (
+    (await redis.zrange<string[]>(BRIDGE_INDEX_KEY, max as `(${number}` | "+inf", min as `(${number}` | "-inf", {
+      byScore: true,
+      rev: true,
+      offset: 0,
+      count,
+    })) ?? []
+  );
+}
+
+/** One MGET for many records (missing/expired come back null). */
+export async function getCctpTransfers(ids: string[]): Promise<(CctpTransferRecord | null)[]> {
+  if (ids.length === 0) return [];
+  const rows = await redis.mget<(CctpTransferRecord | null)[]>(...ids.map(key));
+  return rows.map((r) => r ?? null);
 }
