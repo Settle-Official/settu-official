@@ -59,7 +59,9 @@ function quoteJson(q: BridgeQuote): Json {
     destDomain: q.destDomain,
     user: q.user,
     amount: q.amount.toString(),
-    totalFee: q.totalFee.toString(),
+    settuFee: q.settuFee.toString(),
+    networkFee: q.networkFee.toString(),
+    nativeFee: q.nativeFee.toString(),
     mintRecipient: q.mintRecipient,
     hookData: q.hookData,
     maxFee: q.maxFee.toString(),
@@ -83,7 +85,9 @@ export async function generateQuoteVectors(): Promise<QuoteVectors & Json> {
     destDomain: 27,
     user: EVM_USER,
     amount: BigInt(100_000_000),
-    totalFee: BigInt(1_130_000),
+    settuFee: BigInt(500_000),
+    networkFee: BigInt(0),
+    nativeFee: BigInt("150000000000000"), // 0.00015 ETH in wei
     mintRecipient: `0x${"ab".repeat(32)}`,
     hookData: buildForwarderHookData(FORWARD_RECIPIENT),
     maxFee: BigInt(12_853),
@@ -101,7 +105,9 @@ export async function generateQuoteVectors(): Promise<QuoteVectors & Json> {
     destDomain: 6,
     user: STELLAR_USER,
     amount: BigInt(250_000_000),
-    totalFee: BigInt(2_000_000),
+    settuFee: BigInt(1_250_000),
+    networkFee: BigInt(630_000),
+    nativeFee: BigInt(0),
     mintRecipient: `0x${"00".repeat(12)}${"70997970c51812dc3a010c7d01b50e0d17dc79c8"}`,
     hookData: buildForwarderHookData(FORWARD_RECIPIENT),
     maxFee: BigInt(0),
@@ -117,7 +123,9 @@ export async function generateQuoteVectors(): Promise<QuoteVectors & Json> {
     destDomain: 6,
     user: SOLANA_USER,
     amount: BigInt(5_000_000),
-    totalFee: BigInt(75_000),
+    settuFee: BigInt(25_000),
+    networkFee: BigInt(0),
+    nativeFee: BigInt(2_039_280), // lamports
     mintRecipient: `0x${"00".repeat(12)}${"70997970c51812dc3a010c7d01b50e0d17dc79c8"}`,
     hookData: "0x",
     maxFee: BigInt(650),
@@ -158,7 +166,7 @@ export async function generateQuoteVectors(): Promise<QuoteVectors & Json> {
       prefix: ED25519_QUOTE_PREFIX,
       fixedLength: ED25519_QUOTE_FIXED_LENGTH,
       layout:
-        "prefix(15 ascii) | contractId 32 | sourceDomain u32 | destDomain u32 | user 32 | amount u64 | totalFee u64 | mintRecipient 32 | maxFee u64 | minFinality u32 | deadline u64 | nonce 32 | hookDataLen u32 | hookData (big-endian)",
+        "prefix(15 ascii) | contractId 32 | sourceDomain u32 | destDomain u32 | user 32 | amount u64 | settuFee u64 | networkFee u64 | nativeFee u64 | mintRecipient 32 | maxFee u64 | minFinality u32 | deadline u64 | nonce 32 | hookDataLen u32 | hookData (big-endian)",
     },
     cases: [
       {

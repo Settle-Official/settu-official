@@ -52,7 +52,9 @@ const evmQuote: BridgeQuote = {
   destDomain: 27,
   user: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
   amount: BigInt(100_000_000),
-  totalFee: BigInt(1_130_000),
+  settuFee: BigInt(500_000),
+  networkFee: BigInt(630_000),
+  nativeFee: BigInt(7_000),
   mintRecipient: `0x${"ab".repeat(32)}`,
   hookData: "0x1234",
   maxFee: BigInt(12_853),
@@ -64,7 +66,7 @@ const evmQuote: BridgeQuote = {
 test("EVM type string is the agreed one", () => {
   assert.equal(
     EVM_QUOTE_TYPE_STRING,
-    "Quote(uint8 version,uint32 sourceDomain,uint32 destDomain,address user,uint256 amount,uint256 totalFee,bytes32 mintRecipient,bytes hookData,uint256 maxFee,uint32 minFinality,uint64 deadline,bytes32 nonce)",
+    "Quote(uint8 version,uint32 sourceDomain,uint32 destDomain,address user,uint256 amount,uint256 settuFee,uint256 networkFee,uint256 nativeFee,bytes32 mintRecipient,bytes hookData,uint256 maxFee,uint32 minFinality,uint64 deadline,bytes32 nonce)",
   );
 });
 
@@ -81,7 +83,9 @@ test("EVM: changing any single field changes the recovered address", async () =>
     { destDomain: 5 },
     { user: "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC" },
     { amount: BigInt(100_000_001) },
-    { totalFee: BigInt(1_130_001) },
+    { settuFee: BigInt(500_001) },
+    { networkFee: BigInt(630_001) },
+    { nativeFee: BigInt(7_001) },
     { mintRecipient: `0x${"ab".repeat(31)}ac` },
     { hookData: "0x1235" },
     { hookData: "0x" },
@@ -130,8 +134,8 @@ const stellarQuote: BridgeQuote = {
   hookData: buildForwarderHookData(STELLAR_USER),
 };
 
-test("fixed length is 191 bytes", () => {
-  assert.equal(ED25519_QUOTE_FIXED_LENGTH, 191);
+test("fixed length is 207 bytes", () => {
+  assert.equal(ED25519_QUOTE_FIXED_LENGTH, 207);
 });
 
 test("ed25519 encoding length = fixed + hookData, layout spot checks", () => {
@@ -145,14 +149,16 @@ test("ed25519 encoding length = fixed + hookData, layout spot checks", () => {
   assert.equal(b.readUInt32BE(51), 6);
   assert.deepEqual(b.subarray(55, 87), Buffer.alloc(32, 0x33));
   assert.equal(b.readBigUInt64BE(87), BigInt(100_000_000));
-  assert.equal(b.readBigUInt64BE(95), BigInt(1_130_000));
-  assert.deepEqual(b.subarray(103, 135), Buffer.alloc(32, 0xab));
-  assert.equal(b.readBigUInt64BE(135), BigInt(12_853));
-  assert.equal(b.readUInt32BE(143), 1000);
-  assert.equal(b.readBigUInt64BE(147), BigInt(1_800_000_000));
-  assert.deepEqual(b.subarray(155, 187), Buffer.alloc(32, 0xcd));
-  assert.equal(b.readUInt32BE(187), hookLen);
-  assert.equal(`0x${b.subarray(191).toString("hex")}`, stellarQuote.hookData);
+  assert.equal(b.readBigUInt64BE(95), BigInt(500_000));
+  assert.equal(b.readBigUInt64BE(103), BigInt(630_000));
+  assert.equal(b.readBigUInt64BE(111), BigInt(7_000));
+  assert.deepEqual(b.subarray(119, 151), Buffer.alloc(32, 0xab));
+  assert.equal(b.readBigUInt64BE(151), BigInt(12_853));
+  assert.equal(b.readUInt32BE(159), 1000);
+  assert.equal(b.readBigUInt64BE(163), BigInt(1_800_000_000));
+  assert.deepEqual(b.subarray(171, 203), Buffer.alloc(32, 0xcd));
+  assert.equal(b.readUInt32BE(203), hookLen);
+  assert.equal(`0x${b.subarray(207).toString("hex")}`, stellarQuote.hookData);
 });
 
 test("ed25519 encoding with empty hookData is exactly fixed length", () => {
@@ -204,7 +210,9 @@ test("encoding rejects bad inputs", () => {
   assert.throws(enc({ nonce: `0x${"cd".repeat(33)}` }));
   assert.throws(enc({ hookData: "0x123" as `0x${string}` }));
   assert.throws(enc({ amount: BigInt(2) ** BigInt(64) }));
-  assert.throws(enc({ totalFee: BigInt(-1) }));
+  assert.throws(enc({ settuFee: BigInt(-1) }));
+  assert.throws(enc({ networkFee: BigInt(2) ** BigInt(64) }));
+  assert.throws(enc({ nativeFee: BigInt(2) ** BigInt(64) }));
   assert.throws(enc({ maxFee: BigInt(2) ** BigInt(64) }));
   assert.throws(enc({ deadline: 1.5 }));
   assert.throws(enc({ sourceDomain: 2 ** 32 }));
@@ -265,6 +273,11 @@ test("golden vectors: generated cases self-verify", async () => {
   assert.deepEqual(v.cases.map((c) => c.name), ["evm", "stellar", "solana"]);
   const stellar = v.cases.find((c) => c.name === "stellar")!;
   assert.notEqual(stellar.quote.hookData, "0x");
+  // Both fee-payment modes are exercised.
+  const fee = (n: string) => v.cases.find((c) => c.name === n)!.quote as Record<string, string>;
+  assert.ok(BigInt(fee("evm").nativeFee) > BigInt(0) && fee("evm").networkFee === "0");
+  assert.ok(BigInt(fee("stellar").networkFee) > BigInt(0) && fee("stellar").nativeFee === "0");
+  assert.ok(BigInt(fee("solana").nativeFee) > BigInt(0) && fee("solana").networkFee === "0");
 });
 
 test("golden vectors: committed file matches freshly generated output", async () => {

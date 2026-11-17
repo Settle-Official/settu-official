@@ -2,7 +2,7 @@
  * Settu bridge quote: encoding and signing.
  *
  * The server signs a quote; the Settu bridge contract on the source chain
- * verifies it and takes exactly `totalFee`. The server and the three
+ * verifies it and takes exactly the quoted fees. The server and the three
  * contracts (Solidity, Soroban, Anchor) must agree byte-for-byte, which
  * `contracts/test-vectors/quotes.json` (see quote.test.ts) pins down.
  *
@@ -31,7 +31,12 @@ export interface BridgeQuote {
   /** Source-chain address in its family's native form (0x…, G…, base58). */
   user: string;
   amount: bigint;
-  totalFee: bigint;
+  /** USDC atomic Settu keeps (on Fast, already net of Circle's fee). */
+  settuFee: bigint;
+  /** USDC atomic for destination gas when paid in USDC; 0 otherwise. */
+  networkFee: bigint;
+  /** Network fee in the SOURCE chain's native token (wei/stroops/lamports) when paid in gas token; 0 otherwise. */
+  nativeFee: bigint;
   /** bytes32. Stellar dest: the forwarder; Solana dest: recipient's USDC ATA. */
   mintRecipient: `0x${string}`;
   /** `0x` unless the destination is Stellar (then buildForwarderHookData(G…)). */
@@ -57,7 +62,9 @@ export const EVM_QUOTE_TYPES = {
     { name: "destDomain", type: "uint32" },
     { name: "user", type: "address" },
     { name: "amount", type: "uint256" },
-    { name: "totalFee", type: "uint256" },
+    { name: "settuFee", type: "uint256" },
+    { name: "networkFee", type: "uint256" },
+    { name: "nativeFee", type: "uint256" },
     { name: "mintRecipient", type: "bytes32" },
     { name: "hookData", type: "bytes" },
     { name: "maxFee", type: "uint256" },
@@ -92,7 +99,9 @@ function evmTypedData(quote: BridgeQuote, chainId: number, verifyingContract: Ad
       destDomain: quote.destDomain,
       user: quote.user as Address,
       amount: quote.amount,
-      totalFee: quote.totalFee,
+      settuFee: quote.settuFee,
+      networkFee: quote.networkFee,
+      nativeFee: quote.nativeFee,
       mintRecipient: quote.mintRecipient,
       hookData: quote.hookData,
       maxFee: quote.maxFee,
@@ -139,11 +148,12 @@ export const ED25519_QUOTE_PREFIX = "SETTU_BRIDGE_V1";
  * Layout (all integers big-endian):
  *   "SETTU_BRIDGE_V1" (15 ASCII bytes, no length prefix/terminator)
  *   contractId 32 | sourceDomain u32 | destDomain u32 | user 32
- *   amount u64 | totalFee u64 | mintRecipient 32 | maxFee u64
+ *   amount u64 | settuFee u64 | networkFee u64 | nativeFee u64
+ *   mintRecipient 32 | maxFee u64
  *   minFinality u32 | deadline u64 | nonce 32 | hookData length u32 | hookData
  */
 export const ED25519_QUOTE_FIXED_LENGTH =
-  15 + 32 + 4 + 4 + 32 + 8 + 8 + 32 + 8 + 4 + 8 + 32 + 4;
+  15 + 32 + 4 + 4 + 32 + 8 + 8 + 8 + 8 + 32 + 8 + 4 + 8 + 32 + 4;
 
 const U64_MAX = (BigInt(1) << BigInt(64)) - BigInt(1);
 const U32_MAX = 0xffffffff;
@@ -173,7 +183,9 @@ export function encodeQuoteBytes(
   o = out.writeUInt32BE(u32(quote.destDomain, "destDomain"), o);
   o += Buffer.from(user).copy(out, o);
   o = out.writeBigUInt64BE(u64(quote.amount, "amount"), o);
-  o = out.writeBigUInt64BE(u64(quote.totalFee, "totalFee"), o);
+  o = out.writeBigUInt64BE(u64(quote.settuFee, "settuFee"), o);
+  o = out.writeBigUInt64BE(u64(quote.networkFee, "networkFee"), o);
+  o = out.writeBigUInt64BE(u64(quote.nativeFee, "nativeFee"), o);
   o += Buffer.from(mintRecipient).copy(out, o);
   o = out.writeBigUInt64BE(u64(quote.maxFee, "maxFee"), o);
   o = out.writeUInt32BE(u32(quote.minFinality, "minFinality"), o);
