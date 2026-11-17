@@ -55,6 +55,7 @@ interface World {
   latest: Record<string, bigint>;
   logsFor: (chain: BridgeChainKey, from: bigint, to: bigint) => EvmSweepLog[];
   runs: number;
+  indexed: Map<string, number>;
 }
 
 function world(): World {
@@ -68,6 +69,7 @@ function world(): World {
     latest: {},
     logsFor: () => [],
     runs: 0,
+    indexed: new Map(),
   };
 }
 
@@ -118,6 +120,10 @@ function sweepDeps(w: World, over: Partial<SweepDeps> = {}): SweepDeps {
       w.calls.push(`advance:${id}`);
       w.advanced.push(id);
       return w.store.get(id)!.status;
+    },
+    reindex: async (id, createdAt) => {
+      w.calls.push(`reindex:${id}`);
+      w.indexed.set(id, createdAt);
     },
     log: (m) => w.logs.push(m),
     ...over,
@@ -507,4 +513,20 @@ test("advance offset unavailable: falls back to start 0, pass still runs", async
   const d = sweepDeps(w, { chains: [], nextAdvanceRun: async () => { throw new Error("redis down"); } });
   const r = await sweepBridgedEvents(d);
   assert.equal(r.advanced, 1);
+});
+
+test("sweep advance pass repairs a missing explorer index entry (idempotent)", async () => {
+  const w = world();
+  const id = "0x" + "ee".repeat(32);
+  w.store.set(id, {
+    id, direction: "bridge", sourceDomain: 6, destDomain: 3, burnTxHash: id, mintRecipient: MR,
+    status: "attested", attempts: 0, createdAt: 777, updatedAt: 777,
+    bridge: { source: "base", dest: "arbitrum", user: USER, speed: "fast", quoteNonce: "n", sendAtomic: "1", settuFeeAtomic: "0", networkFeeAtomic: "0", fastFeeMaxAtomic: "0", receiveMinAtomic: "1" },
+  } as CctpTransferRecord);
+  w.pending.add(id);
+  assert.equal(w.indexed.has(id), false, "index write was lost");
+  await sweepBridgedEvents(sweepDeps(w));
+  assert.equal(w.indexed.get(id), 777);
+  await sweepBridgedEvents(sweepDeps(w));
+  assert.equal(w.indexed.size, 1);
 });

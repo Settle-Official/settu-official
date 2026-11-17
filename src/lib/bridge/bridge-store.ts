@@ -7,7 +7,6 @@
 import {
   createCctpTransfer,
   getCctpTransfer,
-  indexBridgeTransfer,
   type BridgeMeta,
   type CctpTransferRecord,
 } from "../cctp/cctp-store";
@@ -68,17 +67,8 @@ const defaultDeps: BridgeStoreDeps = {
     }
   },
   get: getCctpTransfer,
-  create: async (r) => {
-    const rec = await createCctpTransfer(r);
-    // Admin explorer index. Best-effort: a missed ZADD must never fail a registration.
-    // Swept bridges go through registerBridge too, so this covers both paths.
-    try {
-      await indexBridgeTransfer(rec.id, rec.createdAt);
-    } catch (e) {
-      console.error("[bridge/register] index failed:", e instanceof Error ? e.message : "unknown");
-    }
-    return rec;
-  },
+  // createCctpTransfer writes the record, pending entry and explorer index in one MULTI.
+  create: createCctpTransfer,
   now: Date.now,
 };
 

@@ -46,6 +46,7 @@ import { StrKey, xdr } from "@stellar/stellar-sdk";
 import {
   getCctpTransfer,
   listPendingTransfers,
+  indexBridgeTransfer,
   type CctpStatus,
   type CctpTransferRecord,
 } from "../cctp/cctp-store";
@@ -135,6 +136,8 @@ export interface SweepDeps {
   /** Monotonic per-run counter (Redis INCR) that rotates the advance pass's start. */
   nextAdvanceRun(): Promise<number>;
   advance(id: string): Promise<CctpStatus>;
+  /** Idempotent ZADD into the admin explorer index (repairs a lost index write). */
+  reindex(id: string, createdAt: number): Promise<void>;
   log(msg: string): void;
 }
 
@@ -208,6 +211,7 @@ export const defaultSweepDeps: SweepDeps = {
   listPending: listPendingTransfers,
   nextAdvanceRun: async () => Number(await redis().incr(ADVANCE_OFFSET_KEY)),
   advance: advanceCctpTransfer,
+  reindex: (id, createdAt) => indexBridgeTransfer(id, createdAt),
   log: (m) => console.log(m),
 };
 
@@ -384,6 +388,12 @@ export async function sweepBridgedEvents(
       continue;
     }
     if (!r || r.direction !== "bridge" || isFinal(r.status)) continue;
+    // Repair: a pending bridge is always (re)indexed for the admin explorer. Idempotent.
+    try {
+      await deps.reindex(id, r.createdAt);
+    } catch (e) {
+      deps.log(`[bridge/sweep] reindex ${id} failed: ${errMsg(e)}`);
+    }
     tried++;
     try {
       await deps.advance(id);

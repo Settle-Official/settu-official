@@ -207,6 +207,7 @@ export function BridgeExplorer() {
   const loadedRef = useRef(0);
   loadedRef.current = rows.length;
 
+  const filtering = Object.values(applied).some((v) => v.trim() !== "");
   const named = operator.trim().length > 1;
 
   const loadTotals = useCallback(async () => {
@@ -267,7 +268,11 @@ export function BridgeExplorer() {
 
   // Live polling: only while the tab is visible; pause on hidden, resume on visible.
   useEffect(() => {
-    if (authed !== true) return;
+    // Filtered/search lists cost ~10 Redis commands per request: no auto-poll.
+    if (authed !== true || filtering) {
+      setLive(false);
+      return;
+    }
     let timer: ReturnType<typeof setInterval> | null = null;
     const start = () => {
       if (timer) return;
@@ -296,7 +301,7 @@ export function BridgeExplorer() {
       document.removeEventListener("visibilitychange", sync);
       stop();
     };
-  }, [authed, refresh, loadTotals]);
+  }, [authed, filtering, refresh, loadTotals]);
 
   const login = async (e: FormEvent) => {
     e.preventDefault();
@@ -375,6 +380,12 @@ export function BridgeExplorer() {
             <span style={{ backgroundColor: live ? "#109F21" : "#8D8C8C" }} className="size-[7px] rounded-full" />
             {live ? "Live" : "Paused"}
           </span>
+          {filtering && (
+            <span className={MUTED}>
+              Live updates paused while filtering{" "}
+              <button type="button" onClick={() => void refresh(true)} className="text-[#c9a962] underline">Refresh</button>
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-[10px]">
           <input value={operator} onChange={(e) => setOperator(e.target.value)} placeholder="Your name (for actions)" style={BORDER} className={FIELD} />

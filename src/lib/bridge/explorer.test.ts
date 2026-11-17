@@ -212,3 +212,17 @@ test("route: lists, totals, and rejects bad params", async () => {
   assert.equal((await explorerGet(req("?status=bogus"), o)).status, 400);
   assert.equal((await explorerGet(req("?limit=abc"), o)).status, 400);
 });
+
+test("a filtered request with few matches costs at most 10 Redis commands", async () => {
+  const many = Array.from({ length: 3000 }, (_, i) => rec(`f${i}`, 1000 + i, {}, { source: "arbitrum" }));
+  const calls = { range: 0, mget: [] as number[] };
+  const d = deps(many, calls);
+  const out = await listBridges({ source: "base", limit: 50 }, d);
+  assert.equal(out.rows.length, 0);
+  assert.ok(calls.range + calls.mget.length <= 10, `used ${calls.range + calls.mget.length}`);
+  assert.ok(calls.mget.every((n) => n === 100), "scans in pages of 100");
+  assert.ok(out.nextCursor, "cap hit: can continue");
+  const calls2 = { range: 0, mget: [] as number[] };
+  await listBridges({ q: "zzz" }, deps(many, calls2));
+  assert.ok(calls2.range + calls2.mget.length <= 10);
+});

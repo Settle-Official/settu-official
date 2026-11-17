@@ -85,6 +85,17 @@ export async function createCctpTransfer(
 ): Promise<CctpTransferRecord> {
   const now = Date.now();
   const full: CctpTransferRecord = { ...record, attempts: 0, createdAt: now, updatedAt: now };
+  if (record.direction === "bridge") {
+    // One MULTI: the record, its pending entry and its explorer-index entry
+    // land together or not at all, so a failed index write can't orphan it.
+    const tx = redis.multi();
+    tx.set(key(record.id), full, { ex: TTL_SECONDS });
+    tx.sadd(PENDING_KEY, record.id);
+    tx.zadd(BRIDGE_INDEX_KEY, { score: full.createdAt, member: record.id });
+    tx.zremrangebyscore(BRIDGE_INDEX_KEY, "-inf", `(${indexCutoff(full.createdAt)}`);
+    await tx.exec();
+    return full;
+  }
   await redis.set(key(record.id), full, { ex: TTL_SECONDS });
   await addPendingTransfer(record.id);
   return full;
@@ -215,10 +226,20 @@ export async function listPendingTransfers(): Promise<string[]> {
 // ---- bridge explorer index (admin) ----------------------------------------
 
 const BRIDGE_INDEX_KEY = "bridge:index";
+/** Index entries older than the record TTL point at expired records; trimmed on every write. */
+export const INDEX_TRIM_MS = TTL_SECONDS * 1000;
+const indexCutoff = (now: number) => now - INDEX_TRIM_MS;
 
-/** `ZADD bridge:index <createdAt> <id>`: one command per new bridge record. */
-export async function indexBridgeTransfer(id: string, createdAt: number): Promise<void> {
-  await redis.zadd(BRIDGE_INDEX_KEY, { score: createdAt, member: id });
+/**
+ * Idempotent: (re)adds `id` to bridge:index and trims entries older than 7
+ * days (`ZREMRANGEBYSCORE bridge:index -inf (now-7d`). Called by the sweep's
+ * advance pass so a bridge whose index write was ever lost reappears.
+ */
+export async function indexBridgeTransfer(id: string, createdAt: number, now: number = Date.now()): Promise<void> {
+  const tx = redis.multi();
+  tx.zadd(BRIDGE_INDEX_KEY, { score: createdAt, member: id });
+  tx.zremrangebyscore(BRIDGE_INDEX_KEY, "-inf", `(${indexCutoff(now)}`);
+  await tx.exec();
 }
 
 /**
