@@ -421,11 +421,15 @@ async function buildStellar(
   return { family: "stellar", xdr: await buildAndAssemble(server, account, op) };
 }
 
-/** Same tail as stellar-cctp.ts buildAndAssemble: simulate, bump fee, assemble. */
-async function buildAndAssemble(
+/**
+ * Same tail as stellar-cctp.ts buildAndAssemble: simulate, bump fee, assemble.
+ * Also used by owner-txs.ts for the admin's owner-signed limit changes.
+ */
+export async function buildAndAssemble(
   server: StellarRpcLike,
   sourceAccount: StellarSdk.Account,
   operation: xdr.Operation,
+  failMessage: string = "This transfer can't be prepared. Check your USDC and XLM balances, then get a new quote.",
 ): Promise<string> {
   const tx = new StellarSdk.TransactionBuilder(sourceAccount, {
     fee: StellarSdk.BASE_FEE,
@@ -438,10 +442,7 @@ async function buildAndAssemble(
   const sim = await server.simulateTransaction(tx);
   if (StellarSdk.rpc.Api.isSimulationError(sim)) {
     console.error("[bridge/build-tx] Stellar simulation failed:", sim.error);
-    throw new BuildTxError(
-      "simulation_failed",
-      "This transfer can't be prepared. Check your USDC and XLM balances, then get a new quote.",
-    );
+    throw new BuildTxError("simulation_failed", failMessage);
   }
   const ok = sim as StellarSdk.rpc.Api.SimulateTransactionSuccessResponse;
 

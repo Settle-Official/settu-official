@@ -76,3 +76,24 @@ export async function setBridgeFeeBps(
     .ltrim(AUDIT_KEY, 0, AUDIT_MAX - 1)
     .exec();
 }
+
+export interface FeeAuditEntry {
+  at: string;
+  actor: string;
+  speed: Speed;
+  from: number;
+  to: number;
+}
+
+/** Newest first. Entries are JSON strings (Upstash may hand back parsed objects). */
+export async function listBridgeFeeAudit(limit = 20): Promise<FeeAuditEntry[]> {
+  const raw = await getRedis().lrange<string | FeeAuditEntry>(AUDIT_KEY, 0, limit - 1);
+  return (raw ?? []).flatMap((r) => {
+    if (typeof r !== "string") return r && typeof r === "object" ? [r] : [];
+    try {
+      return [JSON.parse(r) as FeeAuditEntry];
+    } catch {
+      return [];
+    }
+  });
+}
