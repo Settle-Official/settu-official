@@ -1,0 +1,10 @@
+# Build output, local ledgers, JS deps. target/deploy holds program keypairs:
+# never commit any keypair (the real program keypair lives outside the repo).
+target/
+test-ledger/
+node_modules/
+.anchor/
+.surfpool/
+.DS_Store
+**/*.rs.bk
+*-keypair.json

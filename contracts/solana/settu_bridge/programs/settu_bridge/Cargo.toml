@@ -1,0 +1,46 @@
+[package]
+name = "settu_bridge"
+version = "0.1.0"
+description = "Settu bridge: Settu-signed quote + fees + Circle CCTP V2 burn in one Solana transaction"
+edition.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "settu_bridge"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
+anchor-debug = []
+custom-heap = []
+custom-panic = []
+
+[dependencies]
+# Pinned to the installed anchor-cli 1.1.2.
+anchor-lang = "=1.1.2"
+anchor-spl = { version = "=1.1.2", default-features = false, features = ["token", "token_2022", "associated_token"] }
+solana-instructions-sysvar = "3.0"
+
+[dev-dependencies]
+litesvm = { version = "0.10.0", features = ["precompiles"] }
+solana-message = "3.0.1"
+solana-transaction = "3.0.2"
+solana-signer = "3.0.0"
+solana-keypair = "3.0.1"
+ed25519-dalek = "2"
+serde_json = "1"
+hex = "0.4"
+sha2 = "0.10"
+solana-ed25519-program = "3.0"
+solana-account = "3.0"
+solana-transaction-error = "3.0"
+bincode = "1"
+base64 = "0.22"
+mock_cctp = { path = "../mock_cctp", features = ["no-entrypoint"] }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

@@ -1,0 +1,28 @@
+[toolchain]
+anchor_version = "1.1.2"
+
+[features]
+resolution = true
+skip-lint = false
+
+# The program keypair is NOT in the repo. Before `anchor deploy`, copy it into
+# the git-ignored target/deploy (see README):
+#   cp ~/.settu-bridge-testnet/solana-program-id.json target/deploy/settu_bridge-keypair.json
+# mock_cctp is a TEST-ONLY stand-in for Circle's TokenMessengerMinterV2; never
+# deploy it. Always deploy with `anchor deploy -p settu_bridge`.
+[programs.localnet]
+settu_bridge = "3CGxb2E9ASpizQtoL8wykokiZ8BH19MXMWmgy17KQmD1"
+
+[programs.devnet]
+settu_bridge = "3CGxb2E9ASpizQtoL8wykokiZ8BH19MXMWmgy17KQmD1"
+
+[provider]
+cluster = "localnet"
+wallet = "~/.config/solana/id.json"
+
+# Tests run in-process on LiteSVM (programs/settu_bridge/tests), no validator.
+[test]
+skip_local_validator = true
+
+[scripts]
+test = "cargo test"
