@@ -1,0 +1,22 @@
+[profile.default]
+src = "src"
+test = "test"
+script = "script"
+out = "out"
+libs = ["lib"]
+allow_paths = ["../../node_modules"]
+solc_version = "0.8.28"
+# OpenZeppelin 5.6 uses MCOPY (Cancun). Cancun opcodes are live on all six target
+# chains (Ethereum, Base, Arbitrum, Optimism, Avalanche C-Chain, Polygon PoS).
+evm_version = "cancun"
+optimizer = true
+optimizer_runs = 200
+remappings = [
+  "@openzeppelin/=../../node_modules/@openzeppelin/",
+  "forge-std/=lib/forge-std/src/",
+]
+# Golden vector (Task 5) + build artifacts for deployCodeTo in tests.
+fs_permissions = [
+  { access = "read", path = "../test-vectors" },
+  { access = "read", path = "./out" },
+]
