@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { BridgeAdminPanel } from "./BridgeAdminPanel";
+import { AdminNav } from "./AdminNav";
 
 /** Mirrors OrderDiagnosis on the server; kept structural so this client
  *  component never imports server-only modules. */
@@ -235,6 +235,7 @@ export function AdminRecoveryConsole() {
           />
         </div>
       </header>
+      <AdminNav />
 
       <form onSubmit={lookup} className="flex flex-wrap gap-[12px]">
         <input
@@ -328,9 +329,6 @@ export function AdminRecoveryConsole() {
         );
       })}
 
-      <div style={{ borderTop: "1px solid rgba(255,255,255,0.12)" }} className="pt-[24px]">
-        <BridgeAdminPanel operator={operator} />
-      </div>
 
       {auditOpen && (
         <div

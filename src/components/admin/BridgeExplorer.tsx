@@ -7,6 +7,8 @@
  * component must not import server modules.
  */
 
+import { AdminNav } from "./AdminNav";
+import { BridgeAdminPanel } from "./BridgeAdminPanel";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import {
   ageLabel,
@@ -389,9 +391,9 @@ export function BridgeExplorer() {
         </div>
         <div className="flex items-center gap-[10px]">
           <input value={operator} onChange={(e) => setOperator(e.target.value)} placeholder="Your name (for actions)" style={BORDER} className={FIELD} />
-          <a href="/admin" className="text-[13px] text-[#c9a962] underline">Recovery console</a>
         </div>
       </header>
+      <AdminNav />
 
       {error && <p className="text-[13px] text-[#ca4c4c]">{error}</p>}
 
@@ -529,6 +531,9 @@ export function BridgeExplorer() {
           </div>
         )}
       </div>
+
+      {/* Relayer gas: part of the live picture, next to the bridges it pays for. */}
+      {authed && <BridgeAdminPanel operator={operator} sections={["relayers"]} title="Relayers" />}
     </main>
   );
 }

@@ -133,7 +133,20 @@ const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 const when = (ms: number | string) =>
   new Date(ms).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
 
-export function BridgeAdminPanel({ operator }: { readonly operator: string }) {
+export type BridgeAdminSection = "fee" | "limits" | "bridges" | "relayers";
+const ALL_SECTIONS: readonly BridgeAdminSection[] = ["fee", "limits", "bridges", "relayers"];
+
+export function BridgeAdminPanel({
+  operator,
+  sections = ALL_SECTIONS,
+  title = "Bridge",
+}: {
+  readonly operator: string;
+  /** Which parts to show (and load): settings on /admin/bridge/settings, status on /admin/bridge. */
+  readonly sections?: readonly BridgeAdminSection[];
+  readonly title?: string;
+}) {
+  const has = (s: BridgeAdminSection) => sections.includes(s);
   const named = operator.trim().length > 1;
   const evm = useEvmWallet();
 
@@ -327,12 +340,14 @@ export function BridgeAdminPanel({ operator }: { readonly operator: string }) {
     }
   }, []);
 
+  // Only what this page shows. The fee card also reads the caps (its limit).
+  const want = sections.join(",");
   useEffect(() => {
-    void loadFee();
-    void loadCaps();
-    void loadBridges();
-    void loadRelayers();
-  }, [loadFee, loadCaps, loadBridges, loadRelayers]);
+    if (want.includes("fee") || want.includes("limits")) void loadFee();
+    if (want.includes("fee") || want.includes("limits")) void loadCaps();
+    if (want.includes("bridges")) void loadBridges();
+    if (want.includes("relayers")) void loadRelayers();
+  }, [want, loadFee, loadCaps, loadBridges, loadRelayers]);
 
   // ---------------------------------------------------------------- render
   const deployed = (f: Family) => caps?.chains.filter((c) => c.family === f && c.status === "ok").length ?? 0;
@@ -340,7 +355,7 @@ export function BridgeAdminPanel({ operator }: { readonly operator: string }) {
   return (
     <section aria-labelledby="bridge-admin" className="flex flex-col gap-[20px]">
       <h2 id="bridge-admin" className="font-fraunces text-[26px] text-white">
-        Bridge
+        {title}
       </h2>
 
       {error && (
@@ -350,6 +365,7 @@ export function BridgeAdminPanel({ operator }: { readonly operator: string }) {
       )}
 
       {/* Fee settings */}
+      {has("fee") && (
       <div className={`${CARD} flex flex-col gap-[16px]`}>
         <div className="flex flex-wrap items-baseline justify-between gap-[8px]">
           <h3 className={H2}>Bridge fee</h3>
@@ -404,7 +420,10 @@ export function BridgeAdminPanel({ operator }: { readonly operator: string }) {
         )}
       </div>
 
+      )}
+
       {/* On-chain limits */}
+      {has("limits") && (
       <div className={`${CARD} flex flex-col gap-[16px]`}>
         <div className="flex flex-wrap items-baseline justify-between gap-[8px]">
           <h3 className={H2}>On-chain limits</h3>
@@ -552,7 +571,10 @@ export function BridgeAdminPanel({ operator }: { readonly operator: string }) {
         </div>
       </div>
 
+      )}
+
       {/* Bridges */}
+      {has("bridges") && (
       <div className={`${CARD} flex flex-col gap-[16px]`}>
         <div className="flex flex-wrap items-baseline justify-between gap-[8px]">
           <h3 className={H2}>Bridges</h3>
@@ -619,7 +641,10 @@ export function BridgeAdminPanel({ operator }: { readonly operator: string }) {
         </ul>
       </div>
 
+      )}
+
       {/* Relayers */}
+      {has("relayers") && (
       <div className={`${CARD} flex flex-col gap-[16px]`}>
         <div className="flex flex-wrap items-baseline justify-between gap-[8px]">
           <h3 className={H2}>Relayer balances</h3>
@@ -648,6 +673,8 @@ export function BridgeAdminPanel({ operator }: { readonly operator: string }) {
           ))}
         </div>
       </div>
+
+      )}
 
       <EvmConnectModal
         open={evm.isConnectModalOpen}
