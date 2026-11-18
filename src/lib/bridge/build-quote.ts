@@ -20,6 +20,7 @@ import { buildForwarderHookData, contractStrkeyToBytes32Hex } from "../cctp/addr
 import { CCTP_CONFIG, FINALITY_THRESHOLD } from "../cctp/constants";
 import { getFastMinimumFeeBps } from "../cctp/iris-client";
 import { requireSolanaRpcUrl } from "../solana/config";
+import { offersFast } from "./speeds";
 import { validateDestinationAddress } from "./address";
 import {
   checkDestinationLive as liveCheck,
@@ -259,6 +260,11 @@ export async function buildQuote(
     return fail("same_chain", "Pick two different networks.");
   }
   if (speed !== "fast" && speed !== "standard") return fail("invalid_speed", "Pick Fast or Standard.");
+  // Standard-only sources: Circle attests them at Standard regardless, so a
+  // Fast quote would charge the Fast fee for a Standard delivery.
+  if (speed === "fast" && !offersFast(source)) {
+    return fail("fast_unavailable", "This route is already fast on Standard.");
+  }
   if (networkFeeMode !== "usdc" && networkFeeMode !== "native") {
     return fail("invalid_fee_mode", "Pick how to pay the network fee.");
   }

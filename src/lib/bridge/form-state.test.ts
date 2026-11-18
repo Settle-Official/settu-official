@@ -154,3 +154,24 @@ test("an address error from the live check is shown as the reason", () => {
   });
   assert.equal(disableReason(s), "That's a token account. Paste the wallet address instead.");
 });
+
+test("picking a Standard-only source switches Fast to Standard", () => {
+  const s = bridgeFormReducer(base(), { type: "setSource", chain: "stellar" });
+  assert.equal(s.speed, "standard");
+});
+
+test("swapping onto a Standard-only source switches to Standard", () => {
+  const s = bridgeFormReducer(initialBridgeForm("base", "polygon"), { type: "swap" });
+  assert.equal(s.source, "polygon");
+  assert.equal(s.speed, "standard");
+});
+
+test("Fast can't be chosen from a Standard-only source", () => {
+  let s = bridgeFormReducer(base(), { type: "setSource", chain: "avalanche" });
+  s = bridgeFormReducer(s, { type: "setSpeed", speed: "fast" });
+  assert.equal(s.speed, "standard");
+});
+
+test("starting on a Standard-only source starts on Standard", () => {
+  assert.equal(initialBridgeForm("stellar", "base").speed, "standard");
+});

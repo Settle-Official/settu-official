@@ -10,6 +10,7 @@ import {
   type ChainFamily,
 } from "@/lib/bridge/chains";
 import { estimatedTime } from "@/lib/bridge/eta";
+import { offersFast } from "@/lib/bridge/speeds";
 import {
   MIN_BRIDGE_USDC,
   addressError,
@@ -296,18 +297,28 @@ export function BridgePanel() {
             label="Transfer speed"
             value={state.speed}
             onChange={(speed) => dispatch({ type: "setSpeed", speed })}
-            options={[
-              {
-                value: "standard",
-                label: "Standard",
-                detail: `0.3% · ${estimatedTime(state.source, "standard")}`,
-              },
-              {
-                value: "fast",
-                label: "Fast",
-                detail: `0.6% · ${estimatedTime(state.source, "fast")}`,
-              },
-            ]}
+            options={
+              offersFast(state.source)
+                ? [
+                    {
+                      value: "standard",
+                      label: "Standard",
+                      detail: `0.3% · ${estimatedTime(state.source, "standard")}`,
+                    },
+                    {
+                      value: "fast",
+                      label: "Fast",
+                      detail: `0.6% · ${estimatedTime(state.source, "fast")}`,
+                    },
+                  ]
+                : [
+                    {
+                      value: "standard",
+                      label: "Standard",
+                      detail: `0.3% · already fast from ${BRIDGE_CHAINS[state.source].label}`,
+                    },
+                  ]
+            }
           />
           {state.notice && (
             <p className="-mt-[16px] font-[family-name:var(--font-inter)] text-[14px] text-[#c9a962]">

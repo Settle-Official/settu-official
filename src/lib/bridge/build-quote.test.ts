@@ -388,6 +388,23 @@ test("Stellar destination: forwarder as mintRecipient, recipient in hookData", a
   assert.equal(r.quote.hookData, buildForwarderHookData(G_RECIPIENT));
 });
 
+// ------------------------------------------------------- Standard-only sources
+
+test("Fast from a Standard-only source (Stellar, Avalanche, Polygon) -> 409 fast_unavailable, never signed", async () => {
+  const users = { stellar: G_USER, avalanche: EVM_USER, polygon: EVM_USER } as const;
+  for (const source of ["stellar", "avalanche", "polygon"] as const) {
+    let iris = 0;
+    const r = err(
+      await buildQuote(
+        { ...baseReq, source, dest: source === "stellar" ? "base" : "arbitrum", user: users[source], speed: "fast" },
+        deps({ ...noSign, getFastFeeBps: async () => { iris++; return 0; } }),
+      ),
+    );
+    assert.equal(r.code, "fast_unavailable", source);
+    assert.equal(iris, 0, `${source}: refused before asking Iris`);
+  }
+});
+
 // ------------------------------------------------------------- Stellar source (Ruling J)
 
 test("Stellar source: signed amounts are x10 (7-dp); breakdown stays 6-dp; ed25519 verifies", async () => {
@@ -397,7 +414,7 @@ test("Stellar source: signed amounts are x10 (7-dp); breakdown stays 6-dp; ed255
         source: "stellar",
         dest: "base",
         amount: "100.1234567", // 7th decimal dropped by the breakdown
-        speed: "fast",
+        speed: "standard", // Stellar is Standard-only (speeds.ts)
         user: G_USER,
         recipient: EVM_RECIPIENT,
         networkFeeMode: "usdc",
@@ -410,8 +427,8 @@ test("Stellar source: signed amounts are x10 (7-dp); breakdown stays 6-dp; ed255
   assert.equal(r.quote.amount, "1001234560");
   assert.equal(r.quote.settuFee, String(BigInt(b.settuFeeAtomic) * BigInt(10)));
   assert.equal(r.quote.networkFee, String(BigInt(b.networkFeeAtomic) * BigInt(10)));
-  assert.equal(r.quote.maxFee, String(BigInt(b.fastFeeMaxAtomic) * BigInt(10)));
-  assert.notEqual(r.quote.maxFee, "0");
+  // Standard carries no Circle Fast fee.
+  assert.equal(r.quote.maxFee, "0");
   assert.equal(r.quote.nativeFee, "0");
   assert.equal(r.quote.user, G_USER);
   assert.equal(r.contract, STELLAR_CONTRACT);

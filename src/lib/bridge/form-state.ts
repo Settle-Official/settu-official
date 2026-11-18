@@ -14,6 +14,7 @@ import { BRIDGE_CHAINS, type BridgeChainKey, type ChainFamily } from "./chains";
 import { validateDestinationAddress } from "./address";
 import type { QuoteSuccess, NetworkFeeMode } from "./build-quote";
 import type { Speed } from "./quote-math";
+import { offersFast } from "./speeds";
 
 /** The localStorage key for addresses a user has bridged to before (spec §8). */
 export const knownAddressesKey = (user: string) => `settu:bridge-known:${user}`;
@@ -63,7 +64,7 @@ export function initialBridgeForm(source: BridgeChainKey, dest: BridgeChainKey):
     source,
     dest,
     amount: "",
-    speed: "fast",
+    speed: offersFast(source) ? "fast" : "standard",
     networkFeeMode: "usdc",
     wallets: {},
     useConnectedDest: true,
@@ -164,6 +165,12 @@ function swapped(s: BridgeFormState): BridgeFormState {
 }
 
 export function bridgeFormReducer(s: BridgeFormState, a: BridgeFormAction): BridgeFormState {
+  const next = reduce(s, a);
+  // Standard-only sources (speeds.ts) never sit on Fast, however they got there.
+  return next.speed === "fast" && !offersFast(next.source) ? cleared({ ...next, speed: "standard" }) : next;
+}
+
+function reduce(s: BridgeFormState, a: BridgeFormAction): BridgeFormState {
   switch (a.type) {
     case "setSource":
       if (a.chain === s.source) return s;
