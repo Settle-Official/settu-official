@@ -57,7 +57,7 @@ const fmtUsdc = (n: number) => (n > 0 ? n.toFixed(2) : "—");
 
 function fmtAmount(row: HistoryRow) {
   if (row.kind === "bridge") {
-    return row.receivedUsdc !== undefined ? `${row.receivedUsdc.toLocaleString("en-US", { maximumFractionDigits: 6 })} USDC arrived` : "—";
+    return row.receivedUsdc !== undefined ? `${row.receivedUsdc.toLocaleString("en-US", { maximumFractionDigits: 6 })} USDC` : "—";
   }
   const n = Number(row.fiatAmount);
   if (!Number.isFinite(n) || n <= 0) return "—";
