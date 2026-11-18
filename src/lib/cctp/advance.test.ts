@@ -78,6 +78,9 @@ function harness(initial: CctpTransferRecord, over: Partial<AdvanceDeps> = {}): 
     submitStellarBridgeMint: rec_("submitStellarBridgeMint", "stellarbridge") as AdvanceDeps["submitStellarBridgeMint"],
     submitSolanaMint: rec_("submitSolanaMint", "solsig") as AdvanceDeps["submitSolanaMint"],
     readReceivedAtomic: rec_("readReceivedAtomic", BigInt(996_950)) as AdvanceDeps["readReceivedAtomic"],
+    recordCompleted: async (r) => {
+      calls.push({ fn: "recordCompleted", args: [r] });
+    },
     notify: async (message, level) => {
       notifies.push({ message, level: level ?? "info" });
       return true;
@@ -314,4 +317,39 @@ test("a bridge transitioning to failed sends exactly one critical notify with id
   assert.match(n.message, /base/i);
   assert.match(n.message, /arbitrum/i);
   assert.match(n.message, /execution reverted: &lt;bad&gt;/);
+});
+
+// ----------------------------------------------------- permanent bridge ledger
+
+test("a bridge completing after its mint is written to the permanent ledger, with what arrived", async () => {
+  const h = harness(record({ status: "minting", mintTxHash: "0xevm" }));
+  await advanceLocked("0xabc", h.current(), h.deps);
+  const rec = called(h, "recordCompleted");
+  assert.equal(rec.length, 1);
+  const r = rec[0].args[0] as CctpTransferRecord;
+  assert.equal(r.status, "completed");
+  assert.equal(r.bridge?.receivedAtomic, "996950");
+  assert.equal(r.mintTxHash, "0xevm");
+});
+
+test("a bridge completed by an existing mint (e.g. a self-claim) is recorded too", async () => {
+  const h = harness(record(), { submitEvmMint: async () => null });
+  await advanceLocked("0xabc", h.current(), h.deps);
+  assert.equal(called(h, "recordCompleted").length, 1);
+});
+
+test("a ledger write failure never fails or un-completes the bridge", async () => {
+  const h = harness(record({ status: "minting", mintTxHash: "0xevm" }), {
+    recordCompleted: async () => {
+      throw new Error("redis down");
+    },
+  });
+  assert.equal(await advanceLocked("0xabc", h.current(), h.deps), "completed");
+  assert.equal(h.current().status, "completed");
+});
+
+test("offramp completions are not bridge ledger entries", async () => {
+  const h = harness(record({ direction: "offramp", bridge: undefined, status: "minting", mintTxHash: "0xb" }));
+  await advanceLocked("0xabc", h.current(), h.deps);
+  assert.equal(called(h, "recordCompleted").length, 0);
 });

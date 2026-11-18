@@ -10,6 +10,13 @@ function compactNaira(amount: number): string {
   return `₦${Math.floor(amount)}`;
 }
 
+/** 5000 -> "$5K+". Rounded down, like the naira figure. */
+function compactUsd(amount: number): string {
+  if (amount >= 1_000_000) return `$${Math.floor(amount / 100_000) / 10}M+`;
+  if (amount >= 1_000) return `$${Math.floor(amount / 100) / 10}K+`;
+  return `$${Math.floor(amount)}`;
+}
+
 function compactCount(n: number): string {
   return n >= 1000 ? `${Math.floor(n / 100) / 10}K+` : `${n}+`;
 }
@@ -32,7 +39,7 @@ const LOGOS = [
  * honest. The page regenerates every 5 minutes (app/page.tsx).
  */
 export async function StatsStrip() {
-  const { settledNgn, transfers } = await getLandingStats();
+  const { settledNgn, transfers, bridgedUsdc } = await getLandingStats();
   const STATS = [
     {
       value: compactNaira(settledNgn),
@@ -43,6 +50,8 @@ export async function StatsStrip() {
     // "< 90 sec" was not survivable: only 1.4% of real payouts landed that
     // fast, while 65% land inside five minutes.
     { value: "~3 min", caption: "Typical time to payout" },
+    // Hidden until the first real bridge, so the strip doesn't show "$0".
+    ...(bridgedUsdc > 0 ? [{ value: compactUsd(bridgedUsdc), caption: "USDC bridged" }] : []),
   ];
 
   return (
@@ -62,7 +71,7 @@ export async function StatsStrip() {
         className="pointer-events-none absolute right-[142px] top-[251px]"
       />
       <div className="relative mx-auto flex w-[1240px] max-w-full flex-col items-center gap-[50px]">
-        <div className="flex flex-wrap items-start justify-center gap-x-[136px] gap-y-[40px] max-[720px]:flex-col max-[720px]:items-center max-[720px]:gap-y-[70px] max-[720px]:py-[40px]">
+        <div className={`flex flex-wrap items-start justify-center ${STATS.length > 3 ? "gap-x-[60px]" : "gap-x-[136px]"} gap-y-[40px] max-[720px]:flex-col max-[720px]:items-center max-[720px]:gap-y-[70px] max-[720px]:py-[40px]`}>
           {STATS.map((stat) => (
             <div
               key={stat.caption}

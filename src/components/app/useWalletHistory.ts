@@ -3,10 +3,12 @@
 import { useCallback, useEffect, useState } from "react";
 import type { OfframpTransactionRecord } from "@/lib/offramp/transaction-history";
 import { TransactionStorage, type Transaction } from "@/lib/transaction-storage";
+import type { CompletedBridge } from "@/lib/bridge/bridge-ledger";
+import { bridgeHistoryRow } from "@/lib/bridge/bridge-history";
 
 export interface HistoryRow {
   readonly id: string;
-  readonly kind: "offramp" | "onramp";
+  readonly kind: "offramp" | "onramp" | "bridge";
   /** Only the browser that started it knows this; absent on server-only rows. */
   readonly initiator?: "form" | "agent";
   /** USDC moved. 0 when not yet known (an onramp still awaiting its rate). */
@@ -24,6 +26,11 @@ export interface HistoryRow {
   /** Where this row came from — "server" rows are authoritative. */
   readonly source: "server" | "local";
   readonly error?: string;
+  /** Bridge rows only. */
+  readonly destChain?: string;
+  readonly destTxHash?: string;
+  readonly receivedUsdc?: number;
+  readonly route?: string;
 }
 
 const num = (v: string | undefined) => {
@@ -166,7 +173,8 @@ export function useWalletHistory(address: string | undefined) {
         if (cancelled) return;
         if (payload?.error) throw new Error(payload.error);
         const records: OfframpTransactionRecord[] = payload?.data?.offramp ?? [];
-        setServer(records.map(fromServer));
+        const bridges: CompletedBridge[] = payload?.data?.bridges ?? [];
+        setServer([...records.map(fromServer), ...bridges.map(bridgeHistoryRow)]);
       })
       .catch((e: unknown) => {
         // Keep showing local rows rather than an empty screen.

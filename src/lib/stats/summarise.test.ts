@@ -53,3 +53,10 @@ test("onramps add to transfers but never to naira paid out", () => {
   assert.equal(s.transfers, BASELINE.transfers + 4);
   assert.equal(s.settledNgn, BASELINE.settledNgn);
 });
+
+test("bridged USDC is the whole dollars users sent, rounded down", async () => {
+  const { bridgedUsdc } = await import("./summarise");
+  assert.equal(bridgedUsdc(BigInt(0)), 0);
+  assert.equal(bridgedUsdc(BigInt(7_500_000)), 7);
+  assert.equal(bridgedUsdc(BigInt(5_000_000_000)), 5000);
+});

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { listByAddress } from "@/lib/offramp/transaction-history";
+import { listCompletedBridgesByAddress } from "@/lib/bridge/bridge-ledger";
 
 /**
  * A wallet's offramp history, straight from the permanent Redis record
@@ -27,8 +28,16 @@ export async function GET(
         ? Math.min(limitParam, 200)
         : 100;
 
-    const offramp = await listByAddress(address, { limit });
-    return NextResponse.json({ data: { offramp } });
+    const [offramp, bridges] = await Promise.all([
+      listByAddress(address, { limit }),
+      // Completed bridges this wallet sent or received (bridge-ledger.ts).
+      // A failure here never hides the offramp history.
+      listCompletedBridgesByAddress(address, limit).catch((e) => {
+        console.error("[history] bridges unavailable:", e instanceof Error ? e.message : "unknown");
+        return [];
+      }),
+    ]);
+    return NextResponse.json({ data: { offramp, bridges } });
   } catch (error: any) {
     return NextResponse.json(
       { error: error?.message || "Failed to load history" },

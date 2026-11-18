@@ -55,3 +55,8 @@ export function summarise(
   };
 }
 
+
+/** Whole USDC from 6-dp atomic, rounded down (the figure may understate, never overstate). */
+export function bridgedUsdc(sentAtomic: bigint): number {
+  return Number(sentAtomic / BigInt(1_000_000));
+}

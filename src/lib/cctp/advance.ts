@@ -4,6 +4,7 @@ import {
   updateCctpTransfer,
   acquireAdvanceLock,
   releaseAdvanceLock,
+  mergeCctpTransfer,
   type CctpStatus,
   type CctpTransferRecord,
 } from "./cctp-store";
@@ -19,6 +20,7 @@ import { deriveUsdcAta } from "../bridge/address-live";
 import { SolanaGasError, submitSolanaMint, type SolanaMintParams } from "../bridge/mint/solana";
 import { MintTxFailedError, readReceivedAtomic } from "../bridge/received-amount";
 import { notify } from "../notify/telegram";
+import { recordCompletedBridge } from "../bridge/bridge-ledger";
 
 const MAX_ATTEMPTS = 20;
 
@@ -48,6 +50,8 @@ export interface AdvanceDeps {
     ctx: { mintRecipient: string },
   ): Promise<bigint>;
   notify(message: string, level?: "info" | "success" | "warning" | "critical"): Promise<unknown>;
+  /** Bridge only: the permanent completed-bridge entry (History, landing stats). */
+  recordCompleted(record: CctpTransferRecord): Promise<unknown>;
   now(): number;
 }
 
@@ -61,6 +65,7 @@ export const defaultAdvanceDeps: AdvanceDeps = {
   submitStellarBridgeMint: (p) => submitMintAndForward(p, { signer: "bridge" }),
   submitSolanaMint: (p) => submitSolanaMint(p),
   readReceivedAtomic: (dest, tx, ctx) => readReceivedAtomic(dest, tx, ctx),
+  recordCompleted: (r) => recordCompletedBridge(r),
   notify,
   now: Date.now,
 };
@@ -159,6 +164,7 @@ export async function advanceLocked(
       // so there's nothing left to send and nothing to wait for.
       if (mintTxHash === null) {
         await deps.update(id, { status: "completed" });
+        if (bridge) await recordBridge(deps, mergeCctpTransfer(record, { status: "completed" }));
         return "completed";
       }
       await deps.update(id, { status: "minting", mintTxHash });
@@ -176,10 +182,12 @@ export async function advanceLocked(
           record.mintTxHash,
           { mintRecipient: record.mintRecipient },
         );
-        await deps.update(id, {
-          status: "completed",
+        const patch = {
+          status: "completed" as const,
           bridge: { ...bridge, receivedAtomic: received.toString() },
-        });
+        };
+        await deps.update(id, patch);
+        await recordBridge(deps, mergeCctpTransfer(record, patch));
         return "completed";
       }
       await deps.update(id, { status: "completed" });
@@ -325,5 +333,17 @@ async function alertBridgeFailed(
     );
   } catch {
     // Best-effort: alerting must never change the transfer's outcome.
+  }
+}
+
+/**
+ * Best-effort: the bridge is already complete, so a ledger write failure is
+ * logged and never turns the delivery into an error or a retry.
+ */
+async function recordBridge(deps: AdvanceDeps, r: CctpTransferRecord): Promise<void> {
+  try {
+    await deps.recordCompleted(r);
+  } catch (e) {
+    console.error("[advance] bridge ledger write failed:", r.id, e instanceof Error ? e.message : "unknown");
   }
 }

@@ -56,6 +56,9 @@ const fmtDate = (ts: number) =>
 const fmtUsdc = (n: number) => (n > 0 ? n.toFixed(2) : "—");
 
 function fmtAmount(row: HistoryRow) {
+  if (row.kind === "bridge") {
+    return row.receivedUsdc !== undefined ? `${row.receivedUsdc.toLocaleString("en-US", { maximumFractionDigits: 6 })} USDC arrived` : "—";
+  }
   const n = Number(row.fiatAmount);
   if (!Number.isFinite(n) || n <= 0) return "—";
   return `${fiatSymbol(row.currency)}${n.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
@@ -63,6 +66,8 @@ function fmtAmount(row: HistoryRow) {
 
 /** No rate is stored anywhere, so derive it from the two amounts we do have. */
 function fmtRate(row: HistoryRow) {
+  // Bridges have no rate: this column shows where the USDC went.
+  if (row.kind === "bridge") return row.route ?? "Bridge";
   const fiat = Number(row.fiatAmount);
   if (!Number.isFinite(fiat) || fiat <= 0 || row.usdc <= 0) return "—";
   const rate = Math.round(fiat / row.usdc);

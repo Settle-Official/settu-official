@@ -1,9 +1,13 @@
 import { listAllPaged, type OfframpTransactionRecord } from "@/lib/offramp/transaction-history";
 import { countOnrampDelivered } from "@/lib/onramp/onramp-store";
 import BASELINE_ORDER_IDS from "./baseline-orders.json";
-import { summarise, type LandingStats } from "./summarise";
+import { bridgedUsdc, summarise, type LandingStats } from "./summarise";
+import { bridgeLifetimeTotals } from "@/lib/bridge/bridge-ledger";
 
 export { BASELINE, type LandingStats } from "./summarise";
+
+/** The landing figures plus the lifetime USDC bridged. */
+export type LandingFigures = LandingStats & { readonly bridgedUsdc: number };
 
 /** The export's 296 settled order ids — tied to BASELINE in summarise.ts. */
 const BASELINE_ORDERS: ReadonlySet<string> = new Set(BASELINE_ORDER_IDS);
@@ -36,7 +40,23 @@ const BASELINE_ORDERS: ReadonlySet<string> = new Set(BASELINE_ORDER_IDS);
 
 const PAGE = 200;
 
-export async function getLandingStats(): Promise<LandingStats> {
+export async function getLandingStats(): Promise<LandingFigures> {
+  // Read apart: a failure on either side leaves the other's figures intact.
+  const [core, bridged] = await Promise.all([readCore(), readBridgedUsdc()]);
+  return { ...core, bridgedUsdc: bridged };
+}
+
+/** Lifetime USDC sent through completed bridges (bridge-ledger.ts); 0 on failure. */
+async function readBridgedUsdc(): Promise<number> {
+  try {
+    return bridgedUsdc((await bridgeLifetimeTotals()).sentAtomic);
+  } catch (err) {
+    console.error("[landing-stats] bridged total unavailable:", err);
+    return 0;
+  }
+}
+
+async function readCore(): Promise<LandingStats> {
   try {
     return await readLandingStats();
   } catch (err) {
