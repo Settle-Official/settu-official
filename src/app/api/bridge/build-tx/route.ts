@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { BuildTxError, buildSourceTx, type PermitSig } from "@/lib/bridge/build-source-tx";
 import type { QuoteResponse } from "@/lib/bridge/build-quote";
+import { CCTP_CONFIG } from "@/lib/cctp/constants";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -38,7 +39,10 @@ export async function POST(request: NextRequest) {
     const tx = await buildSourceTx(b.quote as QuoteResponse, b.userAddress as string, {
       permit: b.permit === undefined || b.permit === null ? undefined : (b.permit as PermitSig),
     });
-    return NextResponse.json(tx, { headers: NO_STORE });
+    // Stellar wallets must sign for the network the tx was built for (testnet on testnet).
+    const body =
+      tx.family === "stellar" ? { ...tx, networkPassphrase: CCTP_CONFIG.stellarNetworkPassphrase } : tx;
+    return NextResponse.json(body, { headers: NO_STORE });
   } catch (e) {
     if (e instanceof BuildTxError) {
       return NextResponse.json({ error: e.message, code: e.code }, { status: 400, headers: NO_STORE });

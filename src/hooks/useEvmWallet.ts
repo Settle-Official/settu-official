@@ -358,7 +358,7 @@ export function useEvmWallet() {
 
   const signAndSendCalls = useCallback(
     async (
-      calls: { to: `0x${string}`; data: `0x${string}` }[],
+      calls: { to: `0x${string}`; data: `0x${string}`; value?: `0x${string}` }[],
       chainId: number,
     ) => {
       if (!address) throw new Error("No wallet connected");
@@ -368,7 +368,7 @@ export function useEvmWallet() {
         for (const call of calls) {
           const hash = (await injectedRef.current.request({
             method: "eth_sendTransaction",
-            params: [{ from: address, to: call.to, data: call.data }],
+            params: [{ from: address, to: call.to, data: call.data, ...(call.value ? { value: call.value } : {}) }],
           })) as string;
           hashes.push(hash);
         }

@@ -13,6 +13,7 @@ import {
 import { BRIDGE_CHAINS, bridgeChainByDomain, type BridgeChainKey } from "./chains";
 import { PublicKey } from "@solana/web3.js";
 import { loadQuoteRecord, type QuoteRecord } from "./quote-record";
+import { isSelfClaimableDest } from "./self-claim";
 import { InvalidEventError, readBridgedEvent, TxNotIndexedError, type BridgedEvent } from "./read-source-event";
 
 export const SELF_CLAIM_AFTER_MS = 30 * 60 * 1000;
@@ -216,10 +217,16 @@ export function toStatusView(r: CctpTransferRecord, now: number = Date.now()): B
     ...(m.receivedAtomic !== undefined ? { receivedAtomic: m.receivedAtomic } : {}),
     sourceTx: r.burnTxHash,
     ...(r.mintTxHash ? { destTx: r.mintTxHash } : {}),
+    // Only where the app can build the claim (Ruling AJ): an attested bridge
+    // the relayer hasn't delivered within 30 min, or one that has failed
+    // after Circle attested it.
     canSelfClaim:
-      r.status === "attested" &&
-      m.attestedAt !== undefined &&
-      now - m.attestedAt >= SELF_CLAIM_AFTER_MS,
+      m.dest in BRIDGE_CHAINS &&
+      isSelfClaimableDest(m.dest as BridgeChainKey) &&
+      ((r.status === "attested" &&
+        m.attestedAt !== undefined &&
+        now - m.attestedAt >= SELF_CLAIM_AFTER_MS) ||
+        (r.status === "failed" && !!r.attestationMessage && !!r.attestationSignature)),
     fellBackToStandard: m.fellBackToStandard === true,
   };
 }

@@ -121,6 +121,14 @@ export function useSolanaWallet() {
     [],
   );
 
+  // Signs and sends a transaction the server already prepared and partially
+  // signed (the bridge's v0 tx, whose event keypair signed server-side).
+  const signAndSendPrepared = useCallback(async (transactionBase64: string): Promise<string> => {
+    const provider = await getSolanaProvider();
+    const tx = VersionedTransaction.deserialize(Uint8Array.from(Buffer.from(transactionBase64, "base64")));
+    return provider.signAndSendTransaction(tx);
+  }, []);
+
   // Proves control of the address for wallet linking.
   const signMessage = useCallback(async (message: string): Promise<string> => {
     const provider = await getSolanaProvider();
@@ -142,6 +150,7 @@ export function useSolanaWallet() {
     connect,
     disconnect,
     signAndSendBurn,
+    signAndSendPrepared,
     signMessage,
   };
 }

@@ -18,19 +18,22 @@ import {
   disableReason,
   initialBridgeForm,
   isFirstTimeAddress,
+  knownAddressesKey,
   sourceWalletOf,
-  type BridgeFormState,
+  quoteKey,
+  recipientOf,
 } from "@/lib/bridge/form-state";
 import { BridgeLegCard } from "./BridgeLegCard";
 import { BridgeReceiveCard } from "./BridgeReceiveCard";
 import { SpeedToggle } from "./SpeedToggle";
 import { useBridgeQuote } from "./useBridgeQuote";
+import { useBridgeFlow } from "./useBridgeFlow";
+import { BridgeStatusPanel } from "./BridgeStatusPanel";
+import { FlowModal } from "@/components/app/FlowModal";
 
 const fieldBox =
   "flex h-[70px] w-full items-center gap-[10px] rounded-[20px] border border-[#d7d6d6]/70 px-[20px] font-[family-name:var(--font-sora)] text-[20px] leading-[25px] text-white transition-colors focus-within:border-[#d7d6d6] max-[720px]:h-[54px] max-[720px]:rounded-[14px] max-[720px]:px-[16px] max-[720px]:text-[16px] max-[720px]:leading-[20px]";
 
-/** The localStorage key for addresses a user has bridged to before (spec §8). */
-export const knownAddressesKey = (user: string) => `settu:bridge-known:${user}`;
 
 function readKnown(user: string): string[] {
   try {
@@ -49,13 +52,9 @@ interface Balance {
   readonly decimals: number;
 }
 
-export function BridgePanel({
-  onSubmit,
-}: {
-  /** Task 20: starts signing with the current form. */
-  readonly onSubmit?: (state: BridgeFormState) => void;
-} = {}) {
+export function BridgePanel() {
   const wallets = useActiveWallet();
+  const flow = useBridgeFlow();
   const [state, dispatch] = useReducer(bridgeFormReducer, undefined, () =>
     initialBridgeForm("solana", "base"),
   );
@@ -347,8 +346,8 @@ export function BridgePanel({
           <div className="flex flex-col gap-[10px]">
             <button
               type="button"
-              disabled={reason !== null || short || !onSubmit}
-              onClick={() => onSubmit?.(state)}
+              disabled={reason !== null || short || flow.phase.kind !== "idle"}
+              onClick={() => void flow.start(state)}
               className="h-[80px] w-full rounded-[40px] font-[family-name:var(--font-sora)] text-[20px] font-semibold leading-[25px] text-[#111010] disabled:cursor-not-allowed disabled:opacity-50 max-[720px]:h-[58px] max-[720px]:text-[16px]"
               style={{ backgroundColor: "#ecc56f" }}
             >
@@ -367,6 +366,35 @@ export function BridgePanel({
           </div>
         </div>
       </div>
+
+      {flow.phase.kind !== "idle" && (
+        <FlowModal
+          // Closing only once nothing is waiting on the wallet; the server
+          // finishes a sent bridge either way.
+          dismissable={!(flow.phase.kind === "running" && flow.phase.step !== "tracking")}
+          onDismiss={() => {
+            const finished = flow.phase.kind === "done";
+            flow.reset();
+            if (finished) dispatch({ type: "setAmount", amount: "" });
+          }}
+        >
+          <BridgeStatusPanel
+            phase={flow.phase}
+            amount={state.amount}
+            source={state.source}
+            dest={state.dest}
+            recipient={recipientOf(state)}
+            onClose={() => flow.reset()}
+            onConfirmNewPrice={() => {
+              if (flow.phase.kind !== "reconfirm") return;
+              const next = { ...state, quote: flow.phase.quote };
+              dispatch({ type: "quoteLoaded", key: quoteKey(state), quote: flow.phase.quote });
+              void flow.start(next);
+            }}
+            onClaim={flow.claim}
+          />
+        </FlowModal>
+      )}
     </div>
   );
 }

@@ -181,14 +181,30 @@ test("status mapping", () => {
   assert.equal(v.fellBackToStandard, false);
 });
 
-test("canSelfClaim: false at 29 min, true at 30", () => {
+test("canSelfClaim: false at 29 min, true at 30 (EVM destination)", () => {
   const at = 1_000_000;
   const rec = (status: CctpTransferRecord["status"]) =>
-    base({ status, bridge: { ...base({}).bridge!, attestedAt: at } });
+    base({ status, bridge: { ...base({}).bridge!, dest: "arbitrum", attestedAt: at } });
   const min = 60_000;
   assert.equal(toStatusView(rec("attested"), at + 29 * min).canSelfClaim, false);
   assert.equal(toStatusView(rec("attested"), at + 30 * min).canSelfClaim, true);
   assert.equal(toStatusView(rec("completed"), at + 60 * min).canSelfClaim, false);
+});
+
+test("canSelfClaim: never for a destination the app can't claim on (Ruling AJ)", () => {
+  const at = 1_000_000;
+  const r = base({ status: "attested", bridge: { ...base({}).bridge!, dest: "solana", attestedAt: at } });
+  assert.equal(toStatusView(r, at + 60 * 60_000).canSelfClaim, false);
+});
+
+test("canSelfClaim: a failed bridge Circle attested can be claimed at once", () => {
+  const r = base({
+    status: "failed",
+    attestationMessage: "0x01",
+    attestationSignature: "0x02",
+    bridge: { ...base({}).bridge!, dest: "arbitrum" },
+  });
+  assert.equal(toStatusView(r, 0).canSelfClaim, true);
 });
 
 test("getBridgeStatus: unknown / non-bridge -> null", async () => {

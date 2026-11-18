@@ -15,6 +15,9 @@ import { validateDestinationAddress } from "./address";
 import type { QuoteSuccess, NetworkFeeMode } from "./build-quote";
 import type { Speed } from "./quote-math";
 
+/** The localStorage key for addresses a user has bridged to before (spec §8). */
+export const knownAddressesKey = (user: string) => `settu:bridge-known:${user}`;
+
 /** Smallest amount the form accepts, in USDC (spec §12 leaves it to the builder). */
 export const MIN_BRIDGE_USDC = 1;
 

@@ -162,7 +162,7 @@ export async function sendTransaction(
   topic: string,
   chainId: number,
   from: `0x${string}`,
-  call: { to: `0x${string}`; data: `0x${string}` },
+  call: { to: `0x${string}`; data: `0x${string}`; value?: `0x${string}` },
 ): Promise<string> {
   await assertSession(topic);
   const client = await getClient();
@@ -171,7 +171,8 @@ export async function sendTransaction(
     chainId: `eip155:${chainId}`,
     request: {
       method: "eth_sendTransaction",
-      params: [{ from, to: call.to, data: call.data }],
+      // value only when set (the bridge's native fee); other callers send none.
+      params: [{ from, to: call.to, data: call.data, ...(call.value ? { value: call.value } : {}) }],
     },
   }) as Promise<string>;
   await focusWallet(topic);
