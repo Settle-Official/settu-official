@@ -207,7 +207,17 @@ export function useBridgeFlow() {
       const tx = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(tx.error ?? "This bridge can't be claimed right now.");
       await wallets.evm.switchChain(tx.chainId);
-      await wallets.evm.signAndSendCalls([{ to: tx.to, data: tx.data }], tx.chainId);
+      const [claimTx] = await wallets.evm.signAndSendCalls([{ to: tx.to, data: tx.data }], tx.chainId);
+      // Confirm it with the server: a failed bridge only completes this way.
+      for (let i = 0; i < 20; i++) {
+        const r = await postJson<BridgeStatusView>(`/api/bridge/${encodeURIComponent(view.id)}/claim`, { txHash: claimTx });
+        if (r.ok && r.body.id) {
+          setPhase({ kind: "done", view: r.body as BridgeStatusView });
+          return;
+        }
+        if (r.status !== 409 || r.body.code === "unsupported_dest" || r.body.code === "not_claimable") break;
+        await sleep(3_000);
+      }
       track(view.id, view);
     },
     [wallets, track],

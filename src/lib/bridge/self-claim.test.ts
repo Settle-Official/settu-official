@@ -45,3 +45,61 @@ test("Stellar and Solana destinations aren't self-claimable from the app yet (Ru
     (e: unknown) => e instanceof SelfClaimError && e.code === "unsupported_dest",
   );
 });
+
+// ------------------------------------------------ final review: confirming a claim
+
+import { confirmSelfClaim, type ConfirmClaimDeps } from "./self-claim";
+
+function claimDeps(r: CctpTransferRecord, over: Partial<ConfirmClaimDeps> = {}) {
+  let current = r;
+  const recorded: CctpTransferRecord[] = [];
+  const d: ConfirmClaimDeps = {
+    get: async () => current,
+    isMinted: async () => true,
+    readReceivedAtomic: async () => BigInt(4_950_000),
+    update: async (_id, patch) => {
+      current = { ...current, ...patch, bridge: { ...current.bridge!, ...(patch.bridge ?? {}) } } as CctpTransferRecord;
+    },
+    recordCompleted: async (x) => {
+      recorded.push(x);
+    },
+    ...over,
+  };
+  return { d, recorded, current: () => current };
+}
+
+const FAILED = () =>
+  rec({ status: "failed", mintRecipient: "0x00000000000000000000000000000000000000000000000000000000000000aa" } as Partial<CctpTransferRecord>);
+
+test("a confirmed claim of a failed bridge completes it with what arrived, and records it", async () => {
+  const h = claimDeps(FAILED());
+  const r = await confirmSelfClaim("0xhash", "0xclaim", h.d);
+  assert.equal(r.status, "completed");
+  assert.equal(h.current().mintTxHash, "0xclaim");
+  assert.equal(h.current().bridge?.receivedAtomic, "4950000");
+  assert.equal(h.recorded.length, 1);
+});
+
+test("a claim tx is not trusted unless this bridge's own message is minted on-chain", async () => {
+  const h = claimDeps(FAILED(), { isMinted: async () => false });
+  await assert.rejects(confirmSelfClaim("0xhash", "0xclaim", h.d), (e: unknown) =>
+    e instanceof SelfClaimError && e.code === "not_minted");
+  assert.equal(h.current().status, "failed");
+});
+
+test("a claim tx that didn't mint to this bridge's recipient is refused", async () => {
+  const h = claimDeps(FAILED(), {
+    readReceivedAtomic: async () => {
+      throw new Error("no USDC mint to the recipient in the destination tx");
+    },
+  });
+  await assert.rejects(confirmSelfClaim("0xhash", "0xclaim", h.d));
+  assert.equal(h.current().status, "failed");
+});
+
+test("confirming an already-completed bridge changes nothing", async () => {
+  const h = claimDeps(rec({ status: "completed", mintTxHash: "0xrelayer" }));
+  const r = await confirmSelfClaim("0xhash", "0xclaim", h.d);
+  assert.equal(r.mintTxHash, "0xrelayer");
+  assert.equal(h.recorded.length, 0);
+});

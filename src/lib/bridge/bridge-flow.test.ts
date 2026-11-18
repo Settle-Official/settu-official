@@ -137,3 +137,23 @@ test("canSelfClaim offers 'Claim it yourself'", () => {
   assert.ok(resultActions({ ...VIEW, status: "delivering", canSelfClaim: true }).includes("Claim it yourself"));
   assert.ok(!resultActions(VIEW).includes("Claim it yourself"));
 });
+
+test("final review: a quote that runs out during the USDC approval is refreshed for reconfirmation, not sent", async () => {
+  let clock = NOW;
+  let built = 0;
+  const d = deps({
+    now: () => clock,
+    buildTx: async () => {
+      built++;
+      d.calls.push("buildTx");
+      return { family: "evm", chainId: 84532, to: "0x1", data: "0x", value: "0", needsApproval: built === 1 } as SourceTx;
+    },
+    approve: async () => {
+      d.calls.push("approve");
+      clock += 110; // the wallet confirmation and the approval's confirmation took 110 s
+    },
+  });
+  const r = await runBridgeFlow({ quote: quote(NOW + 120), source: "base", user: "u" }, d);
+  assert.equal(r.kind, "needsReconfirm");
+  assert.deepEqual(d.calls, ["buildTx", "approve", "refreshQuote"]);
+});

@@ -63,6 +63,12 @@ export async function runBridgeFlow(
   if (tx.family === "evm" && tx.needsApproval) {
     d.onStep("approve");
     await d.approve(quote, tx);
+    // The approval can take most of the quote's life (wallet confirmation
+    // plus on-chain confirmation). Re-check before signing the bridge; the
+    // allowance stays, so the reconfirmed run goes straight to signing.
+    if (quote.expiresAt - d.now() < MIN_QUOTE_LIFE_S) {
+      return { kind: "needsReconfirm", quote: await d.refreshQuote() };
+    }
     tx = await d.buildTx(quote);
   }
 
