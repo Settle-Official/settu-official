@@ -32,7 +32,7 @@ export const SOLANA_USDC_DECIMALS = 6 as const;
 
 // Reuse the existing CCTP_NETWORK switch so Solana follows the same
 // mainnet/testnet toggle as the rest of the bridge.
-const IS_TESTNET = process.env.CCTP_NETWORK === "testnet";
+const IS_TESTNET = (process.env.CCTP_NETWORK ?? process.env.NEXT_PUBLIC_CCTP_NETWORK) === "testnet";
 
 export interface SolanaConfig {
   messageTransmitterV2: string;

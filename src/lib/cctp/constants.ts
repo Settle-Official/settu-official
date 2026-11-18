@@ -12,8 +12,13 @@
 
 export type CctpNetwork = "mainnet" | "testnet";
 
+// The browser only sees NEXT_PUBLIC_* variables (inlined at build), so
+// client code (the bridge's chain registry: USDC addresses, explorers) reads
+// NEXT_PUBLIC_CCTP_NETWORK. Set both together; unset means mainnet.
 export const CCTP_NETWORK: CctpNetwork =
-  process.env.CCTP_NETWORK === "testnet" ? "testnet" : "mainnet";
+  (process.env.CCTP_NETWORK ?? process.env.NEXT_PUBLIC_CCTP_NETWORK) === "testnet"
+    ? "testnet"
+    : "mainnet";
 
 // Domain identifiers are protocol-wide constants, same on mainnet and testnet.
 export const CCTP_DOMAIN = {
