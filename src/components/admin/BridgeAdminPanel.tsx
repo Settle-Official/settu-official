@@ -14,6 +14,7 @@
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { EvmConnectModal } from "@/components/EvmConnectModal";
+import { AppSelect } from "@/components/app/AppSelect";
 import { useEvmWallet } from "@/hooks/useEvmWallet";
 import {
   connectWallet as connectStellarWallet,
@@ -534,17 +535,20 @@ export function BridgeAdminPanel({
                 )}
                 {editing === row.chain && row.status === "ok" && (
                   <div className="flex flex-wrap items-center gap-[10px]">
-                    <select
-                      value={limitEdit.limit}
-                      onChange={(e) =>
-                        setLimitEdit((l) => ({ ...l, limit: e.target.value as "maxNetworkFee" | "maxNativeFee" }))
-                      }
-                      style={BORDER}
-                      className={`${FIELD} bg-[#1e1c1c]`}
-                    >
-                      <option value="maxNetworkFee">Max network fee (USDC)</option>
-                      <option value="maxNativeFee">Max native fee ({row.nativeSymbol ?? "native"})</option>
-                    </select>
+                    <div className="min-w-[240px]">
+                      <AppSelect
+                        size="compact"
+                        aria-label="Limit to change"
+                        value={limitEdit.limit}
+                        onChange={(v) =>
+                          setLimitEdit((l) => ({ ...l, limit: v as "maxNetworkFee" | "maxNativeFee" }))
+                        }
+                        options={[
+                          { code: "maxNetworkFee", name: "Max network fee (USDC)" },
+                          { code: "maxNativeFee", name: `Max native fee (${row.nativeSymbol ?? "native"})` },
+                        ]}
+                      />
+                    </div>
                     <input
                       inputMode="decimal"
                       value={limitEdit.value}

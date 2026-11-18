@@ -18,6 +18,8 @@ interface AppSelectProps {
   /** Shown in place of the value, in the design's error red. */
   readonly error?: string | null;
   readonly "aria-label"?: string;
+  /** "compact": the 40px admin field size, with the caret inset from the edge. */
+  readonly size?: "default" | "compact";
 }
 
 // Lists longer than this get a filter box; short ones (chains, currencies)
@@ -34,7 +36,9 @@ export function AppSelect({
   disabled = false,
   error,
   "aria-label": ariaLabel,
+  size = "default",
 }: AppSelectProps) {
+  const compact = size === "compact";
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const rootRef = useRef<HTMLDivElement>(null);
@@ -78,18 +82,27 @@ export function AppSelect({
         // Inline border: globals.css's unlayered `button { border: 0 }` reset
         // beats any layered border-* utility.
         style={{ border: `1px solid ${error ? "#ac4747" : open ? "#d7d6d6" : "rgba(215,214,214,0.7)"}` }}
-        className={`flex h-[70px] w-full items-center justify-between gap-[10px] rounded-[20px] px-[20px] text-left font-[family-name:var(--font-sora)] text-[20px] leading-[25px] transition-colors disabled:cursor-not-allowed disabled:opacity-60 max-[720px]:h-[54px] max-[720px]:rounded-[14px] max-[720px]:px-[16px] max-[720px]:text-[16px] max-[720px]:leading-[20px] ${
+        className={`flex w-full items-center justify-between gap-[10px] text-left font-[family-name:var(--font-sora)] transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+          compact
+            ? "h-[40px] rounded-[14px] pl-[14px] pr-[12px] text-[13px] leading-[18px]"
+            : "h-[70px] rounded-[20px] px-[20px] text-[20px] leading-[25px] max-[720px]:h-[54px] max-[720px]:rounded-[14px] max-[720px]:px-[16px] max-[720px]:text-[16px] max-[720px]:leading-[20px]"
+        } ${
           error ? "text-[#ac4747]" : selected ? "text-white" : "text-[#8d8c8c]"
         }`}
       >
         <span className="truncate">{label}</span>
-        <CaretDownIcon size={24} className="shrink-0 text-[#a5a2a2] max-[720px]:size-[20px]" />
+        <CaretDownIcon
+          size={compact ? 16 : 24}
+          className={`shrink-0 text-[#a5a2a2] ${compact ? `transition-transform ${open ? "rotate-180" : ""}` : "max-[720px]:size-[20px]"}`}
+        />
       </button>
 
       {open && (
         <div
           role="listbox"
-          className="absolute left-0 right-0 top-[calc(100%+8px)] z-30 max-h-[320px] overflow-hidden rounded-[20px] border border-white/15 bg-[#1e1c1c] shadow-[0_24px_48px_rgba(0,0,0,0.5)] backdrop-blur-xl max-[720px]:rounded-[14px]"
+          className={`absolute left-0 right-0 top-[calc(100%+8px)] z-30 max-h-[320px] min-w-[160px] overflow-hidden border border-white/15 bg-[#1e1c1c] shadow-[0_24px_48px_rgba(0,0,0,0.5)] backdrop-blur-xl ${
+            compact ? "rounded-[14px]" : "rounded-[20px] max-[720px]:rounded-[14px]"
+          }`}
         >
           {showSearch && (
             <div className="p-[10px]">
@@ -125,7 +138,9 @@ export function AppSelect({
                       setQuery("");
                     }}
                     style={o.code === value ? { backgroundColor: "rgba(201,169,98,0.2)" } : undefined}
-                    className="w-full rounded-[12px] px-[14px] py-[12px] text-left font-[family-name:var(--font-sora)] text-[16px] text-white hover:brightness-125 hover:[background-color:rgba(255,255,255,0.06)]"
+                    className={`w-full rounded-[12px] text-left font-[family-name:var(--font-sora)] text-white hover:brightness-125 hover:[background-color:rgba(255,255,255,0.06)] ${
+                      compact ? "px-[12px] py-[9px] text-[13px]" : "px-[14px] py-[12px] text-[16px]"
+                    }`}
                   >
                     {o.name}
                   </button>

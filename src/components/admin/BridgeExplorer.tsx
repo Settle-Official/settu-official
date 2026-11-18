@@ -8,6 +8,7 @@
  */
 
 import { AdminNav } from "./AdminNav";
+import { AppSelect } from "@/components/app/AppSelect";
 import { BridgeAdminPanel } from "./BridgeAdminPanel";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import {
@@ -547,14 +548,20 @@ function Stat({ label, value, warn }: { readonly label: string; readonly value: 
   );
 }
 
+const titleCase = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+/** A filter dropdown: the app's own AppSelect at the admin field size, with "All" first. */
 function Select({ label, value, onChange, options }: { readonly label: string; readonly value: string; readonly onChange: (e: { target: { value: string } }) => void; readonly options: string[] }) {
   return (
-    <label className="flex flex-col gap-[4px]">
+    <div className="flex min-w-[150px] flex-col gap-[4px]">
       <span className={MUTED}>{label}</span>
-      <select value={value} onChange={onChange} style={BORDER} className={`${FIELD} bg-[#191818] capitalize`}>
-        <option value="">All</option>
-        {options.map((o) => <option key={o} value={o}>{o}</option>)}
-      </select>
-    </label>
+      <AppSelect
+        size="compact"
+        aria-label={label}
+        value={value}
+        onChange={(v) => onChange({ target: { value: v } })}
+        options={[{ code: "", name: "All" }, ...options.map((o) => ({ code: o, name: titleCase(o) }))]}
+      />
+    </div>
   );
 }
