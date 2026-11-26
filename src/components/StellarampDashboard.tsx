@@ -1047,6 +1047,10 @@ export function StellarampDashboard({
       amount: tradeData.amount,
       currency: "NGN",
       kind: "offramp",
+      // The payout is known here, at submit. Without it History shows "—" for
+      // rate and amount until the Paycrest webhook settles, which can be
+      // minutes — and forever for a transfer whose webhook is never delivered.
+      fiatAmount: tradeData.destinationAmount,
       initiator: offrampInitiatorRef.current,
       beneficiary: tradeData.beneficiary,
       status: "pending",
@@ -1477,6 +1481,10 @@ export function StellarampDashboard({
       amount: tradeData.amount,
       currency: "NGN",
       kind: "offramp",
+      // The payout is known here, at submit. Without it History shows "—" for
+      // rate and amount until the Paycrest webhook settles, which can be
+      // minutes — and forever for a transfer whose webhook is never delivered.
+      fiatAmount: tradeData.destinationAmount,
       initiator: offrampInitiatorRef.current,
       beneficiary: tradeData.beneficiary,
       status: "pending",
@@ -1807,6 +1815,10 @@ export function StellarampDashboard({
       amount: tradeData.amount,
       currency: "NGN",
       kind: "offramp",
+      // The payout is known here, at submit. Without it History shows "—" for
+      // rate and amount until the Paycrest webhook settles, which can be
+      // minutes — and forever for a transfer whose webhook is never delivered.
+      fiatAmount: tradeData.destinationAmount,
       initiator: offrampInitiatorRef.current,
       beneficiary: tradeData.beneficiary,
       status: "pending",

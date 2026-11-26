@@ -14,7 +14,11 @@ export interface Transaction {
   kind?: "offramp" | "onramp";
   /** Which surface started it: the form/panel, or Agent Mode. */
   initiator?: "form" | "agent";
-  /** Onramp only: the fiat the user paid in (`currency` names its unit). */
+  /**
+   * The fiat side, in the unit `currency` names: what an onramp was paid in,
+   * or what an offramp paid out. Captured at submit so History shows an
+   * amount straight away rather than waiting on the settlement webhook.
+   */
   fiatAmount?: string;
   stellarTxHash?: string;
   bridgeStatus?: string;
