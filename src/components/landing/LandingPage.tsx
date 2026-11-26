@@ -2,6 +2,7 @@ import { Fraunces, Sora, Inter } from "next/font/google";
 import { Hero } from "./Hero";
 import { Nav } from "./Nav";
 import { StatsStrip } from "./StatsStrip";
+import { MarketsTicker } from "./MarketsTicker";
 import { HowItWorks } from "./HowItWorks";
 import { TrustSection } from "./TrustSection";
 import { Faq } from "./Faq";
@@ -42,6 +43,7 @@ export function LandingPage() {
       <Nav />
       <Hero />
       <StatsStrip />
+      <MarketsTicker />
       <HowItWorks />
       <TrustSection />
       <Faq />

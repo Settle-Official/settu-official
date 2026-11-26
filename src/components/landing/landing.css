@@ -346,6 +346,10 @@
   width: max-content;
   animation: landing-marquee 24s linear infinite;
 }
+.landing-marquee-reverse {
+  animation-direction: reverse;
+  animation-duration: 40s;
+}
 .landing-marquee-fade {
   -webkit-mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent);
   mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent);
