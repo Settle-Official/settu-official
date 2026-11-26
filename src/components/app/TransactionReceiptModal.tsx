@@ -7,6 +7,7 @@ import type { HistoryRow } from "./useWalletHistory";
 import { buildReceipt } from "@/lib/receipt/receipt-data";
 import { drawReceipt } from "@/lib/receipt/draw-receipt";
 import { canRepeat, stashRepeat } from "@/lib/offramp/repeat-transfer";
+import type { Beneficiary } from "@/lib/offramp/beneficiary-store";
 
 const STATUS_COLOR: Record<HistoryRow["status"], string> = {
   completed: "#109F21",
@@ -27,8 +28,40 @@ export function TransactionReceiptModal({
   const closeRef = useRef<HTMLButtonElement>(null);
   const [share, setShare] = useState<ShareState>("idle");
 
-  const receipt = useMemo(() => buildReceipt(row), [row]);
-  const repeatable = canRepeat(row);
+  // Rows this browser ran already carry the bank details; every other row has
+  // to fetch them. Lazy on purpose, so a cold backend delays the Repeat button
+  // rather than the receipt itself.
+  const [fetched, setFetched] = useState<Beneficiary | null>(null);
+
+  useEffect(() => {
+    if (!row.orderId || row.bank) return;
+    let cancelled = false;
+    fetch(`/api/offramp/beneficiary/${encodeURIComponent(row.orderId)}`)
+      .then((r) => r.json())
+      .then((data) => !cancelled && setFetched(data?.beneficiary ?? null))
+      .catch(() => {
+        // No beneficiary simply means no Repeat; nothing to report here.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [row.orderId, row.bank]);
+
+  const enriched: HistoryRow = useMemo(
+    () =>
+      fetched
+        ? {
+            ...row,
+            bank: row.bank ?? fetched.institution,
+            accountName: row.accountName ?? fetched.accountName,
+            accountNumber: row.accountNumber ?? fetched.accountIdentifier,
+          }
+        : row,
+    [row, fetched],
+  );
+
+  const receipt = useMemo(() => buildReceipt(enriched), [enriched]);
+  const repeatable = canRepeat(enriched);
 
   useEffect(() => {
     closeRef.current?.focus();
@@ -75,9 +108,9 @@ export function TransactionReceiptModal({
     stashRepeat({
       amountUsdc: String(row.usdc),
       currency: row.currency,
-      institution: row.bank!,
-      accountIdentifier: row.accountNumber!,
-      accountName: row.accountName!,
+      institution: enriched.bank!,
+      accountIdentifier: enriched.accountNumber!,
+      accountName: enriched.accountName!,
       ...(row.sourceChain ? { sourceChain: row.sourceChain } : {}),
     });
     onClose();

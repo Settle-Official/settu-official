@@ -12,6 +12,7 @@ import { notify, alertOfframpEvent, alertRampEvent } from "@/lib/notify/telegram
 import { PLATFORM_FEE_RATE } from "@/lib/offramp/fiat-conversion";
 import { getOrderMeta } from "@/lib/offramp/order-meta-store";
 import { updateTransactionByOrderId } from "@/lib/offramp/transaction-history";
+import { recordBeneficiary, isComplete } from "@/lib/offramp/beneficiary-store";
 import { pushRecentTransaction, addVolume } from "@/lib/stats-store";
 import { formatFiat } from "@/lib/format/currency";
 
@@ -258,6 +259,19 @@ export async function POST(request: NextRequest) {
           ...(payoutRecord.txHash ? { mintTxHash: payoutRecord.txHash } : {}),
         }),
       );
+
+      // The only point where the bank details are still to hand: order meta
+      // expires after 48h, and the permanent record never held them.
+      if (settled && isComplete(meta)) {
+        inBackground(
+          recordBeneficiary(orderId, {
+            institution: meta!.institution,
+            accountIdentifier: meta!.accountIdentifier,
+            accountName: meta!.accountName,
+            currency: meta!.currency,
+          }),
+        );
+      }
     }
 
     // 2xx quickly so Paycrest marks the delivery successful.
