@@ -1,13 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { BUILDING, CHAINS, MARKETS, NEEDS, VOLUMES, toSheetRow, validateWaitlist } from "@/lib/waitlist/schema";
+import { describe, toSheetRow, validateWaitlist } from "@/lib/waitlist/schema";
 import { appendWaitlistRow, sheetsConfigured } from "@/lib/waitlist/sheets";
 import { alertWaitlistSignup } from "@/lib/notify/telegram";
 import { clientIp, createRateLimit } from "@/lib/rate-limit";
 
 // Five sign-ups per IP per 10 minutes is plenty for a person and stops a script.
 const limiter = createRateLimit(5, 10 * 60 * 1000);
-
-const label = (opts: readonly { value: string; label: string }[], v: string) => opts.find((o) => o.value === v)?.label ?? v;
 
 export async function POST(request: NextRequest) {
   let body: unknown;
@@ -26,18 +24,22 @@ export async function POST(request: NextRequest) {
 
   let savedToSheet = false;
   if (sheetsConfigured()) {
-    try { await appendWaitlistRow(toSheetRow(e, new Date())); savedToSheet = true; }
-    catch (err) { console.error("[waitlist] sheet append failed", err instanceof Error ? err.message : err); }
+    const row = toSheetRow(e, new Date());
+    for (let attempt = 1; attempt <= 2 && !savedToSheet; attempt++) {
+      try { await appendWaitlistRow(row); savedToSheet = true; }
+      catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`[waitlist] sheet append failed (attempt ${attempt})`, msg);
+        // Only a dropped connection is worth retrying; a rejection would fail again.
+        if (!/fetch failed|timeout|aborted|ECONN|ENOTFOUND|EAI_AGAIN/i.test(msg)) break;
+      }
+    }
   } else {
     console.error("[waitlist] Google Sheets env is not configured");
   }
 
   const alerted = await alertWaitlistSignup({
-    email: e.email, name: e.name, company: e.company,
-    need: label(NEEDS, e.need), building: label(BUILDING, e.building),
-    markets: e.markets.map((m) => label(MARKETS, m)).join(", "),
-    chains: e.chains.map((c) => label(CHAINS, c)).join(", "),
-    volume: e.volume ? label(VOLUMES, e.volume) : "",
+    email: e.email, name: e.name, company: e.company, ...describe(e),
     useCase: e.useCase, heardFrom: e.heardFrom, savedToSheet,
   });
 

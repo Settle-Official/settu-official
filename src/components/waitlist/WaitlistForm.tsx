@@ -20,7 +20,7 @@ const STEPS = [
 ] as const;
 
 // Which step each server-side field error belongs to.
-const STEP_OF: Partial<Record<keyof FieldErrors, number>> = { email: 0, name: 0, company: 1, need: 1, building: 2, markets: 2, chains: 3, volume: 3, useCase: 4, heardFrom: 4 };
+const STEP_OF: Partial<Record<keyof FieldErrors, number>> = { email: 0, name: 0, company: 1, need: 1, building: 2, buildingOther: 2, markets: 2, marketsOther: 2, chains: 3, chainsOther: 3, volume: 3, useCase: 4, heardFrom: 4 };
 
 function Label({ children, required, htmlFor }: { children: React.ReactNode; required?: boolean; htmlFor?: string }) {
   return (
@@ -62,8 +62,20 @@ function Chips({ opts, value, onChange, multi, name }: { opts: Opt; value: strin
   );
 }
 
+/** The free-text box that appears under a question once "Other" is picked. */
+function OtherBox({ id, label, value, onChange, error }: { id: string; label: string; value: string; onChange: (e: React.ChangeEvent<HTMLInputElement>) => void; error?: string }) {
+  return (
+    <div className="wl-step-in flex flex-col gap-[8px]">
+      <label htmlFor={id} className="sr-only">{label}</label>
+      <input id={id} autoFocus maxLength={120} value={value} onChange={onChange} placeholder={label} aria-invalid={!!error}
+        className={`${fieldBase} ${error ? "border-[#ff8a7a]" : "border-white/10"}`} />
+      <Err msg={error} />
+    </div>
+  );
+}
+
 export function WaitlistForm() {
-  const [f, setF] = useState({ email: "", name: "", company: "", need: "", building: "", volume: "", useCase: "", heardFrom: "", website: "" });
+  const [f, setF] = useState({ email: "", name: "", company: "", need: "", building: "", buildingOther: "", marketsOther: "", chainsOther: "", volume: "", useCase: "", heardFrom: "", website: "" });
   const [markets, setMarkets] = useState<string[]>([]);
   const [chains, setChains] = useState<string[]>([]);
   const [errors, setErrors] = useState<FieldErrors>({});
@@ -97,7 +109,12 @@ export function WaitlistForm() {
       if (!f.name.trim()) e.name = "Tell us your name.";
     }
     if (i === 1 && !f.need) e.need = "Choose what you need.";
-    if (i === 2 && !f.building) e.building = "Choose what you're building.";
+    if (i === 2) {
+      if (!f.building) e.building = "Choose what you're building.";
+      else if (f.building === "other" && !f.buildingOther.trim()) e.buildingOther = "Tell us what you're building.";
+      if (markets.includes("other") && !f.marketsOther.trim()) e.marketsOther = "Which other markets?";
+    }
+    if (i === 3 && chains.includes("other") && !f.chainsOther.trim()) e.chainsOther = "Which other chains?";
     return e;
   }
 
@@ -214,10 +231,12 @@ export function WaitlistForm() {
               <Label required>What are you building?</Label>
               <Chips name="What you're building" opts={BUILDING} value={f.building ? [f.building] : []} onChange={pick("building")} multi={false} />
               <Err msg={errors.building} />
+              {f.building === "other" && <OtherBox id="wl-building-other" label="What are you building?" value={f.buildingOther} onChange={set("buildingOther")} error={errors.buildingOther} />}
             </div>
             <div className="flex flex-col gap-[10px]">
               <Label>Which markets?</Label>
               <Chips name="Markets" opts={MARKETS} value={markets} onChange={setMarkets} multi />
+              {markets.includes("other") && <OtherBox id="wl-markets-other" label="Which other markets? e.g. South Africa, Egypt" value={f.marketsOther} onChange={set("marketsOther")} error={errors.marketsOther} />}
             </div>
           </>
         )}
@@ -227,6 +246,7 @@ export function WaitlistForm() {
             <div className="flex flex-col gap-[10px]">
               <Label>Which chains?</Label>
               <Chips name="Chains" opts={CHAINS} value={chains} onChange={setChains} multi />
+              {chains.includes("other") && <OtherBox id="wl-chains-other" label="Which other chains? e.g. Tron, BNB Chain" value={f.chainsOther} onChange={set("chainsOther")} error={errors.chainsOther} />}
             </div>
             <div className="flex flex-col gap-[10px]">
               <Label>Expected monthly volume</Label>

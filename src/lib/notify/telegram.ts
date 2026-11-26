@@ -328,7 +328,9 @@ export async function alertWaitlistSignup(e: {
     line("Heard from", e.heardFrom),
     e.savedToSheet ? null : `⚠️ <b>Not saved to the sheet</b> — this message is the only copy.`,
   ].filter(Boolean).join("\n");
-  return notify(msg, e.savedToSheet ? "info" : "warning");
+  const level = e.savedToSheet ? "info" : "warning";
+  // One retry: a sign-up's only copy may be this message.
+  return (await notify(msg, level)) || notify(msg, level);
 }
 
 function escapeHtml(s: string): string {

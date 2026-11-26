@@ -63,3 +63,26 @@ test("neutralises spreadsheet formulas in free text", () => {
   assert.ok(row[3].startsWith("'="));
   assert.ok(row[9].startsWith("'+"));
 });
+
+test("'Other' needs its text, and the text replaces the label", () => {
+  const missing = validateWaitlist({ ...good, building: "other", markets: ["NGN", "other"], chains: ["other"] });
+  assert.equal(missing.ok, false);
+  if (missing.ok) return;
+  assert.deepEqual(Object.keys(missing.errors).sort(), ["buildingOther", "chainsOther", "marketsOther"]);
+
+  const r = validateWaitlist({ ...good, building: "other", buildingOther: " Remittance app ", markets: ["NGN", "other"], marketsOther: "South Africa", chains: ["other"], chainsOther: "Tron" });
+  assert.ok(r.ok);
+  if (!r.ok) return;
+  const row = toSheetRow(r.entry, new Date());
+  assert.equal(row[5], "Other: Remittance app");
+  assert.equal(row[6], "Nigeria (NGN), Other: South Africa");
+  assert.equal(row[7], "Other: Tron");
+});
+
+test("'Other' text is ignored unless 'Other' is picked", () => {
+  const r = validateWaitlist({ ...good, buildingOther: "sneaky", chainsOther: "sneaky" });
+  assert.ok(r.ok);
+  if (!r.ok) return;
+  assert.equal(r.entry.buildingOther, "");
+  assert.equal(r.entry.chainsOther, "");
+});

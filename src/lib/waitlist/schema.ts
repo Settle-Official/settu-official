@@ -52,7 +52,7 @@ const valuesOf = (o: Opt) => new Set(o.map((x) => x.value));
 const NEED_SET = valuesOf(NEEDS), BUILD_SET = valuesOf(BUILDING), MARKET_SET = valuesOf(MARKETS),
   CHAIN_SET = valuesOf(CHAINS), VOLUME_SET = valuesOf(VOLUMES);
 
-export const LIMITS = { name: 120, company: 160, useCase: 2000, heardFrom: 300 } as const;
+export const LIMITS = { name: 120, company: 160, useCase: 2000, heardFrom: 300, other: 120 } as const;
 
 export interface WaitlistEntry {
   readonly email: string;
@@ -60,8 +60,12 @@ export interface WaitlistEntry {
   readonly company: string;
   readonly need: string;
   readonly building: string;
+  /** Free text typed next to "Other" — only kept when "Other" is picked. */
+  readonly buildingOther: string;
   readonly markets: readonly string[];
+  readonly marketsOther: string;
   readonly chains: readonly string[];
+  readonly chainsOther: string;
   readonly volume: string;
   readonly useCase: string;
   readonly heardFrom: string;
@@ -86,22 +90,47 @@ export function validateWaitlist(input: unknown):
     company: str(b.company, LIMITS.company),
     need: str(b.need, 20),
     building: str(b.building, 20),
+    buildingOther: "",
     markets: pickList(b.markets, MARKET_SET),
+    marketsOther: "",
     chains: pickList(b.chains, CHAIN_SET),
+    chainsOther: "",
     volume: str(b.volume, 20),
     useCase: str(b.useCase, LIMITS.useCase),
     heardFrom: str(b.heardFrom, LIMITS.heardFrom),
   };
+  // "Other" text only counts when "Other" is actually selected.
+  const other = (picked: boolean, v: unknown) => (picked ? str(v, LIMITS.other) : "");
+  Object.assign(entry, {
+    buildingOther: other(entry.building === "other", b.buildingOther),
+    marketsOther: other(entry.markets.includes("other"), b.marketsOther),
+    chainsOther: other(entry.chains.includes("other"), b.chainsOther),
+  });
   const errors: FieldErrors = {};
   if (!EMAIL.test(entry.email)) errors.email = "Enter a valid email address.";
   if (!entry.name) errors.name = "Tell us your name.";
   if (!NEED_SET.has(entry.need)) errors.need = "Choose what you need.";
   if (!BUILD_SET.has(entry.building)) errors.building = "Choose what you're building.";
+  if (entry.building === "other" && !entry.buildingOther) errors.buildingOther = "Tell us what you're building.";
+  if (entry.markets.includes("other") && !entry.marketsOther) errors.marketsOther = "Which other markets?";
+  if (entry.chains.includes("other") && !entry.chainsOther) errors.chainsOther = "Which other chains?";
   if (entry.volume && !VOLUME_SET.has(entry.volume)) errors.volume = "Choose a volume range.";
   return Object.keys(errors).length ? { ok: false, errors } : { ok: true, entry };
 }
 
 const labelOf = (o: Opt, v: string) => o.find((x) => x.value === v)?.label ?? v;
+const withOther = (o: Opt, v: string, other: string) => (v === "other" && other ? `Other: ${other}` : labelOf(o, v));
+
+/** Human-readable answers, shared by the sheet row and the Telegram alert. */
+export function describe(e: WaitlistEntry) {
+  return {
+    need: labelOf(NEEDS, e.need),
+    building: withOther(BUILDING, e.building, e.buildingOther),
+    markets: e.markets.map((m) => withOther(MARKETS, m, e.marketsOther)).join(", "),
+    chains: e.chains.map((c) => withOther(CHAINS, c, e.chainsOther)).join(", "),
+    volume: e.volume ? labelOf(VOLUMES, e.volume) : "",
+  };
+}
 
 /** The sheet row, in the header order of SHEET_HEADERS. */
 export const SHEET_HEADERS = [
@@ -118,16 +147,17 @@ function cell(v: string): string {
 }
 
 export function toSheetRow(e: WaitlistEntry, at: Date): string[] {
+  const d = describe(e);
   return [
     at.toISOString().replace("T", " ").slice(0, 19),
     e.email,
     e.name,
     e.company,
-    labelOf(NEEDS, e.need),
-    labelOf(BUILDING, e.building),
-    e.markets.map((m) => labelOf(MARKETS, m)).join(", "),
-    e.chains.map((c) => labelOf(CHAINS, c)).join(", "),
-    e.volume ? labelOf(VOLUMES, e.volume) : "",
+    d.need,
+    d.building,
+    d.markets,
+    d.chains,
+    d.volume,
     e.useCase,
     e.heardFrom,
   ].map(cell);
