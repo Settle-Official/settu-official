@@ -253,7 +253,10 @@ export function HistoryList({ notificationsView = false }: { readonly notificati
                   type="button"
                   onClick={() => setSelected(row)}
                   aria-label={`Receipt for ${fmtUsdc(row.usdc)} USDC on ${fmtDate(row.timestamp)}`}
-                  className="history-grid w-full items-center rounded-[10px] pb-[20px] text-left transition-colors hover:bg-[rgba(255,255,255,0.04)] max-[720px]:py-[14px] max-[720px]:pb-[14px]"
+                  // No w-full: .history-grid sets width:max-content below
+                  // 720px so the table can scroll sideways, and a stretched
+                  // row would break that. As a flex child it fills anyway.
+                  className="history-grid items-center rounded-[10px] pb-[20px] text-left transition-colors hover:bg-[rgba(255,255,255,0.04)] max-[720px]:py-[14px] max-[720px]:pb-[14px]"
                 >
                   <Cell color="#FFFFFF">USDC</Cell>
                   <Cell color="#FFFFFF">{fmtUsdc(row.usdc)}</Cell>
