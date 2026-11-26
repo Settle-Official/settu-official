@@ -307,6 +307,30 @@ export async function alertOfframpEvent(details: {
   });
 }
 
+/** A new API waitlist sign-up. Every field is user input, so all of it is escaped. */
+export async function alertWaitlistSignup(e: {
+  email: string; name: string; company: string; need: string; building: string;
+  markets: string; chains: string; volume: string; useCase: string; heardFrom: string;
+  savedToSheet: boolean;
+}): Promise<boolean> {
+  const line = (label: string, v: string) => (v ? `${label}: ${escapeHtml(v)}` : null);
+  const msg = [
+    `<b>New API waitlist sign-up</b>`,
+    line("Email", e.email),
+    line("Name", e.name),
+    line("Company", e.company),
+    line("Needs", e.need),
+    line("Building", e.building),
+    line("Markets", e.markets),
+    line("Chains", e.chains),
+    line("Volume", e.volume),
+    e.useCase && `Use case: <i>${escapeHtml(e.useCase.slice(0, 600))}</i>`,
+    line("Heard from", e.heardFrom),
+    e.savedToSheet ? null : `⚠️ <b>Not saved to the sheet</b> — this message is the only copy.`,
+  ].filter(Boolean).join("\n");
+  return notify(msg, e.savedToSheet ? "info" : "warning");
+}
+
 function escapeHtml(s: string): string {
   return s
     .replace(/&/g, "&amp;")
