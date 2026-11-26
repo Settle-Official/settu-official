@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { AppSelect } from "@/components/app/AppSelect";
 import { CaretDownIcon } from "@/components/app/icons";
 import { useScreenBack } from "@/components/app/ScreenBack";
@@ -9,6 +9,7 @@ import { FlowModal } from "@/components/app/FlowModal";
 import { OfframpStatusPanel } from "@/components/app/OfframpStatusPanel";
 import type { OfframpStep } from "@/components/TransactionProgressModal";
 import { MIN_USDC_AMOUNT } from "@/lib/offramp/fiat-conversion";
+import { consumeRepeat } from "@/lib/offramp/repeat-transfer";
 import { fiatSymbol } from "@/lib/format/currency";
 import {
   sourceChainOptions,
@@ -234,6 +235,24 @@ export function FormCard({
   const isPhone = useMediaQuery(PHONE_QUERY);
   const [phoneStep, setPhoneStep] = useState<1 | 2>(1);
 
+  // "Repeat transfer" from History hands the details over in sessionStorage.
+  // accountName is left alone on purpose: the verify effect re-resolves it,
+  // which also re-checks the account still exists before anything is sent.
+  const repeatDone = useRef(false);
+  const seededCurrency = useRef(false);
+  useEffect(() => {
+    if (repeatDone.current) return;
+    repeatDone.current = true;
+    const repeat = consumeRepeat();
+    if (!repeat) return;
+    seededCurrency.current = true;
+    setAmountMode("crypto");
+    setAmount(repeat.amountUsdc);
+    setCurrency(repeat.currency);
+    setBank(repeat.institution);
+    setAccountNumber(repeat.accountIdentifier);
+  }, []);
+
   // Reset form fields when resetKey changes (after successful transaction)
   useEffect(() => {
     if (resetKey === 0) return; // skip initial mount
@@ -340,6 +359,9 @@ export function FormCard({
         const data = await response.json();
         const supportedCurrencies = Array.isArray(data?.data) ? data.data : [];
         setCurrencies(supportedCurrencies);
+        // This resolves after a repeat has already seeded the form, so it must
+        // not overwrite the currency that transfer actually used.
+        if (seededCurrency.current) return;
         if (supportedCurrencies.some((c: Currency) => c.code === "NGN")) {
           setCurrency("NGN");
         } else if (supportedCurrencies[0]?.code) {

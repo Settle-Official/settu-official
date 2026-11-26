@@ -6,6 +6,7 @@ import { useActiveWallet } from "./ActiveWallet";
 import { fiatSymbol } from "@/lib/format/currency";
 import { FunnelIcon, SearchIcon } from "./icons";
 import { useWalletHistory, type HistoryRow } from "./useWalletHistory";
+import { TransactionReceiptModal } from "./TransactionReceiptModal";
 
 const STATUS_LABEL: Record<HistoryRow["status"], string> = {
   // The stored status stays "pending"; only the wording shown to the user
@@ -117,6 +118,9 @@ export function HistoryList({ notificationsView = false }: { readonly notificati
   const [status, setStatus] = useState<StatusFilter>("all");
   const [filterOpen, setFilterOpen] = useState(false);
   const filterRef = useRef<HTMLDivElement>(null);
+  // The receipt opens from the row rather than an extra column: below 720px
+  // the table scrolls sideways, so an action column would sit off-screen.
+  const [selected, setSelected] = useState<HistoryRow | null>(null);
 
   useEffect(() => setQuery(urlQuery), [urlQuery]);
 
@@ -244,9 +248,15 @@ export function HistoryList({ notificationsView = false }: { readonly notificati
             </div>
             <div className="flex flex-col gap-[10px] max-[720px]:gap-0">
               {visible.map((row) => (
-                <div
+                <button
                   key={row.id}
-                  className="history-grid items-center pb-[20px] max-[720px]:py-[14px] max-[720px]:pb-[14px]"
+                  type="button"
+                  onClick={() => setSelected(row)}
+                  aria-label={`Receipt for ${fmtUsdc(row.usdc)} USDC on ${fmtDate(row.timestamp)}`}
+                  // No w-full: .history-grid sets width:max-content below
+                  // 720px so the table can scroll sideways, and a stretched
+                  // row would break that. As a flex child it fills anyway.
+                  className="history-grid items-center rounded-[10px] pb-[20px] text-left transition-colors hover:bg-[rgba(255,255,255,0.04)] max-[720px]:py-[14px] max-[720px]:pb-[14px]"
                 >
                   <Cell color="#FFFFFF">USDC</Cell>
                   <Cell color="#FFFFFF">{fmtUsdc(row.usdc)}</Cell>
@@ -254,11 +264,15 @@ export function HistoryList({ notificationsView = false }: { readonly notificati
                   <Cell color="#FFFFFF">{fmtAmount(row)}</Cell>
                   <Cell color={STATUS_COLOR[row.status]}>{STATUS_LABEL[row.status]}</Cell>
                   <Cell color="#FFFFFF">{fmtDate(row.timestamp)}</Cell>
-                </div>
+                </button>
               ))}
             </div>
           </div>
         </>
+      )}
+
+      {selected && (
+        <TransactionReceiptModal row={selected} onClose={() => setSelected(null)} />
       )}
     </div>
   );
