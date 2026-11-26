@@ -20,10 +20,12 @@ export const BUILDING = [
 
 export const MARKETS = [
   { value: "NGN", label: "Nigeria (NGN)" },
+  { value: "GHS", label: "Ghana (GHS)" },
   { value: "KES", label: "Kenya (KES)" },
-  { value: "UGX", label: "Uganda (UGX)" },
   { value: "TZS", label: "Tanzania (TZS)" },
-  { value: "XOF", label: "CFA franc (XOF)" },
+  { value: "RWF", label: "Rwanda (RWF)" },
+  { value: "UGX", label: "Uganda (UGX)" },
+  { value: "ZMW", label: "Zambia (ZMW)" },
   { value: "other", label: "Other" },
 ] as const;
 

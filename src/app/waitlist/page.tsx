@@ -14,7 +14,7 @@ const sora = Sora({ subsets: ["latin"], weight: ["400", "600"], variable: "--fon
 
 const POINTS = [
   ["Offramp & onramp", "Stablecoins to local currency and back, through one API."],
-  ["5 African markets", "Nigeria, Kenya, Uganda, Tanzania and CFA-franc West Africa."],
+  ["7 African markets", "Nigeria, Ghana, Kenya, Tanzania, Rwanda, Uganda and Zambia."],
   ["Bank & mobile money", "Payouts land in bank accounts and mobile wallets, usually within minutes."],
   ["8 chains", "Accept USDC from Stellar, Solana and major EVM networks."],
 ] as const;
