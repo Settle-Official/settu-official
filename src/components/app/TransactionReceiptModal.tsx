@@ -218,7 +218,11 @@ export function TransactionReceiptModal({
             <button
               type="button"
               onClick={handleRepeat}
-              className="h-[48px] flex-1 rounded-full bg-[#c9a962] font-[family-name:var(--font-sora)] text-[15px] font-semibold text-[#1a1a1a] transition-opacity hover:opacity-90"
+              // Inline, not a bg- utility: globals.css sets `background: none`
+              // on button unlayered, which beats every layered utility — the
+              // gold was suppressed and this read as dark text on dark.
+              style={{ backgroundColor: "#c9a962", color: "#1a1a1a" }}
+              className="h-[48px] flex-1 rounded-full font-[family-name:var(--font-sora)] text-[15px] font-semibold transition-opacity hover:opacity-90"
             >
               Repeat transfer
             </button>

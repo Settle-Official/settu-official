@@ -23,8 +23,24 @@ const STATUS_INK: Record<string, string> = {
   Failed: "#e07a7e",
 };
 
+// From the asset's own viewBox (523 x 133), so the mark is never stretched.
+const LOGO_SRC = "/brand/settu-logo.svg";
+const LOGO_RATIO = 523 / 133;
+const LOGO_HEIGHT = 30;
+
 function font(size: number, weight = 400): string {
   return `${weight} ${size}px ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif`;
+}
+
+/** Resolves null rather than rejecting, so a missing logo can't lose a receipt. */
+function loadLogo(): Promise<HTMLImageElement | null> {
+  return new Promise((resolve) => {
+    const image = new Image();
+    // Same-origin, so the canvas stays untainted and toBlob still works.
+    image.onload = () => resolve(image);
+    image.onerror = () => resolve(null);
+    image.src = LOGO_SRC;
+  });
 }
 
 /** Returns a PNG blob, or null where canvas isn't available. */
@@ -49,9 +65,21 @@ export async function drawReceipt(receipt: Receipt): Promise<Blob | null> {
 
   let y = PADDING + 30;
 
-  ctx.fillStyle = ACCENT;
-  ctx.font = font(26, 700);
-  ctx.fillText("SETTU", PADDING, y);
+  const logo = await loadLogo();
+  if (logo) {
+    // Baseline-aligned with the title on the right, not top-aligned.
+    ctx.drawImage(
+      logo,
+      PADDING,
+      y - LOGO_HEIGHT + 6,
+      LOGO_HEIGHT * LOGO_RATIO,
+      LOGO_HEIGHT,
+    );
+  } else {
+    ctx.fillStyle = ACCENT;
+    ctx.font = font(26, 700);
+    ctx.fillText("SETTU", PADDING, y);
+  }
 
   ctx.fillStyle = MUTED;
   ctx.font = font(20);

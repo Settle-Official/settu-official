@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { OfframpTransactionRecord } from "@/lib/offramp/transaction-history";
 import { TransactionStorage, type Transaction } from "@/lib/transaction-storage";
+import { knownFiat } from "./known-fiat";
 
 export interface HistoryRow {
   readonly id: string;
@@ -30,6 +31,7 @@ const num = (v: string | undefined) => {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
 };
+
 
 function fromServer(r: OfframpTransactionRecord): HistoryRow {
   return {
@@ -114,8 +116,10 @@ function merge(server: HistoryRow[], local: HistoryRow[]): HistoryRow[] {
       bank: local.bank,
       accountName: local.accountName,
       accountNumber: local.accountNumber,
-      // The server fills destinationAmount in later; prefer whichever is known.
-      fiatAmount: row.fiatAmount ?? local.fiatAmount,
+      // The server writes "0" until settlement fills it in, and "0" is not
+      // null — so ?? alone would keep the placeholder and discard the real
+      // payout the local row captured at submit.
+      fiatAmount: knownFiat(row.fiatAmount) ?? knownFiat(local.fiatAmount),
     };
   });
 
