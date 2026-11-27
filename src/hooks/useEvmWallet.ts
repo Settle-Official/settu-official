@@ -77,6 +77,7 @@ import {
   type Eip1193Provider,
   type InjectedWallet,
 } from "@/lib/evm/injected";
+import { isCctpBridgeChain, sourceChainByChainId } from "@/lib/cctp/evm-chains";
 
 type EvmTransport = "injected" | "walletconnect";
 
@@ -312,6 +313,17 @@ export function useEvmWallet() {
           });
         } catch (err: any) {
           if (err?.code === 4902) {
+            // Newer chains (Arc) aren't in most wallets yet: offer to add it,
+            // which also switches to it once the user approves.
+            const known = sourceChainByChainId(chainId);
+            const add = known && isCctpBridgeChain(known) ? known.addToWallet : undefined;
+            if (add) {
+              await injectedRef.current.request({
+                method: "wallet_addEthereumChain",
+                params: [{ chainId: toChainIdHex(chainId), ...add }],
+              });
+              return;
+            }
             throw new Error(
               "That network isn't in your wallet yet — add it and try again.",
             );
