@@ -6,6 +6,8 @@ import {
   isCctpBridgeChain,
   isChainEnabled,
   type EvmChainKey,
+  effectiveGasPrice,
+  gasCoverage,
 } from "@/lib/cctp/evm-chains";
 import { usdcFloatToEvmInt } from "@/lib/cctp/evm-burn";
 import { withRetry, isNetworkFetchError } from "@/lib/cctp/retry";
@@ -90,10 +92,11 @@ export async function GET(request: NextRequest) {
       const owner = address as `0x${string}`;
       const amountAtomic = usdcFloatToEvmInt(amount);
 
-      const [balanceWei, gasPrice] = await Promise.all([
+      const [balanceWei, quotedGasPrice] = await Promise.all([
         publicClient.getBalance({ address: owner }),
         publicClient.getGasPrice(),
       ]);
+      const gasPrice = effectiveGasPrice(chainConfig, quotedGasPrice);
 
       let gasUnits: bigint;
       if (isCctpBridgeChain(chainConfig)) {
@@ -134,11 +137,19 @@ export async function GET(request: NextRequest) {
       }
 
       const estimatedWei = (gasUnits * gasPrice * GAS_BUFFER_NUM) / GAS_BUFFER_DEN;
+      // On Arc gas is paid from the same USDC being burned, so this reports
+      // what's left for gas after the amount, not the whole balance.
+      const { sufficient, availableForGasWei } = gasCoverage({
+        config: chainConfig,
+        nativeBalanceWei: balanceWei,
+        gasWei: estimatedWei,
+        amountAtomic,
+      });
       return {
-        nativeBalance: formatEther(balanceWei),
+        nativeBalance: formatEther(availableForGasWei),
         estimatedGasNative: formatEther(estimatedWei),
         nativeCurrencySymbol: chainConfig.nativeCurrencySymbol,
-        sufficient: balanceWei >= estimatedWei,
+        sufficient,
       };
     });
 

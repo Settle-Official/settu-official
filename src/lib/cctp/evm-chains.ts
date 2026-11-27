@@ -27,7 +27,8 @@ export type EvmChainKey =
   | "arbitrum"
   | "optimism"
   | "avalanche"
-  | "polygon";
+  | "polygon"
+  | "arc";
 
 interface DirectSourceChainConfig {
   kind: "direct";
@@ -50,6 +51,30 @@ interface CctpBridgeSourceChainConfig {
   nativeCurrencySymbol: string;
   usdcAddress: `0x${string}`;
   rpcUrlEnvVar: string;
+  /**
+   * False where Circle lists Fast Transfer as N/A because the chain is
+   * already final in seconds (Arc). Burns then use standard finality,
+   * which attests just as quickly there and never carries a fast fee.
+   */
+  fastTransfer?: false;
+  /**
+   * True when gas is paid in USDC itself (Arc). The burn and its gas then
+   * come out of the same balance, so "enough for gas" means enough for the
+   * amount *plus* gas, not a separate native balance.
+   */
+  gasIsUsdc?: true;
+  /** Protocol minimum gas price in wei, where the chain enforces one (Arc: 20 gwei). */
+  minGasPriceWei?: bigint;
+  /**
+   * wallet_addEthereumChain params for chains most wallets don't ship with,
+   * so a "network not in your wallet" error can add it instead of failing.
+   */
+  addToWallet?: {
+    chainName: string;
+    rpcUrls: string[];
+    blockExplorerUrls: string[];
+    nativeCurrency: { name: string; symbol: string; decimals: 18 };
+  };
 }
 
 export type SourceChainConfig =
@@ -125,7 +150,65 @@ export const EVM_SOURCE_CHAINS: Record<EvmChainKey, SourceChainConfig> = {
     usdcAddress: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
     rpcUrlEnvVar: "POLYGON_RPC_URL",
   },
+  // Circle's Arc L1 — checked 2026-11-27 against Circle's raw docs
+  // (cctp/evm-smart-contracts: domain 26, TokenMessengerV2 = the shared
+  // address above; stablecoins/usdc-contract-addresses: 0x3600…0000) and
+  // on-chain (USDC decimals() = 6; TokenMessengerV2.localMessageTransmitter()
+  // = Arc's MessageTransmitterV2 0x81D4…4B64; eth_chainId = 5042).
+  // USDC is Arc's gas token: natively 18 decimals, but 0x3600…0000 is its
+  // 6-decimal ERC-20 interface — the only one this app touches.
+  arc: {
+    kind: "cctp-bridge",
+    key: "arc",
+    label: "Arc",
+    chainId: 5042,
+    cctpDomain: 26,
+    nativeCurrencySymbol: "USDC",
+    usdcAddress: "0x3600000000000000000000000000000000000000",
+    rpcUrlEnvVar: "ARC_RPC_URL",
+    fastTransfer: false,
+    gasIsUsdc: true,
+    minGasPriceWei: BigInt(20_000_000_000),
+    addToWallet: {
+      chainName: "Arc",
+      rpcUrls: ["https://rpc.mainnet.arc.io"],
+      blockExplorerUrls: ["https://explorer.arc.io"],
+      nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 18 },
+    },
+  },
 };
+
+/** The chain config for an EVM chain ID, if it's one of ours. */
+export function sourceChainByChainId(chainId: number): SourceChainConfig | undefined {
+  return Object.values(EVM_SOURCE_CHAINS).find((c) => c.chainId === chainId);
+}
+
+/** The gas price to plan with: the RPC's quote, never below a chain's protocol floor. */
+export function effectiveGasPrice(config: SourceChainConfig, quoted: bigint): bigint {
+  const floor = isCctpBridgeChain(config) ? config.minGasPriceWei : undefined;
+  return floor !== undefined && quoted < floor ? floor : quoted;
+}
+
+/**
+ * Whether a wallet can cover a burn's gas. On most chains gas is a separate
+ * native balance. Where gas is USDC (Arc) the burn and the gas share one
+ * balance: `nativeBalanceWei` (18-decimal native USDC) must cover the amount,
+ * scaled from 6 to 18 decimals, plus gas — and what's "left for gas" is the
+ * balance after the amount.
+ */
+export function gasCoverage(params: {
+  config: SourceChainConfig;
+  nativeBalanceWei: bigint;
+  gasWei: bigint;
+  amountAtomic: bigint;
+}): { sufficient: boolean; availableForGasWei: bigint } {
+  const { config, nativeBalanceWei, gasWei, amountAtomic } = params;
+  const sharesUsdc = isCctpBridgeChain(config) && config.gasIsUsdc === true;
+  const spentOnAmount = sharesUsdc ? amountAtomic * BigInt(1_000_000_000_000) : BigInt(0);
+  const available = nativeBalanceWei - spentOnAmount;
+  const availableForGasWei = available > BigInt(0) ? available : BigInt(0);
+  return { sufficient: availableForGasWei >= gasWei, availableForGasWei };
+}
 
 export function isCctpBridgeChain(
   config: SourceChainConfig,

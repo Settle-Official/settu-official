@@ -6,6 +6,7 @@ import {
   isCctpBridgeChain,
   isChainEnabled,
   type EvmChainKey,
+  effectiveGasPrice,
 } from "@/lib/cctp/evm-chains";
 import { buildEvmBurnCalldata, usdcFloatToEvmInt } from "@/lib/cctp/evm-burn";
 import { getBurnFeeQuote, computeAtomicFee } from "@/lib/cctp/iris-client";
@@ -74,12 +75,15 @@ export async function POST(request: NextRequest) {
         args: [fromAddress, EVM_CCTP_TOKEN_MESSENGER_V2],
       });
 
-      const feeQuote = await getBurnFeeQuote({
-        sourceDomain: chainConfig.cctpDomain,
-        destDomain: CCTP_DOMAIN.base,
-      });
       const amountAtomic = usdcFloatToEvmInt(amount);
-      const maxFeeAtomic = computeAtomicFee(feeQuote.minimumFeeBps, amountAtomic);
+      // Standard-finality burns (Arc) carry no fast fee, so no quote is needed.
+      const maxFeeAtomic =
+        chainConfig.fastTransfer === false
+          ? BigInt(0)
+          : computeAtomicFee(
+              (await getBurnFeeQuote({ sourceDomain: chainConfig.cctpDomain, destDomain: CCTP_DOMAIN.base })).minimumFeeBps,
+              amountAtomic,
+            );
 
       const calls = buildEvmBurnCalldata({
         chain: chainConfig,
@@ -87,6 +91,7 @@ export async function POST(request: NextRequest) {
         mintRecipient: toAddress,
         maxFeeAtomic,
         currentAllowance: allowance,
+        fast: chainConfig.fastTransfer !== false,
       });
 
       // Best-effort gas estimate for the pre-flight "do you have enough native
@@ -104,7 +109,7 @@ export async function POST(request: NextRequest) {
           data: calls[0].data,
         });
         const totalGas = calls.length > 1 ? firstGas + BigInt(250_000) : firstGas;
-        const gasPrice = await publicClient.getGasPrice();
+        const gasPrice = effectiveGasPrice(chainConfig, await publicClient.getGasPrice());
         estimatedGasNative = formatEther(
           (totalGas * gasPrice * BigInt(120)) / BigInt(100),
         );
